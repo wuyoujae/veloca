@@ -5,6 +5,7 @@ import {
   ChevronRight,
   FileText,
   Folder,
+  FolderPlus,
   Info,
   Moon,
   Settings,
@@ -14,7 +15,6 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
-type FolderId = 'project' | 'docs' | 'components';
 type ToastType = 'success' | 'info';
 
 interface ToastMessage {
@@ -24,158 +24,69 @@ interface ToastMessage {
   description: string;
 }
 
-interface Section {
-  id: string;
-  level: 1 | 2 | 3;
-  title: string;
-  body: string;
-  quote?: string;
-  code?: string;
-}
-
-interface DocumentFile {
+interface WorkspaceTreeNode {
   id: string;
   name: string;
-  folder: FolderId;
-  path: string[];
-  sections: Section[];
+  type: 'folder' | 'file';
+  path: string;
+  relativePath: string;
+  workspaceFolderId: string;
+  children?: WorkspaceTreeNode[];
 }
 
-const documents: DocumentFile[] = [
-  {
-    id: 'manifesto',
-    name: 'manifesto.md',
-    folder: 'docs',
-    path: ['docs', 'manifesto.md'],
-    sections: [
-      {
-        id: 'veloca-manifesto',
-        level: 1,
-        title: 'Veloca Manifesto',
-        body: 'Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.',
-        quote:
-          'Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away.'
-      },
-      {
-        id: 'design-language',
-        level: 2,
-        title: 'Design Language',
-        body: 'Veloca follows a focused monochrome interface with measured spacing, clear hierarchy, and a calm writing surface.',
-        code: `const editor = {
-  mode: 'live-preview',
-  theme: 'system-ready',
-  storage: 'sqlite'
-};`
-      },
-      {
-        id: 'foundation',
-        level: 2,
-        title: 'Foundation',
-        body: 'The first milestone is a stable Electron shell, a React renderer, a Node backend surface, and persistent application settings.'
-      }
-    ]
-  },
-  {
-    id: 'design-system',
-    name: 'design-system.md',
-    folder: 'docs',
-    path: ['docs', 'design-system.md'],
-    sections: [
-      {
-        id: 'design-system',
-        level: 1,
-        title: 'Design System',
-        body: 'Veloca keeps the editor surface quiet and gives hierarchy to navigation, document structure, and focused writing states.'
-      },
-      {
-        id: 'color',
-        level: 2,
-        title: 'Color',
-        body: 'The palette is intentionally restrained. Dark and light modes use the same layout rhythm, with contrast tuned for long writing sessions.'
-      },
-      {
-        id: 'motion',
-        level: 2,
-        title: 'Motion',
-        body: 'Transitions should feel responsive without drawing attention away from the page. Panels fade and slide softly, while active states move quickly.'
-      }
-    ]
-  },
-  {
-    id: 'component-notes',
-    name: 'component-notes.md',
-    folder: 'components',
-    path: ['components', 'component-notes.md'],
-    sections: [
-      {
-        id: 'components',
-        level: 1,
-        title: 'Component Notes',
-        body: 'The first shared components are small interface primitives used by the shell: tabs, tree rows, switches, segmented controls, and toasts.'
-      },
-      {
-        id: 'sidebar',
-        level: 2,
-        title: 'Sidebar',
-        body: 'The sidebar switches between file navigation and document outline while preserving the current document selection.'
-      },
-      {
-        id: 'settings',
-        level: 2,
-        title: 'Settings',
-        body: 'The settings panel should remain modal, focused, and easy to close with either the close button, Escape, or the blurred backdrop.'
-      }
-    ]
-  },
-  {
-    id: 'readme',
-    name: 'readme.md',
-    folder: 'project',
-    path: ['readme.md'],
-    sections: [
-      {
-        id: 'readme',
-        level: 1,
-        title: 'Readme',
-        body: 'Veloca is currently in its foundation stage. The interface is interactive, while real file IO and markdown editing will be layered in next.'
-      },
-      {
-        id: 'quick-start',
-        level: 2,
-        title: 'Quick Start',
-        body: 'Install dependencies, start the Electron development server, then use the sidebar and settings panel to inspect the current shell behavior.'
-      }
-    ]
-  }
-];
+interface WorkspaceSnapshot {
+  folders: Array<{
+    id: string;
+    name: string;
+    path: string;
+    createdAt: number;
+  }>;
+  tree: WorkspaceTreeNode[];
+  totalMarkdownFiles: number;
+}
 
-const initialFolders: Record<FolderId, boolean> = {
-  project: true,
-  docs: true,
-  components: false
+interface MarkdownFileContent {
+  path: string;
+  name: string;
+  content: string;
+  relativePath: string;
+  workspaceFolderId: string;
+}
+
+interface MarkdownSection {
+  id: string;
+  level: number;
+  title: string;
+  lines: string[];
+}
+
+const emptyWorkspace: WorkspaceSnapshot = {
+  folders: [],
+  tree: [],
+  totalMarkdownFiles: 0
 };
 
 export function App(): JSX.Element {
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
-  const [openFolders, setOpenFolders] = useState<Record<FolderId, boolean>>(initialFolders);
-  const [activeFileId, setActiveFileId] = useState(documents[0].id);
-  const [activeHeadingId, setActiveHeadingId] = useState(documents[0].sections[0].id);
+  const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+  const [activeFile, setActiveFile] = useState<MarkdownFileContent | null>(null);
+  const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
+  const [loadingWorkspace, setLoadingWorkspace] = useState(true);
+  const [loadingFile, setLoadingFile] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const activeFile = documents.find((document) => document.id === activeFileId) ?? documents[0];
-  const activeFileText = useMemo(() => {
-    return activeFile.sections
-      .map((section) => `${'#'.repeat(section.level)} ${section.title}\n${section.body}`)
-      .join('\n');
+  const sections = useMemo(() => {
+    return parseMarkdownSections(activeFile?.content ?? '', activeFile?.name ?? 'Untitled');
   }, [activeFile]);
 
   const wordCount = useMemo(() => {
-    return activeFileText.trim().split(/\s+/).filter(Boolean).length;
-  }, [activeFileText]);
+    return activeFile?.content.trim().split(/\s+/).filter(Boolean).length ?? 0;
+  }, [activeFile]);
 
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
@@ -201,6 +112,14 @@ export function App(): JSX.Element {
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, []);
 
+  useEffect(() => {
+    loadWorkspace();
+  }, []);
+
+  useEffect(() => {
+    setActiveHeadingId(sections[0]?.id ?? '');
+  }, [activeFile?.path, sections]);
+
   const applyTheme = (nextTheme: ThemeMode) => {
     document.documentElement.dataset.theme = nextTheme;
   };
@@ -218,27 +137,125 @@ export function App(): JSX.Element {
     });
   };
 
-  const toggleFolder = (folderId: FolderId) => {
+  const loadWorkspace = async () => {
+    if (!window.veloca) {
+      setLoadingWorkspace(false);
+      return;
+    }
+
+    setLoadingWorkspace(true);
+
+    try {
+      const snapshot = await window.veloca.workspace.get();
+      setWorkspace(snapshot);
+      openWorkspaceRoots(snapshot.tree);
+
+      const nextFile = activeFile
+        ? findFileNodeByPath(snapshot.tree, activeFile.path) ?? findFirstFile(snapshot.tree)
+        : findFirstFile(snapshot.tree);
+
+      if (nextFile) {
+        await readMarkdownFile(nextFile.path);
+      } else {
+        setActiveFile(null);
+      }
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Workspace Unavailable',
+        description: 'Unable to load workspace folders.'
+      });
+    } finally {
+      setLoadingWorkspace(false);
+    }
+  };
+
+  const addWorkspaceFolder = async () => {
+    if (!window.veloca) {
+      showToast({
+        type: 'info',
+        title: 'Desktop Runtime Required',
+        description: 'Folder loading is available in the Electron app.'
+      });
+      return;
+    }
+
+    try {
+      const snapshot = await window.veloca.workspace.addFolder();
+      setWorkspace(snapshot);
+      openWorkspaceRoots(snapshot.tree);
+
+      const nextFile = findFirstFile(snapshot.tree);
+
+      if (nextFile) {
+        await readMarkdownFile(nextFile.path);
+      }
+
+      showToast({
+        type: 'success',
+        title: 'Workspace Updated',
+        description: `${snapshot.totalMarkdownFiles} markdown file${
+          snapshot.totalMarkdownFiles === 1 ? '' : 's'
+        } loaded.`
+      });
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Folder Not Added',
+        description: 'Veloca could not load that folder.'
+      });
+    }
+  };
+
+  const readMarkdownFile = async (filePath: string) => {
+    if (!window.veloca) {
+      return;
+    }
+
+    setLoadingFile(true);
+
+    try {
+      const file = await window.veloca.workspace.readMarkdown(filePath);
+      setActiveFile(file);
+      setSidebarTab('files');
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'File Not Loaded',
+        description: 'Only markdown files inside the current workspace can be opened.'
+      });
+    } finally {
+      setLoadingFile(false);
+    }
+  };
+
+  const openWorkspaceRoots = (tree: WorkspaceTreeNode[]) => {
+    setOpenFolders((current) => {
+      const next = { ...current };
+
+      for (const folder of tree) {
+        next[folder.id] = true;
+      }
+
+      return next;
+    });
+  };
+
+  const toggleFolder = (folderId: string) => {
     setOpenFolders((current) => ({
       ...current,
       [folderId]: !current[folderId]
     }));
   };
 
-  const openFile = (fileId: string) => {
-    const nextFile = documents.find((document) => document.id === fileId);
-
-    if (!nextFile) {
-      return;
-    }
-
-    setActiveFileId(fileId);
-    setActiveHeadingId(nextFile.sections[0].id);
-    setOpenFolders((current) => ({
-      ...current,
-      project: true,
-      [nextFile.folder]: true
-    }));
+  const selectHeading = (headingId: string) => {
+    setActiveHeadingId(headingId);
+    window.requestAnimationFrame(() => {
+      document.getElementById(headingId)?.scrollIntoView({
+        block: 'start',
+        behavior: 'smooth'
+      });
+    });
   };
 
   const showToast = (message: Omit<ToastMessage, 'id'>) => {
@@ -279,16 +296,21 @@ export function App(): JSX.Element {
           <div className="sidebar-content">
             {sidebarTab === 'files' ? (
               <FileTree
-                activeFileId={activeFileId}
+                activeFilePath={activeFile?.path ?? ''}
+                loading={loadingWorkspace}
                 openFolders={openFolders}
-                onFileSelect={openFile}
+                tree={workspace.tree}
+                totalMarkdownFiles={workspace.totalMarkdownFiles}
+                onAddFolder={addWorkspaceFolder}
+                onFileSelect={readMarkdownFile}
                 onFolderToggle={toggleFolder}
               />
             ) : (
               <OutlinePanel
                 activeFile={activeFile}
                 activeHeadingId={activeHeadingId}
-                onHeadingSelect={setActiveHeadingId}
+                sections={sections}
+                onHeadingSelect={selectHeading}
               />
             )}
           </div>
@@ -304,44 +326,53 @@ export function App(): JSX.Element {
         <main className="editor-container">
           <header className="editor-header">
             <div className="breadcrumb">
-              {activeFile.path.map((segment, index) => (
-                <span className="breadcrumb-segment" key={segment}>
-                  {index > 0 && <ChevronRight size={12} />}
-                  {segment}
-                </span>
-              ))}
+              {activeFile ? (
+                activeFile.relativePath.split('/').map((segment, index) => (
+                  <span className="breadcrumb-segment" key={`${segment}-${index}`}>
+                    {index > 0 && <ChevronRight size={12} />}
+                    {segment}
+                  </span>
+                ))
+              ) : (
+                <span>No markdown file selected</span>
+              )}
             </div>
           </header>
 
           <section className="editor-scroll-area" aria-label="Markdown editor preview">
-            <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
-              {activeFile.sections.map((section, index) => (
-                <section
-                  className={activeHeadingId === section.id ? 'document-section active' : 'document-section'}
-                  key={section.id}
-                  onMouseEnter={() => setActiveHeadingId(section.id)}
-                >
-                  {section.level === 1 ? <h1>{section.title}</h1> : <h2>{section.title}</h2>}
-                  <p>
-                    {section.body}
-                    {index === activeFile.sections.length - 1 && <span className="cursor" />}
-                  </p>
-                  {section.quote && <blockquote>{section.quote}</blockquote>}
-                  {section.code && (
-                    <pre>
-                      <code>
-                        {section.code.replace('system-ready', theme)}
-                      </code>
-                    </pre>
-                  )}
-                </section>
-              ))}
-            </article>
+            {activeFile ? (
+              <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
+                {sections.map((section) => (
+                  <section
+                    className={
+                      activeHeadingId === section.id ? 'document-section active' : 'document-section'
+                    }
+                    id={section.id}
+                    key={section.id}
+                    onMouseEnter={() => setActiveHeadingId(section.id)}
+                  >
+                    {renderHeading(section)}
+                    {renderMarkdownLines(section.lines)}
+                  </section>
+                ))}
+                {loadingFile && <div className="loading-state">Loading file...</div>}
+              </article>
+            ) : (
+              <div className="empty-editor-state">
+                <FileText size={24} />
+                <h1>No Markdown Loaded</h1>
+                <p>Add a workspace folder to recursively load its markdown files.</p>
+                <button className="primary-action" type="button" onClick={addWorkspaceFolder}>
+                  <FolderPlus size={16} />
+                  Add Folder
+                </button>
+              </div>
+            )}
           </section>
 
           <footer className="statusbar">
             <span>{wordCount} Words</span>
-            <span>{activeFileText.length} Characters</span>
+            <span>{activeFile?.content.length ?? 0} Characters</span>
             <span>UTF-8</span>
           </footer>
         </main>
@@ -466,129 +497,152 @@ export function App(): JSX.Element {
 }
 
 interface FileTreeProps {
-  activeFileId: string;
-  openFolders: Record<FolderId, boolean>;
-  onFileSelect: (fileId: string) => void;
-  onFolderToggle: (folderId: FolderId) => void;
+  activeFilePath: string;
+  loading: boolean;
+  openFolders: Record<string, boolean>;
+  tree: WorkspaceTreeNode[];
+  totalMarkdownFiles: number;
+  onAddFolder: () => void;
+  onFileSelect: (filePath: string) => void;
+  onFolderToggle: (folderId: string) => void;
 }
 
 function FileTree({
-  activeFileId,
+  activeFilePath,
+  loading,
   openFolders,
+  tree,
+  totalMarkdownFiles,
+  onAddFolder,
   onFileSelect,
   onFolderToggle
 }: FileTreeProps): JSX.Element {
-  const docsFiles = documents.filter((document) => document.folder === 'docs');
-  const componentFiles = documents.filter((document) => document.folder === 'components');
-  const rootFiles = documents.filter((document) => document.folder === 'project');
-
   return (
     <nav aria-label="Workspace files">
-      <FolderRow
-        depth="root"
-        label="Project Veloca"
-        open={openFolders.project}
-        onClick={() => onFolderToggle('project')}
-      />
-      {openFolders.project && (
-        <div className="tree-branch">
-          <FolderRow
-            depth="child"
-            label="docs"
-            open={openFolders.docs}
-            onClick={() => onFolderToggle('docs')}
-          />
-          {openFolders.docs &&
-            docsFiles.map((document) => (
-              <FileRow
-                active={activeFileId === document.id}
-                depth="deep"
-                document={document}
-                key={document.id}
-                onClick={() => onFileSelect(document.id)}
-              />
-            ))}
+      <div className="directory-toolbar">
+        <span>Directory</span>
+        <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
+          <FolderPlus size={16} />
+        </button>
+      </div>
 
-          <FolderRow
-            depth="child"
-            label="components"
-            open={openFolders.components}
-            onClick={() => onFolderToggle('components')}
-          />
-          {openFolders.components &&
-            componentFiles.map((document) => (
-              <FileRow
-                active={activeFileId === document.id}
-                depth="deep"
-                document={document}
-                key={document.id}
-                onClick={() => onFileSelect(document.id)}
-              />
-            ))}
+      {loading && <div className="loading-state">Loading workspace...</div>}
 
-          {rootFiles.map((document) => (
-            <FileRow
-              active={activeFileId === document.id}
-              depth="child"
-              document={document}
-              key={document.id}
-              onClick={() => onFileSelect(document.id)}
-            />
-          ))}
+      {!loading && tree.length === 0 && (
+        <div className="empty-sidebar-state">
+          <Folder size={18} />
+          <p>Add folders to load markdown files recursively.</p>
         </div>
+      )}
+
+      {!loading &&
+        tree.map((node) => (
+          <TreeNode
+            activeFilePath={activeFilePath}
+            depth={0}
+            key={node.id}
+            node={node}
+            openFolders={openFolders}
+            onFileSelect={onFileSelect}
+            onFolderToggle={onFolderToggle}
+          />
+        ))}
+
+      {!loading && tree.length > 0 && (
+        <div className="directory-count">{totalMarkdownFiles} markdown file{totalMarkdownFiles === 1 ? '' : 's'}</div>
       )}
     </nav>
   );
 }
 
-interface FolderRowProps {
-  depth: 'root' | 'child';
-  label: string;
-  open: boolean;
-  onClick: () => void;
+interface TreeNodeProps {
+  activeFilePath: string;
+  depth: number;
+  node: WorkspaceTreeNode;
+  openFolders: Record<string, boolean>;
+  onFileSelect: (filePath: string) => void;
+  onFolderToggle: (folderId: string) => void;
 }
 
-function FolderRow({ depth, label, open, onClick }: FolderRowProps): JSX.Element {
+function TreeNode({
+  activeFilePath,
+  depth,
+  node,
+  openFolders,
+  onFileSelect,
+  onFolderToggle
+}: TreeNodeProps): JSX.Element {
+  const isOpen = openFolders[node.id] ?? false;
+  const paddingLeft = 10 + depth * 18;
+
+  if (node.type === 'file') {
+    return (
+      <button
+        className={activeFilePath === node.path ? 'tree-item active' : 'tree-item'}
+        type="button"
+        style={{ paddingLeft }}
+        onClick={() => onFileSelect(node.path)}
+      >
+        <FileText size={14} />
+        <span>{node.name}</span>
+      </button>
+    );
+  }
+
   return (
-    <button className={`tree-item ${depth === 'child' ? 'tree-indent' : ''}`} type="button" onClick={onClick}>
-      {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-      <Folder size={14} />
-      <span>{label}</span>
-    </button>
-  );
-}
+    <div className="tree-node">
+      <button
+        className="tree-item"
+        type="button"
+        style={{ paddingLeft }}
+        onClick={() => onFolderToggle(node.id)}
+      >
+        {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <Folder size={14} />
+        <span>{node.name}</span>
+      </button>
 
-interface FileRowProps {
-  active: boolean;
-  depth: 'child' | 'deep';
-  document: DocumentFile;
-  onClick: () => void;
-}
-
-function FileRow({ active, depth, document, onClick }: FileRowProps): JSX.Element {
-  return (
-    <button
-      className={`tree-item tree-indent ${depth === 'deep' ? 'deep' : ''} ${active ? 'active' : ''}`}
-      type="button"
-      onClick={onClick}
-    >
-      <FileText size={14} />
-      <span>{document.name}</span>
-    </button>
+      {isOpen && (
+        <div className="tree-branch">
+          {node.children?.map((child) => (
+            <TreeNode
+              activeFilePath={activeFilePath}
+              depth={depth + 1}
+              key={child.id}
+              node={child}
+              openFolders={openFolders}
+              onFileSelect={onFileSelect}
+              onFolderToggle={onFolderToggle}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
 interface OutlinePanelProps {
-  activeFile: DocumentFile;
+  activeFile: MarkdownFileContent | null;
   activeHeadingId: string;
+  sections: MarkdownSection[];
   onHeadingSelect: (headingId: string) => void;
 }
 
 function OutlinePanel({
   activeFile,
   activeHeadingId,
+  sections,
   onHeadingSelect
 }: OutlinePanelProps): JSX.Element {
+  if (!activeFile) {
+    return (
+      <div className="empty-sidebar-state">
+        <FileText size={18} />
+        <p>Select a markdown file to view its outline.</p>
+      </div>
+    );
+  }
+
   return (
     <nav className="outline-panel" aria-label="Document outline">
       <div className="outline-heading">
@@ -596,9 +650,9 @@ function OutlinePanel({
         <span>{activeFile.name}</span>
       </div>
       <div className="outline-list">
-        {activeFile.sections.map((section) => (
+        {sections.map((section) => (
           <button
-            className={`outline-item level-${section.level} ${
+            className={`outline-item level-${Math.min(section.level, 3)} ${
               activeHeadingId === section.id ? 'active' : ''
             }`}
             type="button"
@@ -632,4 +686,172 @@ function Switch({ checked, onChange }: SwitchProps): JSX.Element {
       <span className="shadcn-switch-thumb" />
     </button>
   );
+}
+
+function parseMarkdownSections(content: string, fallbackTitle: string): MarkdownSection[] {
+  const lines = content.split(/\r?\n/);
+  const sections: MarkdownSection[] = [];
+  let current: MarkdownSection | null = null;
+
+  for (const line of lines) {
+    const match = /^(#{1,6})\s+(.+)$/.exec(line);
+
+    if (match) {
+      if (current) {
+        sections.push(current);
+      }
+
+      current = {
+        id: slugify(match[2], sections.length),
+        level: match[1].length,
+        title: match[2].trim(),
+        lines: []
+      };
+      continue;
+    }
+
+    if (!current) {
+      current = {
+        id: 'document',
+        level: 1,
+        title: fallbackTitle,
+        lines: []
+      };
+    }
+
+    current.lines.push(line);
+  }
+
+  if (current) {
+    sections.push(current);
+  }
+
+  return sections.length > 0
+    ? sections
+    : [
+        {
+          id: 'document',
+          level: 1,
+          title: fallbackTitle,
+          lines: []
+        }
+      ];
+}
+
+function renderHeading(section: MarkdownSection): JSX.Element {
+  if (section.level === 1) {
+    return <h1>{section.title}</h1>;
+  }
+
+  if (section.level === 2) {
+    return <h2>{section.title}</h2>;
+  }
+
+  return <h3>{section.title}</h3>;
+}
+
+function renderMarkdownLines(lines: string[]): JSX.Element[] {
+  const elements: JSX.Element[] = [];
+  let paragraph: string[] = [];
+  let codeLines: string[] = [];
+  let inCodeBlock = false;
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) {
+      return;
+    }
+
+    elements.push(<p key={`p-${elements.length}`}>{paragraph.join(' ')}</p>);
+    paragraph = [];
+  };
+
+  const flushCode = () => {
+    elements.push(
+      <pre key={`code-${elements.length}`}>
+        <code>{codeLines.join('\n')}</code>
+      </pre>
+    );
+    codeLines = [];
+  };
+
+  for (const line of lines) {
+    if (line.startsWith('```')) {
+      if (inCodeBlock) {
+        flushCode();
+        inCodeBlock = false;
+      } else {
+        flushParagraph();
+        inCodeBlock = true;
+      }
+      continue;
+    }
+
+    if (inCodeBlock) {
+      codeLines.push(line);
+      continue;
+    }
+
+    if (line.startsWith('>')) {
+      flushParagraph();
+      elements.push(<blockquote key={`quote-${elements.length}`}>{line.replace(/^>\s?/, '')}</blockquote>);
+      continue;
+    }
+
+    if (line.trim() === '') {
+      flushParagraph();
+      continue;
+    }
+
+    paragraph.push(line.trim());
+  }
+
+  flushParagraph();
+
+  if (inCodeBlock) {
+    flushCode();
+  }
+
+  return elements;
+}
+
+function slugify(value: string, index: number): string {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug ? `${slug}-${index}` : `heading-${index}`;
+}
+
+function findFirstFile(nodes: WorkspaceTreeNode[]): WorkspaceTreeNode | null {
+  for (const node of nodes) {
+    if (node.type === 'file') {
+      return node;
+    }
+
+    const child = findFirstFile(node.children ?? []);
+
+    if (child) {
+      return child;
+    }
+  }
+
+  return null;
+}
+
+function findFileNodeByPath(nodes: WorkspaceTreeNode[], filePath: string): WorkspaceTreeNode | null {
+  for (const node of nodes) {
+    if (node.type === 'file' && node.path === filePath) {
+      return node;
+    }
+
+    const child = findFileNodeByPath(node.children ?? [], filePath);
+
+    if (child) {
+      return child;
+    }
+  }
+
+  return null;
 }

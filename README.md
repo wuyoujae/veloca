@@ -2,7 +2,7 @@
 
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
-The current version is a foundation build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, and the first editor interface based on the provided prototype.
+The current version is a foundation build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, and the first editor interface based on the provided prototype.
 
 ## Project Overview
 
@@ -17,7 +17,7 @@ Veloca separates desktop, backend, and renderer responsibilities:
 - Electron owns the native window, lifecycle, and secure bridge between UI and backend code.
 - React owns the interactive editor interface.
 - Node services own persistent application behavior.
-- SQLite stores local application data with a minimal schema aligned to current requirements.
+- SQLite stores local application data with a minimal schema aligned to current requirements, including app settings and workspace folder roots.
 
 This keeps the first version small while leaving a clear path for future markdown file management, editor engine integration, and local document persistence.
 
@@ -26,7 +26,9 @@ This keeps the first version small while leaving a clear path for future markdow
 - Electron desktop app shell with a custom title bar.
 - React-based editor layout matching the prototype direction.
 - Interactive sidebar with Files and Outline modes.
-- Collapsible file tree with local document switching.
+- Collapsible workspace file tree with real folder loading.
+- VS Code-style workspace roots where multiple folders can be added.
+- Recursive `.md` file discovery from added folders.
 - Typora-style markdown preview surface.
 - Settings modal with polished dark/light theme switching.
 - SQLite-backed app setting storage for theme persistence.
@@ -103,6 +105,8 @@ Available environment variables:
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
 
+Workspace folders are stored in SQLite. Markdown file content is read from disk only after selecting a file in the tree.
+
 ## Development Guide
 
 All application code lives under `app`.
@@ -128,24 +132,27 @@ Manual acceptance checks:
 
 1. Run `npm run dev`.
 2. Confirm the Electron window opens with the Veloca editor layout.
-3. Use the `Files` tab to collapse and expand folders.
-4. Select different markdown files and confirm the editor content and breadcrumb update.
-5. Switch to `Outline` and select headings to confirm the active outline state changes.
-6. Click `Settings` in the sidebar.
-7. Switch between `Dark` and `Light`.
-8. Close and reopen the app, then confirm the selected theme is restored.
+3. Click the add-folder icon beside `Directory`.
+4. Select a folder that contains `.md` files.
+5. Confirm only markdown files appear in the tree.
+6. Use the `Files` tab to collapse and expand folders.
+7. Select different markdown files and confirm the editor content and breadcrumb update.
+8. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
+9. Click `Settings` in the sidebar.
+10. Switch between `Dark` and `Light`.
+11. Close and reopen the app, then confirm workspace folders and the selected theme are restored.
 
 Automated unit and integration tests should be added when real markdown editing, file IO, and persistence workflows are implemented.
 
 ## Usage Examples
 
-At this stage, Veloca opens to a sample markdown manifesto page. The left sidebar can switch between a collapsible file tree and a document outline. Selecting files updates the preview and breadcrumb, while the settings panel can be opened from the bottom-left sidebar button to change appearance.
+At this stage, Veloca starts with an empty workspace until folders are added. Use the `Directory` toolbar button to add one or more folders. Veloca recursively scans those roots and shows only `.md` files. Selecting a markdown file updates the preview, breadcrumb, status bar, and outline.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, file tree interactions, and outline interactions.
-- Next: real markdown editor engine integration.
-- Next: local file open/save workflows.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, recursive markdown discovery, file tree interactions, and outline interactions.
+- Next: markdown editor engine integration.
+- Next: local file save workflows.
 - Next: workspace folder indexing and real file tree.
 - Next: markdown export and search.
 - Later: plugin or extension system if product requirements justify it.
@@ -160,9 +167,9 @@ No. This is the initial foundation build. It is suitable for continuing developm
 
 Theme settings need durable local persistence. The schema is intentionally small and can evolve only when new backend behavior requires it.
 
-### Why does the editor show sample content?
+### Why do no files appear after launch?
 
-The current task is the application framework and frontend design. Real markdown editing and file IO are planned as the next feature layer.
+Veloca now loads real markdown files from added workspace folders. Click the add-folder icon beside `Directory` and choose a folder that contains `.md` files.
 
 ## Contribution Guide
 

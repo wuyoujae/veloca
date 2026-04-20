@@ -1,7 +1,12 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
 import { join } from 'node:path';
 import { closeDatabase, getDatabase } from '../database/connection';
 import { getTheme, setTheme, type ThemeMode } from '../services/settings-store';
+import {
+  addWorkspaceFolders,
+  getWorkspaceSnapshot,
+  readMarkdownFile
+} from '../services/workspace-service';
 
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -37,6 +42,26 @@ function registerIpcHandlers(): void {
     }
 
     return setTheme(theme);
+  });
+  ipcMain.handle('workspace:get', () => getWorkspaceSnapshot());
+  ipcMain.handle('workspace:add-folder', async (event) => {
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const dialogOptions: OpenDialogOptions = {
+      title: 'Add Folder to Workspace',
+      properties: ['openDirectory', 'multiSelections']
+    };
+    const result = parentWindow
+      ? await dialog.showOpenDialog(parentWindow, dialogOptions)
+      : await dialog.showOpenDialog(dialogOptions);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return getWorkspaceSnapshot();
+    }
+
+    return addWorkspaceFolders(result.filePaths);
+  });
+  ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
+    return readMarkdownFile(filePath);
   });
 }
 

@@ -2,14 +2,14 @@
 
 ## Scope
 
-The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, and the first editor-facing interface based on the provided prototype files.
+The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, and recursive markdown file loading.
 
 ## Implemented Architecture
 
 - `app/frontend`: React renderer built with Vite. It owns the visible editor surface, sidebar, status bar, settings panel, and theme interactions.
 - `app/backend/electron`: Electron main and preload scripts. The main process creates the desktop window and exposes safe IPC handlers. The preload script exposes a minimal `window.veloca` API to the renderer.
 - `app/backend/database`: SQLite connection setup using `better-sqlite3`. Foreign key enforcement is explicitly disabled to match the project database rule.
-- `app/backend/services`: Backend service layer for app settings.
+- `app/backend/services`: Backend service layer for app settings and workspace scanning.
 
 ## Data Model
 
@@ -22,6 +22,19 @@ Stores application-level settings that must persist across sessions.
 | `id` | `TEXT` | UUID generated immediately before insert. |
 | `setting_key` | `TEXT` | Unique logical key, such as `theme`. |
 | `setting_value` | `TEXT` | Stored value. |
+| `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
+| `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
+
+### `workspace_folders`
+
+Stores folders added to the current local workspace. A workspace can contain multiple root folders, similar to the VS Code workspace concept.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | UUID generated immediately before insert. |
+| `folder_path` | `TEXT` | Unique absolute folder path. |
+| `name` | `TEXT` | Display name derived from the folder basename. |
+| `status` | `INTEGER` | `0` means active. |
 | `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
 | `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
 
@@ -39,7 +52,10 @@ When the app is opened in a normal browser during frontend-only development, the
 - Dark mode is the default.
 - The custom title bar no longer renders the prototype logo text or fake status dots, allowing native Electron window controls to stay unobstructed.
 - The sidebar switches between `Files` and `Outline`.
-- The file tree supports folder expand/collapse and local document switching.
+- The file tree supports folder expand/collapse and real markdown file switching.
+- The `Directory` toolbar exposes an add-folder action.
+- Added folders are persisted in SQLite and reloaded on next launch.
+- Workspace scanning recursively loads `.md` files only. Common generated folders such as `node_modules`, `.git`, `dist`, `out`, and `release` are skipped.
 - The outline panel reflects the active document headings and marks the selected heading.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.
@@ -48,4 +64,4 @@ When the app is opened in a normal browser during frontend-only development, the
 
 ## Next Development Notes
 
-The next practical feature should be real markdown editing and file IO. Before adding it, define the minimum file model and decide whether the first iteration edits a single local file, a workspace folder, or a database-backed document.
+The next practical feature should be markdown editing and save behavior. Before adding it, define whether edits are written directly to disk, staged in memory, or saved through a recovery buffer for crash safety.
