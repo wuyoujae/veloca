@@ -25,7 +25,8 @@ This keeps the first version small while leaving a clear path for future markdow
 
 - Electron desktop app shell with a custom title bar.
 - React-based editor layout matching the prototype direction.
-- Sidebar file tree mockup for the initial workspace experience.
+- Interactive sidebar with Files and Outline modes.
+- Collapsible file tree with local document switching.
 - Typora-style markdown preview surface.
 - Settings modal with polished dark/light theme switching.
 - SQLite-backed app setting storage for theme persistence.
@@ -127,19 +128,22 @@ Manual acceptance checks:
 
 1. Run `npm run dev`.
 2. Confirm the Electron window opens with the Veloca editor layout.
-3. Click `Settings` in the sidebar.
-4. Switch between `Dark` and `Light`.
-5. Close and reopen the app, then confirm the selected theme is restored.
+3. Use the `Files` tab to collapse and expand folders.
+4. Select different markdown files and confirm the editor content and breadcrumb update.
+5. Switch to `Outline` and select headings to confirm the active outline state changes.
+6. Click `Settings` in the sidebar.
+7. Switch between `Dark` and `Light`.
+8. Close and reopen the app, then confirm the selected theme is restored.
 
 Automated unit and integration tests should be added when real markdown editing, file IO, and persistence workflows are implemented.
 
 ## Usage Examples
 
-At this stage, Veloca opens to a sample markdown manifesto page. The left sidebar shows the intended workspace/file tree structure. The settings panel can be opened from the bottom-left sidebar button and currently supports appearance switching.
+At this stage, Veloca opens to a sample markdown manifesto page. The left sidebar can switch between a collapsible file tree and a document outline. Selecting files updates the preview and breadcrumb, while the settings panel can be opened from the bottom-left sidebar button to change appearance.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, file tree interactions, and outline interactions.
 - Next: real markdown editor engine integration.
 - Next: local file open/save workflows.
 - Next: workspace folder indexing and real file tree.

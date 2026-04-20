@@ -37,6 +37,10 @@ When the app is opened in a normal browser during frontend-only development, the
 ## Current UI Behavior
 
 - Dark mode is the default.
+- The custom title bar no longer renders the prototype logo text or fake status dots, allowing native Electron window controls to stay unobstructed.
+- The sidebar switches between `Files` and `Outline`.
+- The file tree supports folder expand/collapse and local document switching.
+- The outline panel reflects the active document headings and marks the selected heading.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.
 - The Theme segmented control switches between dark and light modes.

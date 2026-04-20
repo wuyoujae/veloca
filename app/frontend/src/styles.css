@@ -92,48 +92,19 @@ button {
 }
 
 .titlebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   height: 38px;
-  padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--background);
   -webkit-app-region: drag;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.titlebar-left,
-.window-controls,
 .editor-actions,
 .breadcrumb,
 .tree-item,
 .nav-btn {
   display: flex;
   align-items: center;
-}
-
-.titlebar-left {
-  gap: 12px;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.window-controls {
-  gap: 8px;
-  -webkit-app-region: no-drag;
-}
-
-.control-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 999px;
-  background: var(--muted);
-  transition: background-color 0.2s ease;
-}
-
-.control-dot:hover {
-  background: var(--foreground);
 }
 
 .app-layout {
@@ -204,6 +175,7 @@ button {
   min-height: 0;
   padding: 12px;
   overflow-y: auto;
+  animation: contentEnter 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .tree-item {
@@ -216,6 +188,16 @@ button {
   color: var(--muted-foreground);
   font-size: 13px;
   text-align: left;
+}
+
+.tree-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-item svg:first-child {
+  transition: transform 0.18s ease;
 }
 
 .tree-item:hover,
@@ -238,6 +220,10 @@ button {
 
 .tree-indent.deep {
   padding-left: 50px;
+}
+
+.tree-branch {
+  animation: treeBranchEnter 0.2s ease;
 }
 
 .nav-btn {
@@ -281,20 +267,10 @@ button {
   font-weight: 500;
 }
 
-.editor-actions {
-  gap: 8px;
-}
-
-.icon-btn {
+.breadcrumb-segment {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--muted-foreground);
+  gap: 6px;
 }
 
 .editor-scroll-area {
@@ -311,6 +287,19 @@ button {
   max-width: 720px;
   padding: 0 40px;
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.document-section {
+  border-radius: var(--radius);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.markdown-body.focus-mode .document-section {
+  opacity: 0.34;
+}
+
+.markdown-body.focus-mode .document-section.active {
+  opacity: 1;
 }
 
 .markdown-body h1,
@@ -394,6 +383,93 @@ button {
   font-family: var(--font-mono);
   font-size: 11px;
   pointer-events: none;
+}
+
+.outline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.outline-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.outline-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 6px;
+}
+
+.outline-list::before {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 13px;
+  width: 1px;
+  background: var(--border);
+  content: '';
+}
+
+.outline-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px 7px 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+
+.outline-item:hover {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.outline-item.active {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.outline-item.level-2 {
+  padding-left: 16px;
+}
+
+.outline-item.level-3 {
+  padding-left: 32px;
+}
+
+.outline-marker {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--background);
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.outline-item.active .outline-marker {
+  border-color: var(--foreground);
+  background: var(--foreground);
 }
 
 .settings-overlay {
@@ -688,6 +764,17 @@ button {
   from {
     opacity: 0;
     transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes treeBranchEnter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;

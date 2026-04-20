@@ -1,22 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  BookOpen,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  Feather,
   FileText,
   Folder,
   Info,
   Moon,
-  Search,
   Settings,
-  Share,
   Sun,
   X
 } from 'lucide-react';
 
 type ThemeMode = 'dark' | 'light';
+type SidebarTab = 'files' | 'outline';
+type FolderId = 'project' | 'docs' | 'components';
 type ToastType = 'success' | 'info';
 
 interface ToastMessage {
@@ -26,35 +24,158 @@ interface ToastMessage {
   description: string;
 }
 
-const sampleMarkdown = `# Veloca Manifesto
+interface Section {
+  id: string;
+  level: 1 | 2 | 3;
+  title: string;
+  body: string;
+  quote?: string;
+  code?: string;
+}
 
-Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.
+interface DocumentFile {
+  id: string;
+  name: string;
+  folder: FolderId;
+  path: string[];
+  sections: Section[];
+}
 
-> Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away.
-
-## Design Language
-
-Veloca follows a focused monochrome interface with measured spacing, clear hierarchy, and a calm writing surface.
-
-\`\`\`ts
-const editor = {
+const documents: DocumentFile[] = [
+  {
+    id: 'manifesto',
+    name: 'manifesto.md',
+    folder: 'docs',
+    path: ['docs', 'manifesto.md'],
+    sections: [
+      {
+        id: 'veloca-manifesto',
+        level: 1,
+        title: 'Veloca Manifesto',
+        body: 'Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.',
+        quote:
+          'Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away.'
+      },
+      {
+        id: 'design-language',
+        level: 2,
+        title: 'Design Language',
+        body: 'Veloca follows a focused monochrome interface with measured spacing, clear hierarchy, and a calm writing surface.',
+        code: `const editor = {
   mode: 'live-preview',
   theme: 'system-ready',
   storage: 'sqlite'
+};`
+      },
+      {
+        id: 'foundation',
+        level: 2,
+        title: 'Foundation',
+        body: 'The first milestone is a stable Electron shell, a React renderer, a Node backend surface, and persistent application settings.'
+      }
+    ]
+  },
+  {
+    id: 'design-system',
+    name: 'design-system.md',
+    folder: 'docs',
+    path: ['docs', 'design-system.md'],
+    sections: [
+      {
+        id: 'design-system',
+        level: 1,
+        title: 'Design System',
+        body: 'Veloca keeps the editor surface quiet and gives hierarchy to navigation, document structure, and focused writing states.'
+      },
+      {
+        id: 'color',
+        level: 2,
+        title: 'Color',
+        body: 'The palette is intentionally restrained. Dark and light modes use the same layout rhythm, with contrast tuned for long writing sessions.'
+      },
+      {
+        id: 'motion',
+        level: 2,
+        title: 'Motion',
+        body: 'Transitions should feel responsive without drawing attention away from the page. Panels fade and slide softly, while active states move quickly.'
+      }
+    ]
+  },
+  {
+    id: 'component-notes',
+    name: 'component-notes.md',
+    folder: 'components',
+    path: ['components', 'component-notes.md'],
+    sections: [
+      {
+        id: 'components',
+        level: 1,
+        title: 'Component Notes',
+        body: 'The first shared components are small interface primitives used by the shell: tabs, tree rows, switches, segmented controls, and toasts.'
+      },
+      {
+        id: 'sidebar',
+        level: 2,
+        title: 'Sidebar',
+        body: 'The sidebar switches between file navigation and document outline while preserving the current document selection.'
+      },
+      {
+        id: 'settings',
+        level: 2,
+        title: 'Settings',
+        body: 'The settings panel should remain modal, focused, and easy to close with either the close button, Escape, or the blurred backdrop.'
+      }
+    ]
+  },
+  {
+    id: 'readme',
+    name: 'readme.md',
+    folder: 'project',
+    path: ['readme.md'],
+    sections: [
+      {
+        id: 'readme',
+        level: 1,
+        title: 'Readme',
+        body: 'Veloca is currently in its foundation stage. The interface is interactive, while real file IO and markdown editing will be layered in next.'
+      },
+      {
+        id: 'quick-start',
+        level: 2,
+        title: 'Quick Start',
+        body: 'Install dependencies, start the Electron development server, then use the sidebar and settings panel to inspect the current shell behavior.'
+      }
+    ]
+  }
+];
+
+const initialFolders: Record<FolderId, boolean> = {
+  project: true,
+  docs: true,
+  components: false
 };
-\`\`\`
-`;
 
 export function App(): JSX.Element {
   const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
+  const [openFolders, setOpenFolders] = useState<Record<FolderId, boolean>>(initialFolders);
+  const [activeFileId, setActiveFileId] = useState(documents[0].id);
+  const [activeHeadingId, setActiveHeadingId] = useState(documents[0].sections[0].id);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  const activeFile = documents.find((document) => document.id === activeFileId) ?? documents[0];
+  const activeFileText = useMemo(() => {
+    return activeFile.sections
+      .map((section) => `${'#'.repeat(section.level)} ${section.title}\n${section.body}`)
+      .join('\n');
+  }, [activeFile]);
+
   const wordCount = useMemo(() => {
-    return sampleMarkdown.trim().split(/\s+/).filter(Boolean).length;
-  }, []);
+    return activeFileText.trim().split(/\s+/).filter(Boolean).length;
+  }, [activeFileText]);
 
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
@@ -97,6 +218,29 @@ export function App(): JSX.Element {
     });
   };
 
+  const toggleFolder = (folderId: FolderId) => {
+    setOpenFolders((current) => ({
+      ...current,
+      [folderId]: !current[folderId]
+    }));
+  };
+
+  const openFile = (fileId: string) => {
+    const nextFile = documents.find((document) => document.id === fileId);
+
+    if (!nextFile) {
+      return;
+    }
+
+    setActiveFileId(fileId);
+    setActiveHeadingId(nextFile.sections[0].id);
+    setOpenFolders((current) => ({
+      ...current,
+      project: true,
+      [nextFile.folder]: true
+    }));
+  };
+
   const showToast = (message: Omit<ToastMessage, 'id'>) => {
     const id = Date.now();
     setToasts((current) => [...current, { ...message, id }]);
@@ -109,60 +253,45 @@ export function App(): JSX.Element {
 
   return (
     <div className="app-shell">
-      <header className="titlebar">
-        <div className="titlebar-left">
-          <Feather size={14} />
-          <span>Veloca</span>
-        </div>
-        <div className="window-controls" aria-hidden="true">
-          <span className="control-dot" />
-          <span className="control-dot" />
-          <span className="control-dot" />
-        </div>
-      </header>
+      <header className="titlebar" aria-label="Window title bar" />
 
       <div className="app-layout">
         <aside className="sidebar">
           <div className="sidebar-header">
             <div className="tabs-list">
-              <button className="tab-trigger active" type="button">
+              <button
+                className={sidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
+                type="button"
+                onClick={() => setSidebarTab('files')}
+              >
                 Files
               </button>
-              <button className="tab-trigger" type="button">
+              <button
+                className={sidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
+                type="button"
+                onClick={() => setSidebarTab('outline')}
+              >
                 Outline
               </button>
             </div>
           </div>
 
-          <nav className="sidebar-content" aria-label="Workspace files">
-            <button className="tree-item" type="button">
-              <ChevronDown size={14} />
-              <Folder size={14} />
-              <span>Project Veloca</span>
-            </button>
-            <button className="tree-item tree-indent" type="button">
-              <ChevronDown size={14} />
-              <Folder size={14} />
-              <span>docs</span>
-            </button>
-            <button className="tree-item tree-indent deep active" type="button">
-              <FileText size={14} />
-              <span>manifesto.md</span>
-            </button>
-            <button className="tree-item tree-indent deep" type="button">
-              <FileText size={14} />
-              <span>design-system.md</span>
-            </button>
-            <button className="tree-item tree-indent" type="button">
-              <ChevronRight size={14} />
-              <Folder size={14} />
-              <span>components</span>
-            </button>
-            <button className="tree-item tree-indent" type="button">
-              <FileText size={14} />
-              <span>readme.md</span>
-            </button>
-          </nav>
+          <div className="sidebar-content">
+            {sidebarTab === 'files' ? (
+              <FileTree
+                activeFileId={activeFileId}
+                openFolders={openFolders}
+                onFileSelect={openFile}
+                onFolderToggle={toggleFolder}
+              />
+            ) : (
+              <OutlinePanel
+                activeFile={activeFile}
+                activeHeadingId={activeHeadingId}
+                onHeadingSelect={setActiveHeadingId}
+              />
+            )}
+          </div>
 
           <div className="sidebar-footer">
             <button className="nav-btn" type="button" onClick={() => setSettingsOpen(true)}>
@@ -175,56 +304,44 @@ export function App(): JSX.Element {
         <main className="editor-container">
           <header className="editor-header">
             <div className="breadcrumb">
-              docs <ChevronRight size={12} /> manifesto.md
-            </div>
-            <div className="editor-actions">
-              <button className="icon-btn" type="button" aria-label="Search">
-                <Search size={16} />
-              </button>
-              <button className="icon-btn" type="button" aria-label="Reading mode">
-                <BookOpen size={16} />
-              </button>
-              <button className="icon-btn" type="button" aria-label="Export or share">
-                <Share size={16} />
-              </button>
+              {activeFile.path.map((segment, index) => (
+                <span className="breadcrumb-segment" key={segment}>
+                  {index > 0 && <ChevronRight size={12} />}
+                  {segment}
+                </span>
+              ))}
             </div>
           </header>
 
           <section className="editor-scroll-area" aria-label="Markdown editor preview">
-            <article className="markdown-body">
-              <h1>Veloca Manifesto</h1>
-              <p>
-                Writing should be completely frictionless. Veloca is built on a simple philosophy:
-                the interface should dissolve, leaving only you and your typography.
-              </p>
-              <blockquote>
-                Perfection is achieved, not when there is nothing more to add, but when there is
-                nothing left to take away.
-              </blockquote>
-              <h2>Design Language</h2>
-              <p>
-                Veloca follows a focused monochrome interface with measured spacing, clear hierarchy,
-                and a calm writing surface.
-              </p>
-              <pre>
-                <code>{`const editor = {
-  mode: 'live-preview',
-  theme: '${theme}',
-  storage: 'sqlite'
-};`}</code>
-              </pre>
-              <h2>Foundation</h2>
-              <p>
-                The first milestone is a stable Electron shell, a React renderer, a Node backend
-                surface, and persistent application settings.
-                <span className="cursor" />
-              </p>
+            <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
+              {activeFile.sections.map((section, index) => (
+                <section
+                  className={activeHeadingId === section.id ? 'document-section active' : 'document-section'}
+                  key={section.id}
+                  onMouseEnter={() => setActiveHeadingId(section.id)}
+                >
+                  {section.level === 1 ? <h1>{section.title}</h1> : <h2>{section.title}</h2>}
+                  <p>
+                    {section.body}
+                    {index === activeFile.sections.length - 1 && <span className="cursor" />}
+                  </p>
+                  {section.quote && <blockquote>{section.quote}</blockquote>}
+                  {section.code && (
+                    <pre>
+                      <code>
+                        {section.code.replace('system-ready', theme)}
+                      </code>
+                    </pre>
+                  )}
+                </section>
+              ))}
             </article>
           </section>
 
           <footer className="statusbar">
             <span>{wordCount} Words</span>
-            <span>{sampleMarkdown.length} Characters</span>
+            <span>{activeFileText.length} Characters</span>
             <span>UTF-8</span>
           </footer>
         </main>
@@ -345,6 +462,155 @@ export function App(): JSX.Element {
         ))}
       </div>
     </div>
+  );
+}
+
+interface FileTreeProps {
+  activeFileId: string;
+  openFolders: Record<FolderId, boolean>;
+  onFileSelect: (fileId: string) => void;
+  onFolderToggle: (folderId: FolderId) => void;
+}
+
+function FileTree({
+  activeFileId,
+  openFolders,
+  onFileSelect,
+  onFolderToggle
+}: FileTreeProps): JSX.Element {
+  const docsFiles = documents.filter((document) => document.folder === 'docs');
+  const componentFiles = documents.filter((document) => document.folder === 'components');
+  const rootFiles = documents.filter((document) => document.folder === 'project');
+
+  return (
+    <nav aria-label="Workspace files">
+      <FolderRow
+        depth="root"
+        label="Project Veloca"
+        open={openFolders.project}
+        onClick={() => onFolderToggle('project')}
+      />
+      {openFolders.project && (
+        <div className="tree-branch">
+          <FolderRow
+            depth="child"
+            label="docs"
+            open={openFolders.docs}
+            onClick={() => onFolderToggle('docs')}
+          />
+          {openFolders.docs &&
+            docsFiles.map((document) => (
+              <FileRow
+                active={activeFileId === document.id}
+                depth="deep"
+                document={document}
+                key={document.id}
+                onClick={() => onFileSelect(document.id)}
+              />
+            ))}
+
+          <FolderRow
+            depth="child"
+            label="components"
+            open={openFolders.components}
+            onClick={() => onFolderToggle('components')}
+          />
+          {openFolders.components &&
+            componentFiles.map((document) => (
+              <FileRow
+                active={activeFileId === document.id}
+                depth="deep"
+                document={document}
+                key={document.id}
+                onClick={() => onFileSelect(document.id)}
+              />
+            ))}
+
+          {rootFiles.map((document) => (
+            <FileRow
+              active={activeFileId === document.id}
+              depth="child"
+              document={document}
+              key={document.id}
+              onClick={() => onFileSelect(document.id)}
+            />
+          ))}
+        </div>
+      )}
+    </nav>
+  );
+}
+
+interface FolderRowProps {
+  depth: 'root' | 'child';
+  label: string;
+  open: boolean;
+  onClick: () => void;
+}
+
+function FolderRow({ depth, label, open, onClick }: FolderRowProps): JSX.Element {
+  return (
+    <button className={`tree-item ${depth === 'child' ? 'tree-indent' : ''}`} type="button" onClick={onClick}>
+      {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      <Folder size={14} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+interface FileRowProps {
+  active: boolean;
+  depth: 'child' | 'deep';
+  document: DocumentFile;
+  onClick: () => void;
+}
+
+function FileRow({ active, depth, document, onClick }: FileRowProps): JSX.Element {
+  return (
+    <button
+      className={`tree-item tree-indent ${depth === 'deep' ? 'deep' : ''} ${active ? 'active' : ''}`}
+      type="button"
+      onClick={onClick}
+    >
+      <FileText size={14} />
+      <span>{document.name}</span>
+    </button>
+  );
+}
+
+interface OutlinePanelProps {
+  activeFile: DocumentFile;
+  activeHeadingId: string;
+  onHeadingSelect: (headingId: string) => void;
+}
+
+function OutlinePanel({
+  activeFile,
+  activeHeadingId,
+  onHeadingSelect
+}: OutlinePanelProps): JSX.Element {
+  return (
+    <nav className="outline-panel" aria-label="Document outline">
+      <div className="outline-heading">
+        <FileText size={14} />
+        <span>{activeFile.name}</span>
+      </div>
+      <div className="outline-list">
+        {activeFile.sections.map((section) => (
+          <button
+            className={`outline-item level-${section.level} ${
+              activeHeadingId === section.id ? 'active' : ''
+            }`}
+            type="button"
+            key={section.id}
+            onClick={() => onHeadingSelect(section.id)}
+          >
+            <span className="outline-marker" />
+            <span>{section.title}</span>
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }
 
