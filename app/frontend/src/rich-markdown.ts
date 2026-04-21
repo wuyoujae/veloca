@@ -10,6 +10,7 @@ import {
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Emoji from '@tiptap/extension-emoji';
 import FileHandler from '@tiptap/extension-file-handler';
+import HardBreak from '@tiptap/extension-hard-break';
 import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import { Mathematics } from '@tiptap/extension-mathematics';
@@ -449,10 +450,27 @@ const TyporaTableInput = Extension.create({
   }
 });
 
+const VelocaHardBreak = HardBreak.extend({
+  addKeyboardShortcuts() {
+    return {
+      'Mod-Enter': () => this.editor.commands.setHardBreak(),
+      'Shift-Enter': () => {
+        if (getActiveTableContext(this.editor)) {
+          return false;
+        }
+
+        return this.editor.commands.setHardBreak();
+      }
+    };
+  }
+});
+
 export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
   return [
     StarterKit.configure({
       codeBlock: false,
+      gapcursor: false,
+      hardBreak: false,
       heading: {
         levels: [1, 2, 3, 4, 5, 6]
       }
@@ -481,6 +499,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       nested: true
     }),
     TyporaTableInput,
+    VelocaHardBreak,
     VelocaTable.configure({
       resizable: false
     }),
@@ -781,11 +800,11 @@ function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
   const tableNode = buildMarkdownTableNode(schema, headerCells);
   const paragraphStart = $from.before();
   const paragraphEnd = paragraphStart + $from.parent.nodeSize;
+  const tableStart = paragraphStart + 1;
 
   tr.replaceWith(paragraphStart, paragraphEnd, tableNode);
 
-  const selectionPos = getFirstTableBodyCellSelection(paragraphStart, tableNode);
-  tr.setSelection(TextSelection.create(tr.doc, selectionPos));
+  tr.setSelection(getTableCellTextSelection(tr.doc, tableStart, tableNode, 1, 0));
   tr.scrollIntoView();
 
   editor.view.dispatch(tr);
@@ -889,10 +908,16 @@ function insertBodyRowBelowSelection(editor: Editor, context: TableSelectionCont
   }
 
   const nextTableMap = TableMap.get(tableNode);
-  const cellOffset = nextTableMap.positionAt(insertRowIndex, targetColumn, tableNode);
-  const selectionPos = context.rect.tableStart + cellOffset + 2;
+  const selection = getTableCellTextSelection(
+    transaction.doc,
+    context.rect.tableStart,
+    tableNode,
+    insertRowIndex,
+    targetColumn,
+    nextTableMap
+  );
 
-  transaction.setSelection(TextSelection.create(transaction.doc, selectionPos));
+  transaction.setSelection(selection);
   transaction.scrollIntoView();
   editor.view.dispatch(transaction);
   editor.view.focus();
@@ -1044,14 +1069,16 @@ function buildMarkdownTableNode(schema: Editor['schema'], headerCells: string[])
   return schema.nodes.table.create(null, [headerRow, bodyRow]);
 }
 
-function getFirstTableBodyCellSelection(tableStart: number, tableNode: ReturnType<typeof buildMarkdownTableNode>): number {
-  const headerRow = tableNode.firstChild;
-
-  if (!headerRow) {
-    return tableStart + 1;
-  }
-
-  return tableStart + headerRow.nodeSize + 4;
+function getTableCellTextSelection(
+  doc: Editor['state']['doc'],
+  tableStart: number,
+  tableNode: ProseMirrorNode,
+  rowIndex: number,
+  columnIndex: number,
+  tableMap = TableMap.get(tableNode)
+) {
+  const cellOffset = tableMap.positionAt(rowIndex, columnIndex, tableNode);
+  return TextSelection.near(doc.resolve(tableStart + cellOffset + 1), 1);
 }
 
 function renderVelocaTableToMarkdown(node: JSONContent, helpers: MarkdownRendererHelpers): string {
