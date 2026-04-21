@@ -153,6 +153,7 @@ export function App(): JSX.Element {
   const activeFileRef = useRef<MarkdownFileContent | null>(null);
   const autoSaveRef = useRef(autoSave);
   const documentContentRef = useRef(documentContent);
+  const outlineFilePathRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sections = useMemo(() => {
@@ -218,7 +219,23 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    setActiveHeadingId(sections[0]?.id ?? '');
+    const nextFilePath = activeFile?.path ?? null;
+    const fileChanged = outlineFilePathRef.current !== nextFilePath;
+    outlineFilePathRef.current = nextFilePath;
+
+    setActiveHeadingId((currentHeadingId) => {
+      if (!sections.length) {
+        return '';
+      }
+
+      if (fileChanged) {
+        return sections[0].id;
+      }
+
+      return sections.some((section) => section.id === currentHeadingId)
+        ? currentHeadingId
+        : sections[0].id;
+    });
   }, [activeFile?.path, sections]);
 
   const applyTheme = (nextTheme: ThemeMode) => {
@@ -1306,6 +1323,8 @@ interface MarkdownEditorProps {
 
 function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorProps): JSX.Element {
   const contentRef = useRef(content);
+  const activeFilePathRef = useRef(filePath);
+  const lastEditorContentRef = useRef(content);
   const onChangeRef = useRef(onChange);
   const syncingRef = useRef(false);
 
@@ -1347,6 +1366,7 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
         }
 
         const nextMarkdown = editorHtmlToMarkdown(currentEditor.getHTML());
+        lastEditorContentRef.current = nextMarkdown;
 
         if (nextMarkdown !== contentRef.current) {
           onChangeRef.current(nextMarkdown);
@@ -1361,9 +1381,19 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
       return;
     }
 
+    const fileChanged = activeFilePathRef.current !== filePath;
+    const isExternalContentChange = content !== lastEditorContentRef.current;
+
+    activeFilePathRef.current = filePath;
+
+    if (!fileChanged && !isExternalContentChange) {
+      return;
+    }
+
     const nextHtml = markdownToEditorHtml(content);
 
-    if (editor.getHTML() === nextHtml) {
+    if (!fileChanged && editor.getHTML() === nextHtml) {
+      lastEditorContentRef.current = content;
       return;
     }
 
@@ -1372,6 +1402,7 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
       emitUpdate: false
     });
     syncingRef.current = false;
+    lastEditorContentRef.current = content;
   }, [content, editor, filePath]);
 
   useEffect(() => {
