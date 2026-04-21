@@ -32,6 +32,22 @@ interface MarkdownFileContent {
   workspaceFolderId: string;
 }
 
+interface WorkspaceAssetPayload {
+  data: ArrayBuffer | Uint8Array;
+  fileName: string;
+  mimeType: string;
+}
+
+interface WorkspaceResolvedAsset {
+  assetPath: string;
+  byteSize: number;
+  exists: boolean;
+  fileName: string;
+  isExternal: boolean;
+  mimeType: string;
+  url: string;
+}
+
 interface FileOperationResult {
   snapshot: WorkspaceSnapshot;
   path?: string;
@@ -52,6 +68,9 @@ declare global {
         createDatabaseWorkspace: (name: string) => Promise<FileOperationResult>;
         readMarkdown: (filePath: string) => Promise<MarkdownFileContent>;
         saveMarkdown: (filePath: string, content: string) => Promise<MarkdownFileContent>;
+        saveAsset: (documentPath: string, payload: WorkspaceAssetPayload) => Promise<WorkspaceResolvedAsset>;
+        resolveAsset: (documentPath: string, assetPath: string) => Promise<WorkspaceResolvedAsset>;
+        readAssetMeta: (documentPath: string, assetPath: string) => Promise<WorkspaceResolvedAsset>;
         createEntry: (
           parentPath: string,
           entryType: 'file' | 'folder',

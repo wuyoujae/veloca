@@ -2,13 +2,13 @@
 
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
-The current version is a foundation build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, and a TipTap-powered editor that is fully styled through Veloca's own UI system.
+The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, and local asset handling for richer Markdown documents.
 
 ## Project Overview
 
 Veloca is positioned as a clean, desktop-first markdown editor. Its first core use case is simple: open the app, write markdown in a Typora-like single-pane editor, and control the editor appearance without visual clutter.
 
-The project currently focuses on the base application architecture, local workspace management, markdown editing, and save behavior. Export, search, richer asset handling, and synchronization are planned follow-up modules.
+The project currently focuses on desktop-first workspace management, rich markdown editing, media attachment handling, and save behavior. Export, search, and synchronization are planned follow-up modules.
 
 ## Project Approach
 
@@ -31,7 +31,10 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - Database-backed workspace roots for quick projects that do not need a system folder.
 - Recursive `.md` file discovery from added folders.
 - Custom file tree context menu for common system-level operations.
-- TipTap-powered markdown editor with Veloca-native styling.
+- TipTap-powered rich markdown editor with Veloca-native styling.
+- Rich Markdown rendering for tables, task lists, code highlighting, inline and block math, and emoji input.
+- Local image, audio, video, and iframe embed support.
+- Dual-workspace attachment persistence for both filesystem and SQLite-backed workspaces.
 - Auto Save enabled by default, with `Cmd/Ctrl+S` manual save support.
 - Save status in the editor status bar.
 - Settings modal with polished dark/light theme switching.
@@ -40,7 +43,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 
 ## Tech Stack
 
-- Frontend: React, TypeScript, Vite, Lucide React, TipTap, Marked, Turndown, CSS
+- Frontend: React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, KaTeX, lowlight, DOMPurify, Marked, CSS
 - Desktop shell: Electron, electron-vite
 - Backend: Node.js, TypeScript
 - Database: SQLite through `better-sqlite3`
@@ -109,7 +112,7 @@ Available environment variables:
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
 
-Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Database-backed workspaces store their virtual folders and markdown files directly in SQLite.
+Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
@@ -147,25 +150,28 @@ Manual acceptance checks:
 9. Right-click a folder and try `New File` or `New Folder`; confirm a default item appears in the tree and enters inline rename mode.
 10. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
 11. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
-12. Select a markdown file and edit headings, paragraphs, lists, blockquotes, and code blocks in the TipTap editor.
+12. Select a markdown file and edit headings, paragraphs, lists, blockquotes, tables, task lists, formulas, and code blocks in the TipTap editor.
 13. Wait for Auto Save and confirm the status bar returns to `Saved`.
 14. Select a different file, then return to the edited file and confirm the saved content is still present.
-15. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
-16. Click `Settings` in the sidebar.
-17. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-18. Switch between `Dark` and `Light`.
-19. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+15. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
+16. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
+17. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
+18. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
+19. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
+20. Click `Settings` in the sidebar.
+21. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
+22. Switch between `Dark` and `Light`.
+23. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
 Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, TipTap editor integration, Auto Save, manual save, and outline interactions.
-- Next: image and attachment handling.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, TipTap editor integration, rich Markdown rendering, local media handling, Auto Save, manual save, and outline interactions.
 - Next: markdown export and search.
 - Later: plugin or extension system if product requirements justify it.
 

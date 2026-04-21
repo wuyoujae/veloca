@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import {
   cpSync,
   existsSync,
@@ -10,7 +11,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs';
-import { basename, dirname, extname, join, relative, sep } from 'node:path';
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { getDatabase } from '../database/connection';
 
 export interface WorkspaceFolder {
@@ -71,6 +72,41 @@ interface VirtualWorkspaceEntryRow {
   name: string;
   content: string;
   created_at: number;
+}
+
+interface VirtualWorkspaceAssetRow {
+  id: string;
+  workspace_id: string;
+  document_entry_id: string;
+  asset_path: string;
+  file_name: string;
+  mime_type: string;
+  byte_size: number;
+  binary_content: Buffer;
+  created_at: number;
+}
+
+export interface WorkspaceAssetPayload {
+  data: ArrayBuffer | Uint8Array;
+  fileName: string;
+  mimeType: string;
+}
+
+export interface WorkspaceResolvedAsset {
+  assetPath: string;
+  byteSize: number;
+  exists: boolean;
+  fileName: string;
+  isExternal: boolean;
+  mimeType: string;
+  url: string;
+}
+
+export interface WorkspaceAssetBinary {
+  byteSize: number;
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
 }
 
 const ignoredDirectoryNames = new Set([
@@ -146,6 +182,16 @@ export function removeWorkspaceFolder(workspaceFolderId: string): WorkspaceSnaps
       UPDATE virtual_workspaces
       SET status = 1, updated_at = ?
       WHERE id = ?
+      `
+    )
+    .run(Date.now(), workspaceFolderId);
+
+  getDatabase()
+    .prepare(
+      `
+      UPDATE virtual_workspace_assets
+      SET status = 1, updated_at = ?
+      WHERE workspace_id = ?
       `
     )
     .run(Date.now(), workspaceFolderId);
@@ -230,6 +276,105 @@ export function saveMarkdownFile(filePath: string, content: string): MarkdownFil
     content,
     relativePath: relative(folder.path, resolvedPath).split(sep).join('/'),
     workspaceFolderId: folder.id
+  };
+}
+
+export function saveWorkspaceAsset(
+  documentPath: string,
+  payload: WorkspaceAssetPayload
+): WorkspaceResolvedAsset {
+  const fileName = createStoredAssetFileName(payload.fileName, payload.mimeType);
+  const buffer = toBuffer(payload.data);
+
+  if (isDatabasePath(documentPath)) {
+    return saveDatabaseAsset(documentPath, payload.mimeType, fileName, buffer);
+  }
+
+  return saveFilesystemAsset(documentPath, payload.mimeType, fileName, buffer);
+}
+
+export function resolveWorkspaceAsset(documentPath: string, assetPath: string): WorkspaceResolvedAsset {
+  if (isExternalAssetSource(assetPath)) {
+    return {
+      assetPath,
+      byteSize: 0,
+      exists: true,
+      fileName: basename(assetPath),
+      isExternal: true,
+      mimeType: getMimeTypeFromAssetPath(assetPath),
+      url: assetPath
+    };
+  }
+
+  if (isDatabasePath(documentPath)) {
+    const asset = getDatabaseAsset(documentPath, assetPath);
+
+    return {
+      assetPath: asset.asset_path,
+      byteSize: asset.byte_size,
+      exists: true,
+      fileName: asset.file_name,
+      isExternal: false,
+      mimeType: asset.mime_type,
+      url: createAssetProtocolUrl(documentPath, asset.asset_path)
+    };
+  }
+
+  const resolvedDocumentPath = resolveExistingWorkspacePath(documentPath);
+  const absoluteAssetPath = resolve(dirname(resolvedDocumentPath), assetPath);
+
+  if (!isInsideWorkspace(absoluteAssetPath)) {
+    throw new Error('Asset path is outside the current workspace.');
+  }
+
+  if (!existsSync(absoluteAssetPath)) {
+    throw new Error('Asset not found.');
+  }
+
+  const stats = statSync(absoluteAssetPath);
+
+  return {
+    assetPath,
+    byteSize: stats.size,
+    exists: true,
+    fileName: basename(absoluteAssetPath),
+    isExternal: false,
+    mimeType: getMimeTypeFromAssetPath(absoluteAssetPath),
+    url: createAssetProtocolUrl(resolvedDocumentPath, assetPath)
+  };
+}
+
+export function readWorkspaceAssetMeta(documentPath: string, assetPath: string): WorkspaceResolvedAsset {
+  return resolveWorkspaceAsset(documentPath, assetPath);
+}
+
+export function readWorkspaceAssetBinary(
+  documentPath: string,
+  assetPath: string
+): WorkspaceAssetBinary {
+  if (isDatabasePath(documentPath)) {
+    const asset = getDatabaseAsset(documentPath, assetPath);
+
+    return {
+      buffer: asset.binary_content,
+      byteSize: asset.byte_size,
+      fileName: asset.file_name,
+      mimeType: asset.mime_type
+    };
+  }
+
+  const resolvedDocumentPath = resolveExistingWorkspacePath(documentPath);
+  const absoluteAssetPath = resolve(dirname(resolvedDocumentPath), assetPath);
+
+  if (!isInsideWorkspace(absoluteAssetPath) || !existsSync(absoluteAssetPath)) {
+    throw new Error('Asset not found.');
+  }
+
+  return {
+    buffer: readFileSync(absoluteAssetPath),
+    byteSize: statSync(absoluteAssetPath).size,
+    fileName: basename(absoluteAssetPath),
+    mimeType: getMimeTypeFromAssetPath(absoluteAssetPath)
   };
 }
 
@@ -576,6 +721,89 @@ function saveDatabaseMarkdownFile(filePath: string, content: string): MarkdownFi
   };
 }
 
+function saveFilesystemAsset(
+  documentPath: string,
+  mimeType: string,
+  fileName: string,
+  buffer: Buffer
+): WorkspaceResolvedAsset {
+  const resolvedDocumentPath = resolveExistingWorkspacePath(documentPath);
+
+  if (!isMarkdownFile(resolvedDocumentPath)) {
+    throw new Error('Assets can only be attached to markdown files.');
+  }
+
+  const assetDirectoryPath = join(
+    dirname(resolvedDocumentPath),
+    `${basename(resolvedDocumentPath, extname(resolvedDocumentPath))}.assets`
+  );
+  mkdirSync(assetDirectoryPath, { recursive: true });
+
+  const absoluteAssetPath = getAvailablePath(join(assetDirectoryPath, fileName));
+  writeFileSync(absoluteAssetPath, buffer);
+
+  const relativeAssetPath = `./${relative(dirname(resolvedDocumentPath), absoluteAssetPath)
+    .split(sep)
+    .join('/')}`;
+
+  return {
+    assetPath: relativeAssetPath,
+    byteSize: buffer.byteLength,
+    exists: true,
+    fileName: basename(absoluteAssetPath),
+    isExternal: false,
+    mimeType,
+    url: createAssetProtocolUrl(resolvedDocumentPath, relativeAssetPath)
+  };
+}
+
+function saveDatabaseAsset(
+  documentPath: string,
+  mimeType: string,
+  fileName: string,
+  buffer: Buffer
+): WorkspaceResolvedAsset {
+  const entry = getDatabaseEntryByPath(documentPath);
+
+  if (entry.entry_type !== 1) {
+    throw new Error('Assets can only be attached to markdown documents.');
+  }
+
+  const assetPath = `./${basename(entry.name, extname(entry.name))}.assets/${fileName}`;
+  const now = Date.now();
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO virtual_workspace_assets
+        (id, workspace_id, document_entry_id, asset_path, file_name, mime_type, byte_size, binary_content, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `
+    )
+    .run(
+      randomUUID(),
+      entry.workspace_id,
+      entry.id,
+      assetPath,
+      fileName,
+      mimeType,
+      buffer.byteLength,
+      buffer,
+      now,
+      now
+    );
+
+  return {
+    assetPath,
+    byteSize: buffer.byteLength,
+    exists: true,
+    fileName,
+    isExternal: false,
+    mimeType,
+    url: createAssetProtocolUrl(getDatabaseEntryPath(entry.id), assetPath)
+  };
+}
+
 function createDatabaseEntry(
   parentPath: string,
   entryType: 'file' | 'folder',
@@ -671,6 +899,8 @@ function pasteDatabaseEntry(
       )
       .run(target.workspaceId, target.parentId, Date.now(), source.id);
 
+    updateDatabaseAssetWorkspace(source.id, target.workspaceId);
+
     return {
       snapshot: getWorkspaceSnapshot(),
       path: getDatabaseEntryPath(source.id)
@@ -704,6 +934,10 @@ function cloneDatabaseEntry(
     )
     .run(id, workspaceId, parentId, entry.entry_type, name, entry.content, now, now);
 
+  if (entry.entry_type === 1) {
+    cloneDatabaseAssets(entry.id, id, workspaceId);
+  }
+
   if (entry.entry_type === 0) {
     const children = getDatabase()
       .prepare(
@@ -729,12 +963,99 @@ function deactivateDatabaseEntry(entryId: string): void {
     .prepare('UPDATE virtual_workspace_entries SET status = 1, updated_at = ? WHERE id = ?')
     .run(Date.now(), entryId);
 
+  deactivateDatabaseAssets(entryId);
+
   const children = getDatabase()
     .prepare('SELECT id FROM virtual_workspace_entries WHERE parent_id = ? AND status = 0')
     .all(entryId) as Array<{ id: string }>;
 
   for (const child of children) {
     deactivateDatabaseEntry(child.id);
+  }
+}
+
+function cloneDatabaseAssets(sourceDocumentEntryId: string, targetDocumentEntryId: string, workspaceId: string): void {
+  const assets = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, document_entry_id, asset_path, file_name, mime_type, byte_size, binary_content, created_at
+      FROM virtual_workspace_assets
+      WHERE document_entry_id = ? AND status = 0
+      ORDER BY created_at ASC
+      `
+    )
+    .all(sourceDocumentEntryId) as VirtualWorkspaceAssetRow[];
+
+  const now = Date.now();
+  const insert = getDatabase().prepare(
+    `
+    INSERT INTO virtual_workspace_assets
+      (id, workspace_id, document_entry_id, asset_path, file_name, mime_type, byte_size, binary_content, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    `
+  );
+
+  assets.forEach((asset) => {
+    insert.run(
+      randomUUID(),
+      workspaceId,
+      targetDocumentEntryId,
+      asset.asset_path,
+      asset.file_name,
+      asset.mime_type,
+      asset.byte_size,
+      asset.binary_content,
+      now,
+      now
+    );
+  });
+}
+
+function deactivateDatabaseAssets(documentEntryId: string): void {
+  getDatabase()
+    .prepare('UPDATE virtual_workspace_assets SET status = 1, updated_at = ? WHERE document_entry_id = ? AND status = 0')
+    .run(Date.now(), documentEntryId);
+}
+
+function updateDatabaseAssetWorkspace(entryId: string, workspaceId: string): void {
+  const entry = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE id = ? AND status = 0
+      `
+    )
+    .get(entryId) as VirtualWorkspaceEntryRow | undefined;
+
+  if (!entry) {
+    return;
+  }
+
+  if (entry.entry_type === 1) {
+    getDatabase()
+      .prepare(
+        `
+        UPDATE virtual_workspace_assets
+        SET workspace_id = ?, updated_at = ?
+        WHERE document_entry_id = ? AND status = 0
+        `
+      )
+      .run(workspaceId, Date.now(), entryId);
+  }
+
+  if (entry.entry_type === 0) {
+    const children = getDatabase()
+      .prepare(
+        `
+        SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+        FROM virtual_workspace_entries
+        WHERE parent_id = ? AND status = 0
+        `
+      )
+      .all(entryId) as VirtualWorkspaceEntryRow[];
+
+    children.forEach((child) => updateDatabaseAssetWorkspace(child.id, workspaceId));
   }
 }
 
@@ -793,6 +1114,26 @@ function getDatabaseEntryByPath(filePath: string): VirtualWorkspaceEntryRow {
   }
 
   return row;
+}
+
+function getDatabaseAsset(documentPath: string, assetPath: string): VirtualWorkspaceAssetRow {
+  const entry = getDatabaseEntryByPath(documentPath);
+  const normalizedAssetPath = normalizeAssetPath(assetPath);
+  const asset = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, document_entry_id, asset_path, file_name, mime_type, byte_size, binary_content, created_at
+      FROM virtual_workspace_assets
+      WHERE document_entry_id = ? AND asset_path = ? AND status = 0
+      `
+    )
+    .get(entry.id, normalizedAssetPath) as VirtualWorkspaceAssetRow | undefined;
+
+  if (!asset) {
+    throw new Error('Database asset not found.');
+  }
+
+  return asset;
 }
 
 function getDatabaseRelativePath(entry: VirtualWorkspaceEntryRow): string {
@@ -864,6 +1205,93 @@ function getDatabaseEntryId(filePath: string): string {
   }
 
   return filePath.replace('veloca-db://entry/', '');
+}
+
+function createStoredAssetFileName(fileName: string, mimeType: string): string {
+  const originalExtension = extname(fileName);
+  const safeBaseName = basename(fileName, originalExtension)
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  const fallbackExtension = getExtensionFromMimeType(mimeType);
+  const extension = (originalExtension || fallbackExtension || '').toLowerCase();
+  const baseName = safeBaseName || 'asset';
+
+  return `${randomUUID()}-${baseName}${extension}`;
+}
+
+function normalizeAssetPath(assetPath: string): string {
+  const normalized = assetPath.trim().replace(/\\/g, '/');
+
+  if (!normalized.startsWith('./') && !normalized.startsWith('../')) {
+    return normalized.startsWith('/') ? `.${normalized}` : `./${normalized}`;
+  }
+
+  return normalized;
+}
+
+function createAssetProtocolUrl(documentPath: string, assetPath: string): string {
+  const params = new URLSearchParams({
+    assetPath: normalizeAssetPath(assetPath),
+    documentPath
+  });
+
+  return `veloca-asset://asset?${params.toString()}`;
+}
+
+function isExternalAssetSource(assetPath: string): boolean {
+  return /^(https?:\/\/|data:|blob:|veloca-asset:\/\/)/i.test(assetPath);
+}
+
+function toBuffer(data: ArrayBuffer | Uint8Array): Buffer {
+  if (data instanceof Uint8Array) {
+    return Buffer.from(data);
+  }
+
+  return Buffer.from(new Uint8Array(data));
+}
+
+function getExtensionFromMimeType(mimeType: string): string {
+  const normalizedMimeType = mimeType.toLowerCase();
+  const extensionMap: Record<string, string> = {
+    'audio/mpeg': '.mp3',
+    'audio/mp4': '.m4a',
+    'audio/ogg': '.ogg',
+    'audio/wav': '.wav',
+    'audio/webm': '.webm',
+    'image/gif': '.gif',
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/svg+xml': '.svg',
+    'image/webp': '.webp',
+    'video/mp4': '.mp4',
+    'video/ogg': '.ogv',
+    'video/webm': '.webm'
+  };
+
+  return extensionMap[normalizedMimeType] ?? '';
+}
+
+function getMimeTypeFromAssetPath(assetPath: string): string {
+  const extension = extname(assetPath).toLowerCase();
+  const mimeTypeMap: Record<string, string> = {
+    '.gif': 'image/gif',
+    '.jpeg': 'image/jpeg',
+    '.jpg': 'image/jpeg',
+    '.m4a': 'audio/mp4',
+    '.mp3': 'audio/mpeg',
+    '.mp4': 'video/mp4',
+    '.ogg': 'audio/ogg',
+    '.ogv': 'video/ogg',
+    '.png': 'image/png',
+    '.svg': 'image/svg+xml',
+    '.wav': 'audio/wav',
+    '.webm': 'video/webm',
+    '.webp': 'image/webp'
+  };
+
+  return mimeTypeMap[extension] ?? 'application/octet-stream';
 }
 
 function resolveExistingWorkspacePath(filePath: string): string {

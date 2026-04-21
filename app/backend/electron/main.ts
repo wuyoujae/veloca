@@ -4,6 +4,8 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  net,
+  protocol,
   shell,
   type OpenDialogOptions
 } from 'electron';
@@ -25,9 +27,13 @@ import {
   getWorkspaceSnapshot,
   pasteWorkspaceEntry,
   readMarkdownFile,
+  readWorkspaceAssetBinary,
+  readWorkspaceAssetMeta,
   removeWorkspaceFolder,
   renameWorkspaceEntry,
+  resolveWorkspaceAsset,
   saveMarkdownFile,
+  saveWorkspaceAsset,
   validateWorkspacePath
 } from '../services/workspace-service';
 
@@ -96,6 +102,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle('workspace:save-markdown', (_event, filePath: string, content: string) => {
     return saveMarkdownFile(filePath, content);
   });
+  ipcMain.handle('workspace:save-asset', (_event, documentPath: string, payload) => {
+    return saveWorkspaceAsset(documentPath, payload);
+  });
+  ipcMain.handle('workspace:resolve-asset', (_event, documentPath: string, assetPath: string) => {
+    return resolveWorkspaceAsset(documentPath, assetPath);
+  });
+  ipcMain.handle('workspace:read-asset-meta', (_event, documentPath: string, assetPath: string) => {
+    return readWorkspaceAssetMeta(documentPath, assetPath);
+  });
   ipcMain.handle(
     'workspace:create-entry',
     (_event, parentPath: string, entryType: 'file' | 'folder', name: string) => {
@@ -140,9 +155,41 @@ function registerIpcHandlers(): void {
   });
 }
 
+function registerAssetProtocol(): void {
+  protocol.handle('veloca-asset', async (request) => {
+    const requestUrl = new URL(request.url);
+    const documentPath = requestUrl.searchParams.get('documentPath');
+    const assetPath = requestUrl.searchParams.get('assetPath');
+
+    if (!documentPath || !assetPath) {
+      return new Response('Invalid asset request.', { status: 400 });
+    }
+
+    try {
+      const asset = resolveWorkspaceAsset(documentPath, assetPath);
+
+      if (asset.isExternal) {
+        return net.fetch(asset.url);
+      }
+
+      const binary = readWorkspaceAssetBinary(documentPath, assetPath);
+
+      return new Response(new Uint8Array(binary.buffer), {
+        headers: {
+          'Content-Length': String(binary.byteSize),
+          'Content-Type': binary.mimeType
+        }
+      });
+    } catch {
+      return new Response('Asset not found.', { status: 404 });
+    }
+  });
+}
+
 app.whenReady().then(() => {
   getDatabase();
   registerIpcHandlers();
+  registerAssetProtocol();
   createMainWindow();
 
   app.on('activate', () => {

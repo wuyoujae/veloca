@@ -3,6 +3,8 @@ import type { ThemeMode } from '../services/settings-store';
 import type {
   FileOperationResult,
   MarkdownFileContent,
+  WorkspaceAssetPayload,
+  WorkspaceResolvedAsset,
   WorkspaceSnapshot
 } from '../services/workspace-service';
 
@@ -23,6 +25,12 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('workspace:read-markdown', filePath) as Promise<MarkdownFileContent>,
     saveMarkdown: (filePath: string, content: string) =>
       ipcRenderer.invoke('workspace:save-markdown', filePath, content) as Promise<MarkdownFileContent>,
+    saveAsset: (documentPath: string, payload: WorkspaceAssetPayload) =>
+      ipcRenderer.invoke('workspace:save-asset', documentPath, payload) as Promise<WorkspaceResolvedAsset>,
+    resolveAsset: (documentPath: string, assetPath: string) =>
+      ipcRenderer.invoke('workspace:resolve-asset', documentPath, assetPath) as Promise<WorkspaceResolvedAsset>,
+    readAssetMeta: (documentPath: string, assetPath: string) =>
+      ipcRenderer.invoke('workspace:read-asset-meta', documentPath, assetPath) as Promise<WorkspaceResolvedAsset>,
     createEntry: (parentPath: string, entryType: 'file' | 'folder', name: string) =>
       ipcRenderer.invoke('workspace:create-entry', parentPath, entryType, name) as Promise<FileOperationResult>,
     renameEntry: (filePath: string, name: string) =>

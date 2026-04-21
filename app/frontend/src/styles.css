@@ -626,6 +626,192 @@ button {
   color: var(--editor-copy);
 }
 
+.veloca-editor .ProseMirror .hljs-keyword,
+.veloca-editor .ProseMirror .hljs-selector-tag,
+.veloca-editor .ProseMirror .hljs-title.function_ {
+  color: #c084fc;
+}
+
+.veloca-editor .ProseMirror .hljs-string,
+.veloca-editor .ProseMirror .hljs-attr,
+.veloca-editor .ProseMirror .hljs-title.class_ {
+  color: #86efac;
+}
+
+.veloca-editor .ProseMirror .hljs-comment,
+.veloca-editor .ProseMirror .hljs-quote {
+  color: var(--muted-foreground);
+}
+
+.veloca-editor .ProseMirror .hljs-number,
+.veloca-editor .ProseMirror .hljs-literal {
+  color: #fbbf24;
+}
+
+.veloca-editor .ProseMirror .hljs-variable,
+.veloca-editor .ProseMirror .hljs-template-variable {
+  color: #60a5fa;
+}
+
+.veloca-editor .ProseMirror .tableWrapper {
+  width: 100%;
+  margin: 20px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+
+.veloca-editor .ProseMirror table {
+  width: 100%;
+  min-width: 420px;
+  border-collapse: collapse;
+}
+
+.veloca-editor .ProseMirror th,
+.veloca-editor .ProseMirror td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.veloca-editor .ProseMirror th:last-child,
+.veloca-editor .ProseMirror td:last-child {
+  border-right: 0;
+}
+
+.veloca-editor .ProseMirror tr:last-child td {
+  border-bottom: 0;
+}
+
+.veloca-editor .ProseMirror th {
+  background: var(--muted);
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] {
+  padding-left: 0;
+  list-style: none;
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li > label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li > label input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--foreground);
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li[data-checked='true'] > div {
+  color: var(--muted-foreground);
+  text-decoration: line-through;
+}
+
+.veloca-editor .ProseMirror img,
+.veloca-editor .ProseMirror video,
+.veloca-editor .ProseMirror iframe,
+.veloca-editor .ProseMirror audio,
+.veloca-html-block > * {
+  max-width: 100%;
+}
+
+.veloca-editor .ProseMirror img,
+.veloca-editor .ProseMirror video,
+.veloca-editor .ProseMirror iframe,
+.veloca-editor .ProseMirror audio,
+.veloca-html-block {
+  display: block;
+  margin: 22px auto;
+}
+
+.veloca-editor .ProseMirror img,
+.veloca-editor .ProseMirror video,
+.veloca-editor .ProseMirror iframe,
+.veloca-html-block details {
+  border-radius: calc(var(--radius) + 2px);
+}
+
+.veloca-editor .ProseMirror img,
+.veloca-editor .ProseMirror video,
+.veloca-editor .ProseMirror iframe {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.veloca-editor .ProseMirror audio {
+  width: 100%;
+}
+
+.veloca-html-block {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: var(--muted);
+}
+
+.veloca-html-block details {
+  overflow: hidden;
+  background: transparent;
+}
+
+.veloca-html-block summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  color: var(--foreground);
+  font-weight: 600;
+  transition: background-color 0.18s ease;
+}
+
+.veloca-html-block summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.veloca-html-block details > :not(summary) {
+  padding: 0 14px 14px;
+}
+
+.veloca-editor .ProseMirror .tiptap-mathematics-render,
+.veloca-editor .ProseMirror .katex-display {
+  margin: 18px 0;
+  color: var(--foreground);
+}
+
+.veloca-editor .ProseMirror .tiptap-mathematics-render {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.veloca-editor .ProseMirror .tiptap-mathematics-render[data-type='block-math'] {
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+.veloca-editor .ProseMirror .katex {
+  color: var(--foreground);
+}
+
 .markdown-body.focus-mode .ProseMirror > * {
   opacity: 0.42;
   transition: opacity 0.18s ease;

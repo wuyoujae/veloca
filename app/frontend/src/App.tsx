@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import Placeholder from '@tiptap/extension-placeholder';
-import StarterKit from '@tiptap/starter-kit';
 import { EditorContent, useEditor } from '@tiptap/react';
 import {
   CheckCircle2,
@@ -25,7 +23,20 @@ import {
   X
 } from 'lucide-react';
 import { marked } from 'marked';
-import TurndownService from 'turndown';
+import 'katex/dist/katex.min.css';
+import {
+  MEDIA_LIMITS,
+  buildMediaInsertContent,
+  buildMediaNodeFromUrl,
+  createRichEditorExtensions,
+  extractFirstMediaUrl,
+  hydrateDocumentAssets,
+  isAudioUrl,
+  isImageUrl,
+  isVideoUrl,
+  type WorkspaceAssetPayload,
+  type WorkspaceResolvedAsset
+} from './rich-markdown';
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
@@ -111,24 +122,6 @@ marked.setOptions({
   async: false,
   breaks: false,
   gfm: true
-});
-
-const turndownService = new TurndownService({
-  bulletListMarker: '-',
-  codeBlockStyle: 'fenced',
-  emDelimiter: '_',
-  headingStyle: 'atx',
-  hr: '---',
-  strongDelimiter: '**'
-});
-
-turndownService.addRule('strikethrough', {
-  filter(node) {
-    return ['del', 's', 'strike'].includes(node.nodeName.toLowerCase());
-  },
-  replacement(content: string) {
-    return `~~${content}~~`;
-  }
 });
 
 export function App(): JSX.Element {
@@ -885,6 +878,7 @@ export function App(): JSX.Element {
                   filePath={activeFile.path}
                   theme={theme}
                   onChange={updateDocumentContent}
+                  onToast={showToast}
                 />
                 {loadingFile && <div className="loading-state">Loading file...</div>}
               </article>
@@ -1337,13 +1331,22 @@ interface MarkdownEditorProps {
   filePath: string;
   theme: ThemeMode;
   onChange: (content: string) => void;
+  onToast: (message: Omit<ToastMessage, 'id'>) => void;
 }
 
-function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorProps): JSX.Element {
+function MarkdownEditor({
+  content,
+  filePath,
+  theme,
+  onChange,
+  onToast
+}: MarkdownEditorProps): JSX.Element {
   const contentRef = useRef(content);
   const activeFilePathRef = useRef(filePath);
   const lastEditorContentRef = useRef(content);
+  const editorInstanceRef = useRef<ReturnType<typeof useEditor> | null>(null);
   const onChangeRef = useRef(onChange);
+  const onToastRef = useRef(onToast);
   const syncingRef = useRef(false);
 
   useEffect(() => {
@@ -1354,41 +1357,155 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
     onChangeRef.current = onChange;
   }, [onChange]);
 
+  useEffect(() => {
+    onToastRef.current = onToast;
+  }, [onToast]);
+
+  const extensions = useMemo(
+    () =>
+      createRichEditorExtensions({
+        onFileDrop: async (currentEditor, files, pos) => {
+          if (!window.veloca || files.length === 0) {
+            return;
+          }
+
+          const insertionContent: Array<Record<string, unknown>> = [];
+
+          for (const file of files) {
+            const mediaCategory = getMediaCategory(file.type, file.name);
+
+            if (!mediaCategory) {
+              onToastRef.current({
+                type: 'info',
+                title: 'Unsupported Media',
+                description: `${file.name} is not a supported image, audio, or video file.`
+              });
+              continue;
+            }
+
+            const maxSize = MEDIA_LIMITS[mediaCategory];
+
+            if (file.size > maxSize) {
+              onToastRef.current({
+                type: 'info',
+                title: 'Media Too Large',
+                description: `${file.name} exceeds the current ${mediaCategory} size limit.`
+              });
+              continue;
+            }
+
+            try {
+              const payload: WorkspaceAssetPayload = {
+                data: await file.arrayBuffer(),
+                fileName: file.name,
+                mimeType: file.type || guessMimeTypeFromName(file.name)
+              };
+              const savedAsset = await window.veloca.workspace.saveAsset(activeFilePathRef.current, payload);
+              insertionContent.push(buildMediaInsertContent(savedAsset, file.name));
+            } catch {
+              onToastRef.current({
+                type: 'info',
+                title: 'Attachment Failed',
+                description: `Veloca could not attach ${file.name}.`
+              });
+            }
+          }
+
+          if (!insertionContent.length) {
+            return;
+          }
+
+          const nodes = insertionContent.flatMap((node, index) =>
+            index === 0 ? [node] : [{ type: 'paragraph' }, node]
+          );
+
+          if (typeof pos === 'number') {
+            currentEditor.chain().focus().insertContentAt(pos, nodes).run();
+            return;
+          }
+
+          currentEditor.chain().focus().insertContent(nodes).run();
+        },
+        onPasteMediaUrl: async (currentEditor, url) => {
+          const mediaNode = buildMediaNodeFromUrl(url);
+
+          if (!mediaNode) {
+            return false;
+          }
+
+          currentEditor.chain().focus().insertContent(mediaNode).run();
+          return true;
+        },
+        onUpdateBlockMath: (pos, latex) => {
+          editorInstanceRef.current?.commands.updateBlockMath({ latex, pos });
+        },
+        onUpdateInlineMath: (pos, latex) => {
+          editorInstanceRef.current?.commands.updateInlineMath({ latex, pos });
+        }
+      }),
+    []
+  );
+
   const editor = useEditor(
     {
-      content: markdownToEditorHtml(content),
+      content,
+      contentType: 'markdown',
       editorProps: {
         attributes: {
           class: theme === 'dark' ? 'veloca-prosemirror theme-dark' : 'veloca-prosemirror theme-light'
+        },
+        handlePaste: (view, event) => {
+          const clipboard = event.clipboardData;
+
+          if (!clipboard) {
+            return false;
+          }
+
+          const html = clipboard.getData('text/html').trim();
+
+          if (html && /<(details|iframe|audio|video|section)\b/i.test(html)) {
+            event.preventDefault();
+            editorInstanceRef.current?.chain().focus().insertContent(html, { contentType: 'html' }).run();
+            return true;
+          }
+
+          const pastedText = clipboard.getData('text/plain').trim();
+          const mediaUrl = extractFirstMediaUrl(pastedText);
+
+          if (!mediaUrl) {
+            return false;
+          }
+
+          const mediaNode = buildMediaNodeFromUrl(mediaUrl);
+
+          if (!mediaNode) {
+            return false;
+          }
+
+          event.preventDefault();
+          editorInstanceRef.current?.chain().focus().insertContent(mediaNode).run();
+          return true;
         }
       },
-      extensions: [
-        StarterKit.configure({
-          codeBlock: {
-            HTMLAttributes: {
-              class: 'veloca-code-block'
-            }
-          },
-          heading: {
-            levels: [1, 2, 3, 4, 5, 6]
-          }
-        }),
-        Placeholder.configure({
-          placeholder: 'Start writing in Markdown...'
-        })
-      ],
+      extensions,
       immediatelyRender: false,
+      onCreate: ({ editor: currentEditor }) => {
+        editorInstanceRef.current = currentEditor;
+        void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
+      },
       onUpdate: ({ editor: currentEditor }) => {
         if (syncingRef.current) {
           return;
         }
 
-        const nextMarkdown = editorHtmlToMarkdown(currentEditor.getHTML());
+        const nextMarkdown = currentEditor.getMarkdown();
         lastEditorContentRef.current = nextMarkdown;
 
         if (nextMarkdown !== contentRef.current) {
           onChangeRef.current(nextMarkdown);
         }
+
+        void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
       }
     },
     [filePath]
@@ -1408,19 +1525,19 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
       return;
     }
 
-    const nextHtml = markdownToEditorHtml(content);
-
-    if (!fileChanged && editor.getHTML() === nextHtml) {
+    if (!fileChanged && editor.getMarkdown() === content) {
       lastEditorContentRef.current = content;
       return;
     }
 
     syncingRef.current = true;
-    editor.commands.setContent(nextHtml, {
+    editor.commands.setContent(content, {
+      contentType: 'markdown',
       emitUpdate: false
     });
     syncingRef.current = false;
     lastEditorContentRef.current = content;
+    void hydrateDocumentAssets(editor, filePath, resolveAssetForEditor);
   }, [content, editor, filePath]);
 
   useEffect(() => {
@@ -1436,6 +1553,29 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
       }
     });
   }, [editor, theme]);
+
+  useEffect(() => {
+    editorInstanceRef.current = editor;
+  }, [editor]);
+
+  const resolveAssetForEditor = async (
+    documentPath: string,
+    assetPath: string
+  ): Promise<WorkspaceResolvedAsset> => {
+    if (!window.veloca) {
+      return {
+        assetPath,
+        byteSize: 0,
+        exists: false,
+        fileName: assetPath,
+        isExternal: true,
+        mimeType: guessMimeTypeFromName(assetPath),
+        url: assetPath
+      };
+    }
+
+    return window.veloca.workspace.resolveAsset(documentPath, assetPath);
+  };
 
   return (
     <div className="veloca-editor">
@@ -1663,24 +1803,74 @@ function Switch({ checked, onChange }: SwitchProps): JSX.Element {
   );
 }
 
-function markdownToEditorHtml(markdown: string): string {
-  if (!markdown.trim()) {
-    return '<p></p>';
+function getMediaCategory(mimeType: string, fileName: string): keyof typeof MEDIA_LIMITS | null {
+  if (mimeType.startsWith('image/') || isImageUrl(fileName)) {
+    return 'image';
   }
 
-  const rendered = marked.parse(markdown);
-  return typeof rendered === 'string' ? rendered : '<p></p>';
+  if (mimeType.startsWith('audio/') || isAudioUrl(fileName)) {
+    return 'audio';
+  }
+
+  if (mimeType.startsWith('video/') || isVideoUrl(fileName)) {
+    return 'video';
+  }
+
+  return null;
 }
 
-function editorHtmlToMarkdown(html: string): string {
-  if (!html.trim()) {
-    return '';
+function guessMimeTypeFromName(fileName: string): string {
+  const normalizedFileName = fileName.toLowerCase();
+
+  if (isImageUrl(normalizedFileName)) {
+    if (normalizedFileName.endsWith('.png')) {
+      return 'image/png';
+    }
+
+    if (normalizedFileName.endsWith('.svg')) {
+      return 'image/svg+xml';
+    }
+
+    if (normalizedFileName.endsWith('.webp')) {
+      return 'image/webp';
+    }
+
+    if (normalizedFileName.endsWith('.gif')) {
+      return 'image/gif';
+    }
+
+    return 'image/jpeg';
   }
 
-  return turndownService
-    .turndown(html)
-    .replace(/\n{3,}/g, '\n\n')
-    .trimEnd();
+  if (isAudioUrl(normalizedFileName)) {
+    if (normalizedFileName.endsWith('.wav')) {
+      return 'audio/wav';
+    }
+
+    if (normalizedFileName.endsWith('.ogg')) {
+      return 'audio/ogg';
+    }
+
+    if (normalizedFileName.endsWith('.webm')) {
+      return 'audio/webm';
+    }
+
+    return 'audio/mpeg';
+  }
+
+  if (isVideoUrl(normalizedFileName)) {
+    if (normalizedFileName.endsWith('.webm')) {
+      return 'video/webm';
+    }
+
+    if (normalizedFileName.endsWith('.ogv') || normalizedFileName.endsWith('.ogg')) {
+      return 'video/ogg';
+    }
+
+    return 'video/mp4';
+  }
+
+  return 'application/octet-stream';
 }
 
 function getSaveStatusLabel(status: SaveStatus): string {

@@ -2,7 +2,7 @@
 
 ## Scope
 
-The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, recursive markdown file loading, and a TipTap-powered markdown editor that is styled entirely by Veloca.
+The current Veloca milestone provides a Typora-like markdown editor with rich Markdown rendering. It now includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, recursive markdown file loading, a TipTap-powered rich editor, and a dual-workspace asset pipeline for images, audio, video, formulas, tables, and safe HTML embeds.
 
 ## Implemented Architecture
 
@@ -10,7 +10,8 @@ The current Veloca milestone provides the foundation for a Typora-like markdown 
 - `app/backend/electron`: Electron main and preload scripts. The main process creates the desktop window and exposes safe IPC handlers. The preload script exposes a minimal `window.veloca` API to the renderer.
 - `app/backend/database`: SQLite connection setup using `better-sqlite3`. Foreign key enforcement is explicitly disabled to match the project database rule.
 - `app/backend/services`: Backend service layer for app settings and workspace scanning.
-- `tiptap`: MIT-licensed rich-text editor engine used as the writing surface, with Markdown converted into and out of the editor through a local conversion layer.
+- `tiptap`: MIT-licensed rich-text editor engine used as the writing surface, with `@tiptap/markdown` as the primary Markdown bridge.
+- `veloca-asset://`: A custom read-only Electron protocol that serves local media from either filesystem workspaces or SQLite-backed workspaces.
 
 ## Data Model
 
@@ -67,6 +68,24 @@ Stores database-backed folders and markdown files inside a virtual workspace roo
 | `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
 | `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
 
+### `virtual_workspace_assets`
+
+Stores database-backed binary assets that belong to markdown documents in virtual workspaces.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | UUID generated immediately before insert. |
+| `workspace_id` | `TEXT` | Logical root workspace ID. No foreign key constraint is used. |
+| `document_entry_id` | `TEXT` | Logical markdown document entry ID. |
+| `asset_path` | `TEXT` | Relative path stored in markdown such as `./note.assets/uuid-image.png`. |
+| `file_name` | `TEXT` | Stored asset file name. |
+| `mime_type` | `TEXT` | Media MIME type. |
+| `byte_size` | `INTEGER` | Asset byte size. |
+| `binary_content` | `BLOB` | Binary asset payload. |
+| `status` | `INTEGER` | `0` means active. |
+| `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
+| `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
+
 ## Theme Flow
 
 1. Renderer asks `window.veloca.settings.getTheme()` for the stored theme.
@@ -79,14 +98,16 @@ When the app is opened in a normal browser during frontend-only development, the
 ## Editing and Save Flow
 
 1. Renderer opens a markdown file through `window.veloca.workspace.readMarkdown(path)`.
-2. The active markdown source is converted into HTML and passed into TipTap.
-3. Editor updates are converted back into Markdown and stored in renderer state.
+2. The active markdown source is loaded into TipTap using `contentType: 'markdown'`.
+3. TipTap rich nodes are serialized back into Markdown through `editor.getMarkdown()`.
 4. Renderer state updates outline data, word count, character count, and save status.
 5. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
 6. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
 7. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
 8. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
-9. The editor header exposes a manual save button, and Auto Save reuses that same button for animated `Saving` and `Saved` feedback instead of showing a separate label.
+9. Media files dropped or pasted into the editor are persisted through `workspace:save-asset` and inserted back into the document as Markdown or safe HTML-backed rich nodes.
+10. Relative media paths are resolved into renderable URLs through `workspace:resolve-asset`, then served through `veloca-asset://`.
+11. The editor header exposes a manual save button, and Auto Save reuses that same button for animated `Saving` and `Saved` feedback instead of showing a separate label.
 
 ## Current UI Behavior
 
@@ -104,9 +125,12 @@ When the app is opened in a normal browser during frontend-only development, the
 - New files and folders are created with default names directly inside the tree, then immediately enter inline rename mode, matching Typora-style creation behavior.
 - Root workspace folders can be removed from the workspace through the context menu.
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
-- The editor surface uses TipTap with a Markdown conversion layer and no visible third-party toolbar.
+- The editor surface uses TipTap with `@tiptap/markdown`, rich Markdown extensions, and no visible third-party toolbar.
 - The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
 - List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
+- The editor supports richer Markdown blocks including tables, task lists, code highlighting, inline and block LaTeX formulas, emoji input, images, audio, video, iframe embeds, and safe HTML `details` blocks.
+- Filesystem workspaces save pasted or dropped media beside the current markdown file in a `<document>.assets` directory and keep relative markdown paths.
+- Database-backed workspaces store pasted or dropped media inside SQLite and resolve them through the same asset protocol used by renderer media nodes.
 - The editor saves markdown changes automatically by default and supports manual `Cmd/Ctrl+S` saves.
 - The editor header shows both the current file path and a single save button that reflects auto-save activity through its own animated state changes.
 - The status bar shows save state, word count, character count, and encoding.
@@ -119,4 +143,4 @@ When the app is opened in a normal browser during frontend-only development, the
 
 ## Next Development Notes
 
-The next practical feature should be image and attachment handling. Before adding it, define local asset storage, image compression rules, and how markdown links should be generated for filesystem and database-backed workspaces.
+The next practical feature after this milestone should be richer import/export and search. Image and attachment handling is now implemented, so the next design work should focus on format interoperability, document discovery, and longer-document authoring ergonomics.
