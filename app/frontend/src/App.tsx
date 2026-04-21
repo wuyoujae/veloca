@@ -82,12 +82,16 @@ interface ContextMenuState {
 
 interface NameDialogState {
   description: string;
-  entryType?: 'file' | 'folder';
-  mode: 'create-entry' | 'database-workspace' | 'rename-entry';
-  node?: WorkspaceTreeNode;
+  mode: 'database-workspace';
   placeholder: string;
   submitLabel: string;
   title: string;
+}
+
+interface EditingNodeState {
+  originalName: string;
+  path: string;
+  value: string;
 }
 
 const emptyWorkspace: WorkspaceSnapshot = {
@@ -106,6 +110,7 @@ export function App(): JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [nameDialogValue, setNameDialogValue] = useState('');
+  const [editingNode, setEditingNode] = useState<EditingNodeState | null>(null);
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
@@ -319,6 +324,13 @@ export function App(): JSX.Element {
     }
   };
 
+  const setFolderOpen = (folderId: string) => {
+    setOpenFolders((current) => ({
+      ...current,
+      [folderId]: true
+    }));
+  };
+
   const readMarkdownFile = async (filePath: string) => {
     if (!window.veloca) {
       return;
@@ -381,28 +393,39 @@ export function App(): JSX.Element {
   };
 
   const createEntry = async (node: WorkspaceTreeNode, entryType: 'file' | 'folder') => {
-    const label = entryType === 'file' ? 'file' : 'folder';
-    setNameDialogValue('');
-    setNameDialog({
-      mode: 'create-entry',
-      node,
-      entryType,
-      title: `New ${label}`,
-      description: `Create a new ${label} inside "${node.name}".`,
-      placeholder: entryType === 'file' ? 'File name' : 'Folder name',
-      submitLabel: 'Create'
-    });
+    if (!window.veloca) {
+      return;
+    }
+
+    const defaultName = entryType === 'file' ? 'Untitled.md' : 'New Folder';
+    setFolderOpen(node.id);
+
+    try {
+      const result = await window.veloca.workspace.createEntry(node.path, entryType, defaultName);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+
+      if (result.path) {
+        const createdNode = findNodeByPath(result.snapshot.tree, result.path);
+        setEditingNode({
+          originalName: createdNode?.name ?? defaultName,
+          path: result.path,
+          value: createdNode?.name ?? defaultName
+        });
+      }
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Create Failed',
+        description: `Unable to create that ${entryType}.`
+      });
+    }
   };
 
   const renameEntry = async (node: WorkspaceTreeNode) => {
-    setNameDialogValue(node.name);
-    setNameDialog({
-      mode: 'rename-entry',
-      node,
-      title: 'Rename',
-      description: `Rename "${node.name}".`,
-      placeholder: 'Name',
-      submitLabel: 'Rename'
+    setEditingNode({
+      originalName: node.name,
+      path: node.path,
+      value: node.name
     });
   };
 
@@ -419,46 +442,45 @@ export function App(): JSX.Element {
 
     if (nameDialog.mode === 'database-workspace') {
       await submitDatabaseWorkspace();
-      return;
-    }
-
-    if (nameDialog.mode === 'create-entry' && nameDialog.node && nameDialog.entryType) {
-      try {
-        const result = await window.veloca.workspace.createEntry(
-          nameDialog.node.path,
-          nameDialog.entryType,
-          name
-        );
-        await refreshWorkspaceAfterOperation(result.snapshot, result.path);
-        closeNameDialog();
-      } catch {
-        showToast({
-          type: 'info',
-          title: 'Create Failed',
-          description: `Unable to create that ${nameDialog.entryType}.`
-        });
-      }
-      return;
-    }
-
-    if (nameDialog.mode === 'rename-entry' && nameDialog.node) {
-      try {
-        const result = await window.veloca.workspace.renameEntry(nameDialog.node.path, name);
-        await refreshWorkspaceAfterOperation(result.snapshot, result.path);
-        closeNameDialog();
-      } catch {
-        showToast({
-          type: 'info',
-          title: 'Rename Failed',
-          description: 'A file or folder with that name may already exist.'
-        });
-      }
     }
   };
 
   const closeNameDialog = () => {
     setNameDialog(null);
     setNameDialogValue('');
+  };
+
+  const updateEditingNodeName = (value: string) => {
+    setEditingNode((current) => (current ? { ...current, value } : current));
+  };
+
+  const cancelInlineRename = () => {
+    setEditingNode(null);
+  };
+
+  const commitInlineRename = async () => {
+    if (!editingNode || !window.veloca) {
+      return;
+    }
+
+    const nextName = editingNode.value.trim();
+    const currentEditingNode = editingNode;
+    setEditingNode(null);
+
+    if (!nextName || nextName === currentEditingNode.originalName) {
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.renameEntry(currentEditingNode.path, nextName);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Rename Failed',
+        description: 'A file or folder with that name may already exist.'
+      });
+    }
   };
 
   const duplicateEntry = async (node: WorkspaceTreeNode) => {
@@ -593,12 +615,16 @@ export function App(): JSX.Element {
             {sidebarTab === 'files' ? (
               <FileTree
                 activeFilePath={activeFile?.path ?? ''}
+                editingNode={editingNode}
                 loading={loadingWorkspace}
                 openFolders={openFolders}
                 tree={workspace.tree}
                 onAddFolder={addWorkspaceFolder}
+                onCancelInlineRename={cancelInlineRename}
+                onCommitInlineRename={commitInlineRename}
                 onCreateDatabaseWorkspace={createDatabaseWorkspace}
                 onContextMenu={openContextMenu}
+                onEditingNodeChange={updateEditingNodeName}
                 onFileSelect={readMarkdownFile}
                 onFolderToggle={toggleFolder}
               />
@@ -833,24 +859,32 @@ export function App(): JSX.Element {
 
 interface FileTreeProps {
   activeFilePath: string;
+  editingNode: EditingNodeState | null;
   loading: boolean;
   openFolders: Record<string, boolean>;
   tree: WorkspaceTreeNode[];
   onAddFolder: () => void;
+  onCancelInlineRename: () => void;
+  onCommitInlineRename: () => void;
   onCreateDatabaseWorkspace: () => void;
   onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
+  onEditingNodeChange: (value: string) => void;
   onFileSelect: (filePath: string) => void;
   onFolderToggle: (folderId: string) => void;
 }
 
 function FileTree({
   activeFilePath,
+  editingNode,
   loading,
   openFolders,
   tree,
   onAddFolder,
+  onCancelInlineRename,
+  onCommitInlineRename,
   onCreateDatabaseWorkspace,
   onContextMenu,
+  onEditingNodeChange,
   onFileSelect,
   onFolderToggle
 }: FileTreeProps): JSX.Element {
@@ -882,10 +916,14 @@ function FileTree({
           <TreeNode
             activeFilePath={activeFilePath}
             depth={0}
+            editingNode={editingNode}
             key={node.id}
             node={node}
             openFolders={openFolders}
+            onCancelInlineRename={onCancelInlineRename}
+            onCommitInlineRename={onCommitInlineRename}
             onContextMenu={onContextMenu}
+            onEditingNodeChange={onEditingNodeChange}
             onFileSelect={onFileSelect}
             onFolderToggle={onFolderToggle}
           />
@@ -897,9 +935,13 @@ function FileTree({
 interface TreeNodeProps {
   activeFilePath: string;
   depth: number;
+  editingNode: EditingNodeState | null;
   node: WorkspaceTreeNode;
   openFolders: Record<string, boolean>;
+  onCancelInlineRename: () => void;
+  onCommitInlineRename: () => void;
   onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
+  onEditingNodeChange: (value: string) => void;
   onFileSelect: (filePath: string) => void;
   onFolderToggle: (folderId: string) => void;
 }
@@ -907,15 +949,20 @@ interface TreeNodeProps {
 function TreeNode({
   activeFilePath,
   depth,
+  editingNode,
   node,
   openFolders,
+  onCancelInlineRename,
+  onCommitInlineRename,
   onContextMenu,
+  onEditingNodeChange,
   onFileSelect,
   onFolderToggle
 }: TreeNodeProps): JSX.Element {
   const isOpen = openFolders[node.id] ?? false;
   const paddingLeft = 10 + depth * 18;
   const isDatabaseRoot = node.source === 'database' && node.relativePath === '';
+  const isEditing = editingNode?.path === node.path;
 
   if (node.type === 'file') {
     return (
@@ -927,7 +974,16 @@ function TreeNode({
         onClick={() => onFileSelect(node.path)}
       >
         <FileText size={14} />
-        <span>{node.name}</span>
+        {isEditing ? (
+          <InlineNameInput
+            value={editingNode.value}
+            onCancel={onCancelInlineRename}
+            onChange={onEditingNodeChange}
+            onCommit={onCommitInlineRename}
+          />
+        ) : (
+          <span>{node.name}</span>
+        )}
       </button>
     );
   }
@@ -943,7 +999,16 @@ function TreeNode({
       >
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         {isDatabaseRoot ? <FolderStarIcon size={14} /> : <Folder size={14} />}
-        <span>{node.name}</span>
+        {isEditing ? (
+          <InlineNameInput
+            value={editingNode.value}
+            onCancel={onCancelInlineRename}
+            onChange={onEditingNodeChange}
+            onCommit={onCommitInlineRename}
+          />
+        ) : (
+          <span>{node.name}</span>
+        )}
       </button>
 
       {isOpen && (
@@ -952,10 +1017,14 @@ function TreeNode({
             <TreeNode
               activeFilePath={activeFilePath}
               depth={depth + 1}
+              editingNode={editingNode}
               key={child.id}
               node={child}
               openFolders={openFolders}
+              onCancelInlineRename={onCancelInlineRename}
+              onCommitInlineRename={onCommitInlineRename}
               onContextMenu={onContextMenu}
+              onEditingNodeChange={onEditingNodeChange}
               onFileSelect={onFileSelect}
               onFolderToggle={onFolderToggle}
             />
@@ -963,6 +1032,43 @@ function TreeNode({
         </div>
       )}
     </div>
+  );
+}
+
+interface InlineNameInputProps {
+  value: string;
+  onCancel: () => void;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+}
+
+function InlineNameInput({
+  value,
+  onCancel,
+  onChange,
+  onCommit
+}: InlineNameInputProps): JSX.Element {
+  return (
+    <input
+      autoFocus
+      className="tree-inline-input"
+      value={value}
+      onBlur={onCommit}
+      onChange={(event) => onChange(event.target.value)}
+      onClick={(event) => event.stopPropagation()}
+      onFocus={(event) => event.currentTarget.select()}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+
+        if (event.key === 'Escape') {
+          event.stopPropagation();
+          onCancel();
+        }
+      }}
+      onMouseDown={(event) => event.stopPropagation()}
+    />
   );
 }
 

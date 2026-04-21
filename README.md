@@ -140,7 +140,7 @@ Manual acceptance checks:
 6. Confirm the database-backed workspace uses a folder-with-star icon that differs from system folders.
 7. Confirm only markdown files appear as files under system folders.
 8. Use the `Files` tab to collapse and expand folders.
-9. Right-click a folder and try `New File` or `New Folder`.
+9. Right-click a folder and try `New File` or `New Folder`; confirm a default item appears in the tree and enters inline rename mode.
 10. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
 11. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
 12. Select different markdown files and confirm the editor content and breadcrumb update.

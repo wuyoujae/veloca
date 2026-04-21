@@ -88,6 +88,7 @@ When the app is opened in a normal browser during frontend-only development, the
 - Database-backed files and folders are stored in SQLite and participate in the same tree interactions as system files.
 - Workspace scanning recursively loads `.md` files only. Common generated folders such as `node_modules`, `.git`, `dist`, `out`, and `release` are skipped.
 - The file tree supports a custom context menu for creating files/folders, opening in Finder, copying paths, deleting, renaming, duplicating, copying, cutting, and pasting.
+- New files and folders are created with default names directly inside the tree, then immediately enter inline rename mode, matching Typora-style creation behavior.
 - Root workspace folders can be removed from the workspace through the context menu.
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
 - The outline panel reflects the active document headings using a Typora-style indented list without connector lines.

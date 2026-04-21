@@ -236,6 +236,19 @@ button {
   white-space: nowrap;
 }
 
+.tree-inline-input {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid var(--foreground);
+  border-radius: calc(var(--radius) - 3px);
+  outline: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+}
+
 .tree-item svg:first-child {
   transition: transform 0.18s ease;
 }
