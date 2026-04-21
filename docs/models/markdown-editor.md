@@ -127,6 +127,7 @@ When the app is opened in a normal browser during frontend-only development, the
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
 - The editor surface uses TipTap with `@tiptap/markdown`, rich Markdown extensions, and no visible third-party toolbar.
 - The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
+- The live editor typography now follows the `propertypes/word.html` specification across headings, links, lists, task lists, quotes, code blocks, tables, media, formulas, horizontal rules, and details blocks so the shipped renderer stays aligned with the approved markdown prototype.
 - List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
 - Typora-style table authoring is supported: typing a single header row such as `| Head 1 | Head 2 |` in a normal paragraph and pressing `Enter` immediately converts it into a rendered table, auto-inserting the standard Markdown separator row and an empty body row.
 - The editor supports richer Markdown blocks including tables, task lists, code highlighting, inline and block LaTeX formulas, emoji input, images, audio, video, iframe embeds, and safe HTML `details` blocks.

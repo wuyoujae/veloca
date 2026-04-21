@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Serif:ital@0;1&display=swap');
 
 :root {
   --background: #09090b;
@@ -11,6 +11,7 @@
   --sidebar: #09090b;
   --editor-copy: #d4d4d8;
   --code-background: #000000;
+  --surface-hover: #3f3f46;
   --overlay: rgba(0, 0, 0, 0.6);
   --toast-background: rgba(9, 9, 11, 0.85);
   --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
@@ -19,6 +20,7 @@
   --radius: 0.5rem;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-serif: 'Noto Serif', Georgia, Cambria, 'Times New Roman', Times, serif;
 }
 
 :root[data-theme='light'] {
@@ -32,6 +34,7 @@
   --sidebar: #fafafa;
   --editor-copy: #3f3f46;
   --code-background: #fafafa;
+  --surface-hover: #e4e4e7;
   --overlay: rgba(255, 255, 255, 0.45);
   --toast-background: rgba(255, 255, 255, 0.9);
   --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.02);
@@ -408,50 +411,130 @@ button {
 
 .markdown-body {
   width: 100%;
-  max-width: 720px;
-  padding: 0 40px;
+  max-width: 760px;
+  padding: 80px 40px 120px;
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  color: var(--editor-copy);
+  font-size: 16px;
+  line-height: 1.75;
 }
 
 .markdown-body h1,
 .markdown-body h2,
-.markdown-body h3 {
-  line-height: 1.2;
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
   color: var(--foreground);
+  line-height: 1.25;
+  margin-top: 2em;
+  margin-bottom: 1rem;
+  font-weight: 600;
 }
 
 .markdown-body h1 {
-  margin: 0 0 24px;
+  margin: 0 0 1.5rem;
   font-size: 2.25rem;
   font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .markdown-body h2 {
-  margin: 48px 0 16px;
-  padding-bottom: 8px;
+  margin: 2.5em 0 1rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
   font-size: 1.5rem;
-  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
 .markdown-body h3 {
-  margin: 32px 0 12px;
-  color: var(--foreground);
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.markdown-body h4 {
+  font-size: 1rem;
+}
+
+.markdown-body h5 {
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.markdown-body h6 {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
 }
 
 .markdown-body p {
-  margin: 0 0 14px;
+  margin: 0 0 1.25em;
   color: var(--editor-copy);
   font-size: 1rem;
   line-height: 1.75;
 }
 
+.markdown-body strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.markdown-body em {
+  font-style: italic;
+}
+
+.markdown-body del {
+  color: var(--muted-foreground);
+  text-decoration-color: var(--muted-foreground);
+}
+
+.markdown-body mark {
+  padding: 0.125em 0.25em;
+  border-radius: 0.25rem;
+  background: #fef08a;
+  color: #854d0e;
+  font-weight: 500;
+}
+
+.markdown-body a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--surface-hover);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color 0.2s ease, text-decoration-thickness 0.2s ease;
+}
+
+.markdown-body a:hover {
+  text-decoration-color: var(--foreground);
+  text-decoration-thickness: 2px;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0 0 1.25em;
+  padding-left: 1.625em;
+}
+
+.markdown-body li {
+  margin-top: 0.25em;
+}
+
+.markdown-body li > p {
+  margin-bottom: 0.5em;
+}
+
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin-top: 0.5em;
+  margin-bottom: 0;
+}
+
 .markdown-body blockquote {
-  margin: 18px 0;
-  padding: 6px 0 6px 14px;
-  border-left: 2px solid var(--foreground);
+  margin: 1.5em 0;
+  padding: 0.5em 1.5em;
+  border-left: 3px solid var(--surface-hover);
   color: var(--muted-foreground);
   font-style: italic;
 }
@@ -465,25 +548,58 @@ button {
 }
 
 .markdown-body code {
-  border-radius: 4px;
+  padding: 0.2em 0.4em;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
   background: var(--muted);
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-size: 0.85em;
 }
 
 .markdown-body pre {
-  margin: 24px 0;
-  padding: 16px;
+  position: relative;
+  margin: 1.5em 0;
+  padding: 1.25rem;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--code-background);
 }
 
+.markdown-body pre[data-language]::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0.25rem 0.75rem;
+  border-top-right-radius: calc(var(--radius) - 1px);
+  border-bottom-left-radius: var(--radius);
+  background: var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 .markdown-body pre code {
+  display: block;
+  white-space: pre;
   background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 0;
   color: var(--editor-copy);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.markdown-body hr {
+  height: 1px;
+  margin: 3em 0;
+  border: 0;
+  background: var(--border);
 }
 
 .veloca-editor {
@@ -501,7 +617,7 @@ button {
   padding: 0;
   color: var(--editor-copy);
   font-family: var(--font-sans);
-  font-size: 1rem;
+  font-size: 16px;
   line-height: 1.75;
   outline: 0;
   white-space: pre-wrap;
@@ -536,28 +652,46 @@ button {
 .veloca-editor .ProseMirror h5,
 .veloca-editor .ProseMirror h6 {
   color: var(--foreground);
-  line-height: 1.2;
-  letter-spacing: 0;
+  line-height: 1.25;
+  margin-top: 2em;
+  margin-bottom: 1rem;
+  font-weight: 600;
 }
 
 .veloca-editor .ProseMirror h1 {
-  margin: 0 0 24px;
+  margin: 0 0 1.5rem;
   font-size: 2.25rem;
   font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .veloca-editor .ProseMirror h2 {
-  margin: 48px 0 16px;
-  padding-bottom: 8px;
+  margin: 2.5em 0 1rem;
+  padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
   font-size: 1.5rem;
-  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
 .veloca-editor .ProseMirror h3 {
-  margin: 32px 0 12px;
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.veloca-editor .ProseMirror h4 {
+  font-size: 1rem;
+}
+
+.veloca-editor .ProseMirror h5 {
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.veloca-editor .ProseMirror h6 {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
 }
 
 .veloca-editor .ProseMirror p,
@@ -568,27 +702,69 @@ button {
 }
 
 .veloca-editor .ProseMirror p {
-  margin: 0 0 14px;
+  margin: 0 0 1.25em;
+}
+
+.veloca-editor .ProseMirror strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.veloca-editor .ProseMirror em {
+  font-style: italic;
+}
+
+.veloca-editor .ProseMirror del {
+  color: var(--muted-foreground);
+  text-decoration-color: var(--muted-foreground);
+}
+
+.veloca-editor .ProseMirror mark {
+  padding: 0.125em 0.25em;
+  border-radius: 0.25rem;
+  background: #fef08a;
+  color: #854d0e;
+  font-weight: 500;
+}
+
+.veloca-editor .ProseMirror a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--surface-hover);
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1px;
+  transition: text-decoration-color 0.2s ease, text-decoration-thickness 0.2s ease;
+}
+
+.veloca-editor .ProseMirror a:hover {
+  text-decoration-color: var(--foreground);
+  text-decoration-thickness: 2px;
 }
 
 .veloca-editor .ProseMirror ul,
 .veloca-editor .ProseMirror ol {
-  margin: 0 0 14px;
-  padding-left: 24px;
+  margin: 0 0 1.25em;
+  padding-left: 1.625em;
 }
 
 .veloca-editor .ProseMirror li > p {
-  margin: 0;
+  margin-bottom: 0.5em;
 }
 
-.veloca-editor .ProseMirror li + li {
-  margin-top: 4px;
+.veloca-editor .ProseMirror li {
+  margin-top: 0.25em;
+}
+
+.veloca-editor .ProseMirror li > ul,
+.veloca-editor .ProseMirror li > ol {
+  margin-top: 0.5em;
+  margin-bottom: 0;
 }
 
 .veloca-editor .ProseMirror blockquote {
-  margin: 18px 0;
-  padding: 6px 0 6px 14px;
-  border-left: 2px solid var(--foreground);
+  margin: 1.5em 0;
+  padding: 0.5em 1.5em;
+  border-left: 3px solid var(--surface-hover);
   color: var(--muted-foreground);
   font-style: italic;
 }
@@ -602,28 +778,58 @@ button {
 }
 
 .veloca-editor .ProseMirror code {
-  border-radius: 4px;
+  padding: 0.2em 0.4em;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
   background: var(--muted);
   color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 0.9em;
-  padding: 0.15em 0.35em;
+  font-size: 0.85em;
 }
 
 .veloca-editor .ProseMirror pre {
-  margin: 24px 0;
-  padding: 16px;
+  position: relative;
+  margin: 1.5em 0;
+  padding: 1.25rem;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--code-background);
 }
 
+.veloca-editor .ProseMirror pre[data-language]::before {
+  content: attr(data-language);
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 0.25rem 0.75rem;
+  border-top-right-radius: calc(var(--radius) - 1px);
+  border-bottom-left-radius: var(--radius);
+  background: var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
 .veloca-editor .ProseMirror pre code {
+  display: block;
+  white-space: pre;
   padding: 0;
+  border: 0;
   border-radius: 0;
   background: transparent;
   color: var(--editor-copy);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.veloca-editor .ProseMirror hr {
+  height: 1px;
+  margin: 3em 0;
+  border: 0;
+  background: var(--border);
 }
 
 .veloca-editor .ProseMirror .hljs-keyword,
@@ -655,7 +861,7 @@ button {
 
 .veloca-editor .ProseMirror .tableWrapper {
   width: 100%;
-  margin: 20px 0;
+  margin: 2em 0;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -666,24 +872,15 @@ button {
   width: 100%;
   min-width: 420px;
   border-collapse: collapse;
+  font-size: 0.9em;
 }
 
 .veloca-editor .ProseMirror th,
 .veloca-editor .ProseMirror td {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
-}
-
-.veloca-editor .ProseMirror th:last-child,
-.veloca-editor .ProseMirror td:last-child {
-  border-right: 0;
-}
-
-.veloca-editor .ProseMirror tr:last-child td {
-  border-bottom: 0;
 }
 
 .veloca-editor .ProseMirror th {
@@ -692,29 +889,69 @@ button {
   font-weight: 600;
 }
 
+.veloca-editor .ProseMirror tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--background) 78%, var(--muted) 22%);
+}
+
+.veloca-editor .ProseMirror tbody tr:hover {
+  background: color-mix(in srgb, var(--background) 65%, var(--muted) 35%);
+}
+
 .veloca-editor .ProseMirror ul[data-type='taskList'] {
+  margin: 0 0 1.25em;
   padding-left: 0;
   list-style: none;
 }
 
 .veloca-editor .ProseMirror ul[data-type='taskList'] > li {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  margin-left: -1.625em;
+  padding-left: 1.5rem;
 }
 
 .veloca-editor .ProseMirror ul[data-type='taskList'] > li > label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 4px;
+  position: absolute;
+  left: 0;
+  top: 0.35em;
+  display: grid;
+  place-content: center;
+  margin-top: 0;
 }
 
 .veloca-editor .ProseMirror ul[data-type='taskList'] > li > label input {
   width: 16px;
   height: 16px;
   margin: 0;
-  accent-color: var(--foreground);
+  appearance: none;
+  border: 1px solid var(--muted-foreground);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: grid;
+  place-content: center;
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li > label input::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  transform: scale(0);
+  transition: transform 120ms ease-in-out;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  background: var(--accent-foreground);
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li[data-checked='true'] > label input {
+  border-color: var(--foreground);
+  background: var(--foreground);
+}
+
+.veloca-editor .ProseMirror ul[data-type='taskList'] > li[data-checked='true'] > label input::before {
+  transform: scale(1);
 }
 
 .veloca-editor .ProseMirror ul[data-type='taskList'] > li > div {
@@ -759,6 +996,14 @@ button {
   background: var(--muted);
 }
 
+.veloca-editor .ProseMirror figcaption {
+  margin-top: -1.25em;
+  margin-bottom: 2em;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+
 .veloca-editor .ProseMirror audio {
   width: 100%;
 }
@@ -767,48 +1012,64 @@ button {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 2px);
-  background: var(--muted);
+  background: color-mix(in srgb, var(--background) 82%, var(--muted) 18%);
 }
 
 .veloca-html-block details {
   overflow: hidden;
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
   background: transparent;
 }
 
 .veloca-html-block summary {
   cursor: pointer;
-  padding: 12px 14px;
+  margin: -0.5rem -1rem;
+  padding: 0.5rem 1rem;
   color: var(--foreground);
   font-weight: 600;
-  transition: background-color 0.18s ease;
+  transition: background-color 0.2s ease;
 }
 
 .veloca-html-block summary:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--muted);
+}
+
+.veloca-html-block details[open] summary {
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
 }
 
 .veloca-html-block details > :not(summary) {
-  padding: 0 14px 14px;
+  padding: 0 0 0.25rem;
 }
 
 .veloca-editor .ProseMirror .tiptap-mathematics-render,
 .veloca-editor .ProseMirror .katex-display {
-  margin: 18px 0;
+  margin: 1.5em 0;
   color: var(--foreground);
 }
 
 .veloca-editor .ProseMirror .tiptap-mathematics-render {
-  padding: 6px 10px;
-  border-radius: var(--radius);
-  background: var(--muted);
+  padding: 0;
+  background: transparent;
+  font-family: var(--font-serif);
+  font-size: 1.1em;
 }
 
 .veloca-editor .ProseMirror .tiptap-mathematics-render[data-type='block-math'] {
-  padding: 14px 16px;
+  padding: 1em;
   overflow-x: auto;
+  text-align: center;
+  font-size: 1.2rem;
 }
 
 .veloca-editor .ProseMirror .katex {
+  font-family: var(--font-serif);
   color: var(--foreground);
 }
 
