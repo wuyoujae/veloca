@@ -136,8 +136,8 @@ Manual acceptance checks:
 2. Confirm the Electron window opens with the Veloca editor layout.
 3. Click the add-folder icon beside `Workspace`.
 4. Select a folder that contains `.md` files.
-5. Click the database icon beside `Workspace` and create a database-backed workspace.
-6. Confirm the database-backed workspace uses a different icon from system folders.
+5. Click the new-workspace icon beside `Workspace` and create a database-backed workspace.
+6. Confirm the database-backed workspace uses a file-plus style icon that differs from system folders.
 7. Confirm only markdown files appear as files under system folders.
 8. Use the `Files` tab to collapse and expand folders.
 9. Right-click a folder and try `New File` or `New Folder`.
@@ -153,7 +153,7 @@ Automated unit and integration tests should be added when real markdown editing,
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the database button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file updates the preview, breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file updates the preview, breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
 
 ## Roadmap
 

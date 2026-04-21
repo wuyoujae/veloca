@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Clipboard,
   Copy,
-  Database,
   ExternalLink,
   FileText,
   FilePlus,
@@ -95,6 +94,8 @@ export function App(): JSX.Element {
   const [activeFile, setActiveFile] = useState<MarkdownFileContent | null>(null);
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [databaseWorkspaceDialogOpen, setDatabaseWorkspaceDialogOpen] = useState(false);
+  const [databaseWorkspaceName, setDatabaseWorkspaceName] = useState('');
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
@@ -242,11 +243,16 @@ export function App(): JSX.Element {
   };
 
   const createDatabaseWorkspace = async () => {
+    setDatabaseWorkspaceName('');
+    setDatabaseWorkspaceDialogOpen(true);
+  };
+
+  const submitDatabaseWorkspace = async () => {
     if (!window.veloca) {
       return;
     }
 
-    const name = window.prompt('New database workspace name');
+    const name = databaseWorkspaceName.trim();
 
     if (!name) {
       return;
@@ -260,6 +266,8 @@ export function App(): JSX.Element {
         title: 'Database Workspace Created',
         description: name
       });
+      setDatabaseWorkspaceDialogOpen(false);
+      setDatabaseWorkspaceName('');
     } catch {
       showToast({
         type: 'info',
@@ -596,7 +604,7 @@ export function App(): JSX.Element {
                     Add Folder
                   </button>
                   <button className="secondary-action" type="button" onClick={createDatabaseWorkspace}>
-                    <Database size={16} />
+                    <FilePlus size={16} />
                     New Database Workspace
                   </button>
                 </div>
@@ -710,6 +718,17 @@ export function App(): JSX.Element {
         </div>
       )}
 
+      {databaseWorkspaceDialogOpen && (
+        <NameDialog
+          description="Create a workspace stored in SQLite without choosing a system folder."
+          name={databaseWorkspaceName}
+          title="New Workspace"
+          onCancel={() => setDatabaseWorkspaceDialogOpen(false)}
+          onChange={setDatabaseWorkspaceName}
+          onSubmit={submitDatabaseWorkspace}
+        />
+      )}
+
       <div className="toast-viewport" aria-live="polite">
         {toasts.map((toast) => (
           <div className={`toast ${toast.type}`} key={toast.id}>
@@ -778,7 +797,7 @@ function FileTree({
         <span>Workspace</span>
         <div className="directory-toolbar-actions">
           <button className="toolbar-icon-btn" type="button" aria-label="New database workspace" onClick={onCreateDatabaseWorkspace}>
-            <Database size={16} />
+            <FilePlus size={16} />
           </button>
           <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
             <FolderPlus size={16} />
@@ -834,7 +853,7 @@ function TreeNode({
   const isOpen = openFolders[node.id] ?? false;
   const paddingLeft = 10 + depth * 18;
   const isDatabaseRoot = node.source === 'database' && node.relativePath === '';
-  const FolderIcon = isDatabaseRoot ? Database : Folder;
+  const FolderIcon = isDatabaseRoot ? FilePlus : Folder;
 
   if (node.type === 'file') {
     return (
@@ -925,6 +944,58 @@ function OutlinePanel({
         ))}
       </div>
     </nav>
+  );
+}
+
+interface NameDialogProps {
+  description: string;
+  name: string;
+  title: string;
+  onCancel: () => void;
+  onChange: (name: string) => void;
+  onSubmit: () => void;
+}
+
+function NameDialog({
+  description,
+  name,
+  title,
+  onCancel,
+  onChange,
+  onSubmit
+}: NameDialogProps): JSX.Element {
+  return (
+    <div className="name-dialog-overlay" onMouseDown={onCancel}>
+      <form
+        className="name-dialog"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <div className="name-dialog-header">
+          <FilePlus size={18} />
+          <h2>{title}</h2>
+        </div>
+        <p>{description}</p>
+        <input
+          autoFocus
+          className="name-dialog-input"
+          placeholder="Workspace name"
+          value={name}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <div className="name-dialog-actions">
+          <button className="dialog-secondary-action" type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="dialog-primary-action" type="submit" disabled={!name.trim()}>
+            Create
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
