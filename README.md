@@ -137,7 +137,7 @@ Manual acceptance checks:
 3. Click the add-folder icon beside `Workspace`.
 4. Select a folder that contains `.md` files.
 5. Click the new-workspace icon beside `Workspace` and create a database-backed workspace.
-6. Confirm the database-backed workspace uses a file-plus style icon that differs from system folders.
+6. Confirm the database-backed workspace uses a folder-with-star icon that differs from system folders.
 7. Confirm only markdown files appear as files under system folders.
 8. Use the `Files` tab to collapse and expand folders.
 9. Right-click a folder and try `New File` or `New Folder`.

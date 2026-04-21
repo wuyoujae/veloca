@@ -84,7 +84,7 @@ When the app is opened in a normal browser during frontend-only development, the
 - The `Workspace` toolbar exposes an add-folder action.
 - Added folders are persisted in SQLite and reloaded on next launch.
 - Database-backed workspace roots can be created directly from the toolbar without selecting a system folder.
-- Database-backed roots use a different icon from system folders.
+- Database-backed roots use a custom folder-with-star icon to keep the same hierarchy as system folders while still being visually distinct.
 - Database-backed files and folders are stored in SQLite and participate in the same tree interactions as system files.
 - Workspace scanning recursively loads `.md` files only. Common generated folders such as `node_modules`, `.git`, `dist`, `out`, and `release` are skipped.
 - The file tree supports a custom context menu for creating files/folders, opening in Finder, copying paths, deleting, renaming, duplicating, copying, cutting, and pasting.

@@ -80,6 +80,16 @@ interface ContextMenuState {
   node: WorkspaceTreeNode;
 }
 
+interface NameDialogState {
+  description: string;
+  entryType?: 'file' | 'folder';
+  mode: 'create-entry' | 'database-workspace' | 'rename-entry';
+  node?: WorkspaceTreeNode;
+  placeholder: string;
+  submitLabel: string;
+  title: string;
+}
+
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
   tree: [],
@@ -94,8 +104,8 @@ export function App(): JSX.Element {
   const [activeFile, setActiveFile] = useState<MarkdownFileContent | null>(null);
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [databaseWorkspaceDialogOpen, setDatabaseWorkspaceDialogOpen] = useState(false);
-  const [databaseWorkspaceName, setDatabaseWorkspaceName] = useState('');
+  const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
+  const [nameDialogValue, setNameDialogValue] = useState('');
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
@@ -243,8 +253,14 @@ export function App(): JSX.Element {
   };
 
   const createDatabaseWorkspace = async () => {
-    setDatabaseWorkspaceName('');
-    setDatabaseWorkspaceDialogOpen(true);
+    setNameDialogValue('');
+    setNameDialog({
+      mode: 'database-workspace',
+      title: 'New Workspace',
+      description: 'Create a workspace stored in SQLite without choosing a system folder.',
+      placeholder: 'Workspace name',
+      submitLabel: 'Create'
+    });
   };
 
   const submitDatabaseWorkspace = async () => {
@@ -252,7 +268,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    const name = databaseWorkspaceName.trim();
+    const name = nameDialogValue.trim();
 
     if (!name) {
       return;
@@ -266,8 +282,7 @@ export function App(): JSX.Element {
         title: 'Database Workspace Created',
         description: name
       });
-      setDatabaseWorkspaceDialogOpen(false);
-      setDatabaseWorkspaceName('');
+      closeNameDialog();
     } catch {
       showToast({
         type: 'info',
@@ -281,9 +296,13 @@ export function App(): JSX.Element {
     setWorkspace(snapshot);
     openWorkspaceRoots(snapshot.tree);
 
-    if (selectedPath && selectedPath.endsWith('.md')) {
-      await readMarkdownFile(selectedPath);
-      return;
+    if (selectedPath) {
+      const selectedNode = findNodeByPath(snapshot.tree, selectedPath);
+
+      if (selectedNode?.type === 'file') {
+        await readMarkdownFile(selectedNode.path);
+        return;
+      }
     }
 
     if (activeFile && findFileNodeByPath(snapshot.tree, activeFile.path)) {
@@ -363,41 +382,83 @@ export function App(): JSX.Element {
 
   const createEntry = async (node: WorkspaceTreeNode, entryType: 'file' | 'folder') => {
     const label = entryType === 'file' ? 'file' : 'folder';
-    const name = window.prompt(`New ${label} name`);
-
-    if (!name || !window.veloca) {
-      return;
-    }
-
-    try {
-      const result = await window.veloca.workspace.createEntry(node.path, entryType, name);
-      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
-    } catch {
-      showToast({
-        type: 'info',
-        title: 'Create Failed',
-        description: `Unable to create that ${label}.`
-      });
-    }
+    setNameDialogValue('');
+    setNameDialog({
+      mode: 'create-entry',
+      node,
+      entryType,
+      title: `New ${label}`,
+      description: `Create a new ${label} inside "${node.name}".`,
+      placeholder: entryType === 'file' ? 'File name' : 'Folder name',
+      submitLabel: 'Create'
+    });
   };
 
   const renameEntry = async (node: WorkspaceTreeNode) => {
-    const name = window.prompt('Rename', node.name);
+    setNameDialogValue(node.name);
+    setNameDialog({
+      mode: 'rename-entry',
+      node,
+      title: 'Rename',
+      description: `Rename "${node.name}".`,
+      placeholder: 'Name',
+      submitLabel: 'Rename'
+    });
+  };
 
-    if (!name || !window.veloca) {
+  const submitNameDialog = async () => {
+    if (!nameDialog || !window.veloca) {
       return;
     }
 
-    try {
-      const result = await window.veloca.workspace.renameEntry(node.path, name);
-      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
-    } catch {
-      showToast({
-        type: 'info',
-        title: 'Rename Failed',
-        description: 'A file or folder with that name may already exist.'
-      });
+    const name = nameDialogValue.trim();
+
+    if (!name) {
+      return;
     }
+
+    if (nameDialog.mode === 'database-workspace') {
+      await submitDatabaseWorkspace();
+      return;
+    }
+
+    if (nameDialog.mode === 'create-entry' && nameDialog.node && nameDialog.entryType) {
+      try {
+        const result = await window.veloca.workspace.createEntry(
+          nameDialog.node.path,
+          nameDialog.entryType,
+          name
+        );
+        await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+        closeNameDialog();
+      } catch {
+        showToast({
+          type: 'info',
+          title: 'Create Failed',
+          description: `Unable to create that ${nameDialog.entryType}.`
+        });
+      }
+      return;
+    }
+
+    if (nameDialog.mode === 'rename-entry' && nameDialog.node) {
+      try {
+        const result = await window.veloca.workspace.renameEntry(nameDialog.node.path, name);
+        await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+        closeNameDialog();
+      } catch {
+        showToast({
+          type: 'info',
+          title: 'Rename Failed',
+          description: 'A file or folder with that name may already exist.'
+        });
+      }
+    }
+  };
+
+  const closeNameDialog = () => {
+    setNameDialog(null);
+    setNameDialogValue('');
   };
 
   const duplicateEntry = async (node: WorkspaceTreeNode) => {
@@ -718,14 +779,16 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      {databaseWorkspaceDialogOpen && (
+      {nameDialog && (
         <NameDialog
-          description="Create a workspace stored in SQLite without choosing a system folder."
-          name={databaseWorkspaceName}
-          title="New Workspace"
-          onCancel={() => setDatabaseWorkspaceDialogOpen(false)}
-          onChange={setDatabaseWorkspaceName}
-          onSubmit={submitDatabaseWorkspace}
+          description={nameDialog.description}
+          name={nameDialogValue}
+          placeholder={nameDialog.placeholder}
+          submitLabel={nameDialog.submitLabel}
+          title={nameDialog.title}
+          onCancel={closeNameDialog}
+          onChange={setNameDialogValue}
+          onSubmit={submitNameDialog}
         />
       )}
 
@@ -853,7 +916,6 @@ function TreeNode({
   const isOpen = openFolders[node.id] ?? false;
   const paddingLeft = 10 + depth * 18;
   const isDatabaseRoot = node.source === 'database' && node.relativePath === '';
-  const FolderIcon = isDatabaseRoot ? FilePlus : Folder;
 
   if (node.type === 'file') {
     return (
@@ -880,7 +942,7 @@ function TreeNode({
         onClick={() => onFolderToggle(node.id)}
       >
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <FolderIcon size={14} />
+        {isDatabaseRoot ? <FolderStarIcon size={14} /> : <Folder size={14} />}
         <span>{node.name}</span>
       </button>
 
@@ -950,6 +1012,8 @@ function OutlinePanel({
 interface NameDialogProps {
   description: string;
   name: string;
+  placeholder: string;
+  submitLabel: string;
   title: string;
   onCancel: () => void;
   onChange: (name: string) => void;
@@ -959,6 +1023,8 @@ interface NameDialogProps {
 function NameDialog({
   description,
   name,
+  placeholder,
+  submitLabel,
   title,
   onCancel,
   onChange,
@@ -982,7 +1048,7 @@ function NameDialog({
         <input
           autoFocus
           className="name-dialog-input"
-          placeholder="Workspace name"
+          placeholder={placeholder}
           value={name}
           onChange={(event) => onChange(event.target.value)}
         />
@@ -991,7 +1057,7 @@ function NameDialog({
             Cancel
           </button>
           <button className="dialog-primary-action" type="submit" disabled={!name.trim()}>
-            Create
+            {submitLabel}
           </button>
         </div>
       </form>
@@ -1117,6 +1183,29 @@ function ContextMenuItem({ destructive = false, icon, label, onClick }: ContextM
 
 function ContextMenuSeparator(): JSX.Element {
   return <div className="context-menu-separator" />;
+}
+
+interface FolderStarIconProps {
+  size: number;
+}
+
+function FolderStarIcon({ size }: FolderStarIconProps): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M3 6.75A2.75 2.75 0 0 1 5.75 4h4.1c.73 0 1.42.29 1.93.8l1.02 1.02c.3.3.7.47 1.13.47h4.32A2.75 2.75 0 0 1 21 9.04v7.21A2.75 2.75 0 0 1 18.25 19H5.75A2.75 2.75 0 0 1 3 16.25Z" />
+      <path d="m16.2 10.35.48 1.02 1.1.15-.8.78.2 1.1-.98-.52-.98.52.19-1.1-.79-.78 1.1-.15Z" />
+    </svg>
+  );
 }
 
 interface SwitchProps {
@@ -1298,6 +1387,22 @@ function findFileNodeByPath(nodes: WorkspaceTreeNode[], filePath: string): Works
     }
 
     const child = findFileNodeByPath(node.children ?? [], filePath);
+
+    if (child) {
+      return child;
+    }
+  }
+
+  return null;
+}
+
+function findNodeByPath(nodes: WorkspaceTreeNode[], filePath: string): WorkspaceTreeNode | null {
+  for (const node of nodes) {
+    if (node.path === filePath) {
+      return node;
+    }
+
+    const child = findNodeByPath(node.children ?? [], filePath);
 
     if (child) {
       return child;
