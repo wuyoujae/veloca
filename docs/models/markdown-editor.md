@@ -130,6 +130,8 @@ When the app is opened in a normal browser during frontend-only development, the
 - The live editor typography now follows the `propertypes/word.html` specification across headings, links, lists, task lists, quotes, code blocks, tables, media, formulas, horizontal rules, and details blocks so the shipped renderer stays aligned with the approved markdown prototype.
 - List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
 - Typora-style table authoring is supported: typing a single header row such as `| Head 1 | Head 2 |` in a normal paragraph and pressing `Enter` immediately converts it into a rendered table, auto-inserting the standard Markdown separator row and an empty body row.
+- Tables now use a dedicated interaction layer: `Enter` inserts an in-cell line break, `Shift+Enter` inserts a new body row below the current row and keeps the same column focused, and arrowing above or below the table boundary exits into a real paragraph block.
+- In-table line breaks persist as `<br>` inside Markdown table cells so table editing remains stable after save and reload.
 - The editor supports richer Markdown blocks including tables, task lists, code highlighting, inline and block LaTeX formulas, emoji input, images, audio, video, iframe embeds, and safe HTML `details` blocks.
 - Filesystem workspaces save pasted or dropped media beside the current markdown file in a `<document>.assets` directory and keep relative markdown paths.
 - Database-backed workspaces store pasted or dropped media inside SQLite and resolve them through the same asset protocol used by renderer media nodes.

@@ -1,5 +1,12 @@
 import DOMPurify from 'dompurify';
-import { Extension, mergeAttributes, Node, type Editor } from '@tiptap/core';
+import {
+  Extension,
+  mergeAttributes,
+  Node,
+  type Editor,
+  type JSONContent,
+  type MarkdownRendererHelpers
+} from '@tiptap/core';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Emoji from '@tiptap/extension-emoji';
 import FileHandler from '@tiptap/extension-file-handler';
@@ -17,7 +24,9 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
-import { TextSelection } from '@tiptap/pm/state';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { CellSelection, TableMap, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
 import StarterKit from '@tiptap/starter-kit';
 import { common, createLowlight } from 'lowlight';
 
@@ -390,13 +399,49 @@ export const HtmlBlockNode = Node.create({
   }
 });
 
+const VelocaTable = Table.extend({
+  renderMarkdown(node, helpers): string {
+    return renderVelocaTableToMarkdown(node.toJSON() as JSONContent, helpers);
+  }
+});
+
 const TyporaTableInput = Extension.create({
   name: 'typoraTableInput',
 
-  addKeyboardShortcuts() {
-    return {
-      Enter: () => convertMarkdownTableHeaderToTable(this.editor)
-    };
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+
+    return [
+      new Plugin({
+        key: new PluginKey('veloca-table-input'),
+        props: {
+          handleKeyDown(view, event) {
+            if (event.isComposing || view.composing || event.altKey) {
+              return false;
+            }
+
+            if (handleTableKeyboardInteraction(editor, event)) {
+              event.preventDefault();
+              return true;
+            }
+
+            if (
+              event.key === 'Enter' &&
+              !event.shiftKey &&
+              !event.metaKey &&
+              !event.ctrlKey &&
+              !event.altKey &&
+              convertMarkdownTableHeaderToTable(editor)
+            ) {
+              event.preventDefault();
+              return true;
+            }
+
+            return false;
+          }
+        }
+      })
+    ];
   }
 });
 
@@ -432,7 +477,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       nested: true
     }),
     TyporaTableInput,
-    Table.configure({
+    VelocaTable.configure({
       resizable: false
     }),
     TableRow,
@@ -744,6 +789,197 @@ function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
   return true;
 }
 
+function handleTableKeyboardInteraction(editor: Editor, event: KeyboardEvent): boolean {
+  const context = getActiveTableContext(editor);
+
+  if (!context) {
+    return false;
+  }
+
+  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
+    if (event.shiftKey) {
+      return insertBodyRowBelowSelection(editor, context);
+    }
+
+    return insertTableHardBreak(editor, context);
+  }
+
+  if (event.key === 'ArrowDown' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+    return maybeExitTable(editor, context, 'down');
+  }
+
+  if (event.key === 'ArrowUp' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+    return maybeExitTable(editor, context, 'up');
+  }
+
+  return false;
+}
+
+function getActiveTableContext(editor: Editor): TableSelectionContext | null {
+  const { selection } = editor.state;
+
+  if (!selection.empty || selection instanceof CellSelection) {
+    return null;
+  }
+
+  const { $from } = selection;
+  const $cell = cellAround($from);
+  const table = findTable($from);
+
+  if (!$cell || !table) {
+    return null;
+  }
+
+  const rect = selectedRect(editor.state);
+  const cellNode = $cell.nodeAfter;
+
+  if (!cellNode || !isTextCursorInsideTableCell(selection)) {
+    return null;
+  }
+
+  return {
+    cellNode,
+    rect,
+    table,
+    tableMap: TableMap.get(table.node)
+  };
+}
+
+function insertTableHardBreak(editor: Editor, context: TableSelectionContext): boolean {
+  const { selection, schema } = editor.state;
+
+  if (!isTextCursorInsideTableCell(selection)) {
+    return false;
+  }
+
+  const hardBreak = schema.nodes.hardBreak;
+
+  if (!hardBreak) {
+    return false;
+  }
+
+  const transaction = editor.state.tr.replaceSelectionWith(hardBreak.create()).scrollIntoView();
+  editor.view.dispatch(transaction);
+
+  return true;
+}
+
+function insertBodyRowBelowSelection(editor: Editor, context: TableSelectionContext): boolean {
+  if (context.cellNode.attrs.colspan > 1 || context.cellNode.attrs.rowspan > 1) {
+    return false;
+  }
+
+  const insertRowIndex = context.rect.bottom;
+  const targetColumn = context.rect.left;
+  const transaction = editor.state.tr;
+  const inserted = insertPlainTableRow(transaction, context.table, context.tableMap, insertRowIndex);
+
+  if (!inserted) {
+    return false;
+  }
+
+  const nextTable = transaction.doc.nodeAt(context.table.pos);
+
+  if (!nextTable) {
+    return false;
+  }
+
+  const nextTableMap = TableMap.get(nextTable);
+  const cellOffset = nextTableMap.positionAt(insertRowIndex, targetColumn, nextTable);
+  const selectionPos = context.table.start + cellOffset + 2;
+
+  transaction.setSelection(TextSelection.near(transaction.doc.resolve(selectionPos)));
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+
+  return true;
+}
+
+function insertPlainTableRow(
+  transaction: Editor['state']['tr'],
+  table: TableSelectionContext['table'],
+  tableMap: TableSelectionContext['tableMap'],
+  rowIndex: number
+): boolean {
+  if (rowIndex < 0 || rowIndex > tableMap.height) {
+    return false;
+  }
+
+  let rowPos = table.start;
+
+  for (let index = 0; index < rowIndex; index += 1) {
+    rowPos += table.node.child(index).nodeSize;
+  }
+
+  const cellType = table.node.type.schema.nodes.tableCell;
+  const rowType = table.node.type.schema.nodes.tableRow;
+
+  if (!cellType || !rowType) {
+    return false;
+  }
+
+  const cells = Array.from({ length: tableMap.width }, () => cellType.createAndFill()).filter(
+    (cell): cell is ProseMirrorNode => Boolean(cell)
+  );
+
+  if (cells.length !== tableMap.width) {
+    return false;
+  }
+
+  transaction.insert(rowPos, rowType.create(null, cells));
+
+  return true;
+}
+
+function maybeExitTable(editor: Editor, context: TableSelectionContext, direction: 'up' | 'down'): boolean {
+  const { selection } = editor.state;
+  const isBoundaryRow = direction === 'down' ? context.rect.bottom === context.tableMap.height : context.rect.top === 0;
+  const isBoundaryOffset =
+    direction === 'down'
+      ? selection.$from.parentOffset === selection.$from.parent.content.size
+      : selection.$from.parentOffset === 0;
+
+  if (!isBoundaryRow || !isBoundaryOffset) {
+    return false;
+  }
+
+  return exitTableToParagraph(editor, context.table, direction);
+}
+
+function exitTableToParagraph(editor: Editor, table: TableSelectionContext['table'], direction: 'up' | 'down'): boolean {
+  const transaction = editor.state.tr;
+
+  if (direction === 'down') {
+    const afterPos = table.pos + table.node.nodeSize;
+    const $after = transaction.doc.resolve(afterPos);
+
+    if ($after.nodeAfter?.type.name === 'paragraph') {
+      transaction.setSelection(TextSelection.near(transaction.doc.resolve(afterPos + 1), 1));
+    } else {
+      transaction.insert(afterPos, editor.state.schema.nodes.paragraph.create());
+      transaction.setSelection(TextSelection.near(transaction.doc.resolve(afterPos + 1), 1));
+    }
+
+    transaction.scrollIntoView();
+    editor.view.dispatch(transaction);
+    return true;
+  }
+
+  const beforePos = table.pos;
+  const $before = transaction.doc.resolve(beforePos);
+
+  if ($before.nodeBefore?.type.name === 'paragraph') {
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(Math.max(1, beforePos - 1)), -1));
+  } else {
+    transaction.insert(beforePos, editor.state.schema.nodes.paragraph.create());
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(beforePos + 1), -1));
+  }
+
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+  return true;
+}
+
 function isRootParagraphContext($from: Editor['state']['selection']['$from']): boolean {
   for (let depth = $from.depth - 1; depth >= 0; depth -= 1) {
     const ancestorName = $from.node(depth).type.name;
@@ -846,6 +1082,166 @@ function getFirstTableBodyCellSelection(tableStart: number, tableNode: ReturnTyp
 
   return tableStart + headerRow.nodeSize + 4;
 }
+
+function renderVelocaTableToMarkdown(node: JSONContent, helpers: MarkdownRendererHelpers): string {
+  if (!node.content?.length) {
+    return '';
+  }
+
+  const rows = node.content.map((rowNode) =>
+    (rowNode.content ?? []).map((cellNode) => ({
+      align: normalizeTableCellAlignment(cellNode.attrs),
+      isHeader: cellNode.type === 'tableHeader',
+      text: renderTableCellMarkdown(cellNode, helpers)
+    }))
+  );
+
+  const columnCount = rows.reduce((count, row) => Math.max(count, row.length), 0);
+
+  if (!columnCount) {
+    return '';
+  }
+
+  const hasHeader = rows[0]?.some((cell) => cell.isHeader) ?? false;
+  const columnWidths = new Array<number>(columnCount).fill(3);
+  const alignments = new Array<string | null>(columnCount).fill(null);
+
+  rows.forEach((row) => {
+    for (let column = 0; column < columnCount; column += 1) {
+      const cell = row[column];
+
+      if (!cell) {
+        continue;
+      }
+
+      columnWidths[column] = Math.max(columnWidths[column], cell.text.length || 3);
+
+      if (!alignments[column] && cell.align) {
+        alignments[column] = cell.align;
+      }
+    }
+  });
+
+  const headerTexts = new Array(columnCount)
+    .fill('')
+    .map((_, index) => (hasHeader ? rows[0]?.[index]?.text ?? '' : ''));
+  const bodyRows = hasHeader ? rows.slice(1) : rows;
+  const lines = [''];
+
+  lines.push(`| ${headerTexts.map((cell, index) => padTableCell(cell, columnWidths[index])).join(' | ')} |`);
+  lines.push(`| ${alignments.map((alignment, index) => buildMarkdownDivider(columnWidths[index], alignment)).join(' | ')} |`);
+
+  bodyRows.forEach((row) => {
+    lines.push(
+      `| ${new Array(columnCount)
+        .fill('')
+        .map((_, index) => padTableCell(row[index]?.text ?? '', columnWidths[index]))
+        .join(' | ')} |`
+    );
+  });
+
+  return `${lines.join('\n')}\n`;
+}
+
+function renderTableCellMarkdown(
+  cellNode: JSONContent,
+  helpers: MarkdownRendererHelpers
+): string {
+  const blocks = (cellNode.content ?? []).map((childNode) => renderTableCellBlock(childNode, helpers));
+
+  return blocks
+    .filter(Boolean)
+    .map((block) => normalizeTableCellWhitespace(block))
+    .join('<br>');
+}
+
+function renderTableCellBlock(
+  node: JSONContent,
+  helpers: MarkdownRendererHelpers
+): string {
+  if (node.type === 'paragraph') {
+    return renderTableCellInline(node.content ?? [], helpers);
+  }
+
+  if (node.type === 'hardBreak') {
+    return '<br>';
+  }
+
+  if (node.content?.length) {
+    return renderTableCellInline(node.content, helpers);
+  }
+
+  return helpers.renderChildren([node]);
+}
+
+function renderTableCellInline(
+  nodes: JSONContent[],
+  helpers: MarkdownRendererHelpers
+): string {
+  return nodes
+    .map((node) => {
+      if (node.type === 'hardBreak') {
+        return '<br>';
+      }
+
+      if (node.content?.length) {
+        return helpers.renderChildren([node]);
+      }
+
+      return helpers.renderChildren([node]);
+    })
+    .join('');
+}
+
+function normalizeTableCellWhitespace(value: string): string {
+  return value
+    .split('<br>')
+    .map((segment) => segment.replace(/\s+/g, ' ').trim())
+    .join('<br>');
+}
+
+function normalizeTableCellAlignment(attrs?: Record<string, unknown>): string | null {
+  if (attrs?.align === 'left' || attrs?.align === 'center' || attrs?.align === 'right') {
+    return attrs.align;
+  }
+
+  return null;
+}
+
+function padTableCell(value: string, width: number): string {
+  return value + ' '.repeat(Math.max(0, width - value.length));
+}
+
+function buildMarkdownDivider(width: number, alignment: string | null): string {
+  const dashCount = Math.max(3, width);
+
+  if (alignment === 'left') {
+    return `:${'-'.repeat(dashCount)}`;
+  }
+
+  if (alignment === 'right') {
+    return `${'-'.repeat(dashCount)}:`;
+  }
+
+  if (alignment === 'center') {
+    return `:${'-'.repeat(dashCount)}:`;
+  }
+
+  return '-'.repeat(dashCount);
+}
+
+function isTextCursorInsideTableCell(selection: Editor['state']['selection']): boolean {
+  const parentType = selection.$from.parent.type.name;
+
+  return selection.empty && (parentType === 'paragraph' || parentType === 'text');
+}
+
+type TableSelectionContext = {
+  cellNode: ProseMirrorNode;
+  rect: ReturnType<typeof selectedRect>;
+  table: NonNullable<ReturnType<typeof findTable>>;
+  tableMap: TableMap;
+};
 
 function sanitizeUrl(value: string | null): string | null {
   if (!value) {
