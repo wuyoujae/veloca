@@ -53,10 +53,13 @@ When the app is opened in a normal browser during frontend-only development, the
 - The custom title bar no longer renders the prototype logo text or fake status dots, allowing native Electron window controls to stay unobstructed.
 - The sidebar switches between `Files` and `Outline`.
 - The file tree supports folder expand/collapse and real markdown file switching.
-- The `Directory` toolbar exposes an add-folder action.
+- The `Workspace` toolbar exposes an add-folder action.
 - Added folders are persisted in SQLite and reloaded on next launch.
 - Workspace scanning recursively loads `.md` files only. Common generated folders such as `node_modules`, `.git`, `dist`, `out`, and `release` are skipped.
-- The outline panel reflects the active document headings and marks the selected heading.
+- The file tree supports a custom context menu for creating files/folders, opening in Finder, copying paths, deleting, renaming, duplicating, copying, cutting, and pasting.
+- Root workspace folders can be removed from the workspace through the context menu.
+- Delete operations move files or folders to the system Trash instead of permanently deleting them.
+- The outline panel reflects the active document headings using a Typora-style indented list without connector lines.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.
 - The Theme segmented control switches between dark and light modes.

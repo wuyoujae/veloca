@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, extname, join, relative, sep } from 'node:path';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  statSync,
+  writeFileSync
+} from 'node:fs';
+import { basename, dirname, extname, join, relative, sep } from 'node:path';
 import { getDatabase } from '../database/connection';
 
 export interface WorkspaceFolder {
@@ -32,6 +42,11 @@ export interface MarkdownFileContent {
   content: string;
   relativePath: string;
   workspaceFolderId: string;
+}
+
+export interface FileOperationResult {
+  snapshot: WorkspaceSnapshot;
+  path?: string;
 }
 
 interface WorkspaceFolderRow {
@@ -77,6 +92,20 @@ export function addWorkspaceFolders(folderPaths: string[]): WorkspaceSnapshot {
   return getWorkspaceSnapshot();
 }
 
+export function removeWorkspaceFolder(workspaceFolderId: string): WorkspaceSnapshot {
+  getDatabase()
+    .prepare(
+      `
+      UPDATE workspace_folders
+      SET status = 1, updated_at = ?
+      WHERE id = ?
+      `
+    )
+    .run(Date.now(), workspaceFolderId);
+
+  return getWorkspaceSnapshot();
+}
+
 export function getWorkspaceSnapshot(): WorkspaceSnapshot {
   const folders = getWorkspaceFolders();
   const tree: WorkspaceTreeNode[] = [];
@@ -118,6 +147,100 @@ export function readMarkdownFile(filePath: string): MarkdownFileContent {
     relativePath: relative(folder.path, resolvedPath),
     workspaceFolderId: folder.id
   };
+}
+
+export function createWorkspaceEntry(
+  parentPath: string,
+  entryType: 'file' | 'folder',
+  name: string
+): FileOperationResult {
+  const parentDirectory = resolveExistingWorkspaceDirectory(parentPath);
+  const safeName = normalizeEntryName(name, entryType);
+  const targetPath = getAvailablePath(join(parentDirectory, safeName));
+
+  if (entryType === 'folder') {
+    mkdirSync(targetPath, { recursive: false });
+  } else {
+    writeFileSync(targetPath, '', { flag: 'wx' });
+  }
+
+  return {
+    snapshot: getWorkspaceSnapshot(),
+    path: targetPath
+  };
+}
+
+export function renameWorkspaceEntry(filePath: string, name: string): FileOperationResult {
+  const sourcePath = resolveExistingWorkspacePath(filePath);
+  const stats = statSync(sourcePath);
+  const safeName = normalizeEntryName(name, stats.isDirectory() ? 'folder' : 'file');
+  const targetPath = join(dirname(sourcePath), safeName);
+
+  if (sourcePath === targetPath) {
+    return {
+      snapshot: getWorkspaceSnapshot(),
+      path: sourcePath
+    };
+  }
+
+  if (existsSync(targetPath)) {
+    throw new Error('A file or folder with that name already exists.');
+  }
+
+  renameSync(sourcePath, targetPath);
+
+  return {
+    snapshot: getWorkspaceSnapshot(),
+    path: targetPath
+  };
+}
+
+export function duplicateWorkspaceEntry(filePath: string): FileOperationResult {
+  const sourcePath = resolveExistingWorkspacePath(filePath);
+  const targetPath = getCopyPath(sourcePath, dirname(sourcePath));
+
+  cpSync(sourcePath, targetPath, {
+    recursive: true,
+    errorOnExist: true
+  });
+
+  return {
+    snapshot: getWorkspaceSnapshot(),
+    path: targetPath
+  };
+}
+
+export function pasteWorkspaceEntry(
+  sourcePath: string,
+  targetFolderPath: string,
+  mode: 'copy' | 'cut'
+): FileOperationResult {
+  const resolvedSourcePath = resolveExistingWorkspacePath(sourcePath);
+  const targetDirectory = resolveExistingWorkspaceDirectory(targetFolderPath);
+  const stats = statSync(resolvedSourcePath);
+  const targetPath = getAvailablePath(join(targetDirectory, basename(resolvedSourcePath)));
+
+  if (stats.isDirectory() && isSameOrChildPath(resolvedSourcePath, targetDirectory)) {
+    throw new Error('A folder cannot be pasted into itself.');
+  }
+
+  if (mode === 'cut') {
+    renameSync(resolvedSourcePath, targetPath);
+  } else {
+    cpSync(resolvedSourcePath, targetPath, {
+      recursive: true,
+      errorOnExist: true
+    });
+  }
+
+  return {
+    snapshot: getWorkspaceSnapshot(),
+    path: targetPath
+  };
+}
+
+export function validateWorkspacePath(filePath: string): string {
+  return resolveExistingWorkspacePath(filePath);
 }
 
 function getWorkspaceFolders(): WorkspaceFolder[] {
@@ -185,17 +308,15 @@ function scanDirectory(
 
       const children = safeScanDirectory(entryPath, rootPath, workspaceFolderId);
 
-      if (children.length > 0) {
-        nodes.push({
-          id: `folder:${entryPath}`,
-          name: entry.name,
-          type: 'folder',
-          path: entryPath,
-          relativePath: relative(rootPath, entryPath),
-          workspaceFolderId,
-          children
-        });
-      }
+      nodes.push({
+        id: `folder:${entryPath}`,
+        name: entry.name,
+        type: 'folder',
+        path: entryPath,
+        relativePath: relative(rootPath, entryPath),
+        workspaceFolderId,
+        children
+      });
 
       continue;
     }
@@ -251,4 +372,71 @@ function findWorkspaceFolderForPath(filePath: string): WorkspaceFolder | undefin
     const relativePath = relative(folder.path, filePath);
     return relativePath === '' || (!relativePath.startsWith('..') && !relativePath.startsWith(sep));
   });
+}
+
+function resolveExistingWorkspacePath(filePath: string): string {
+  const resolvedPath = realpathSync(filePath);
+
+  if (!isInsideWorkspace(resolvedPath)) {
+    throw new Error('Path is outside the current workspace.');
+  }
+
+  return resolvedPath;
+}
+
+function resolveExistingWorkspaceDirectory(filePath: string): string {
+  const resolvedPath = resolveExistingWorkspacePath(filePath);
+  const stats = statSync(resolvedPath);
+
+  if (!stats.isDirectory()) {
+    throw new Error('Target path is not a directory.');
+  }
+
+  return resolvedPath;
+}
+
+function normalizeEntryName(name: string, entryType: 'file' | 'folder'): string {
+  const trimmedName = name.trim();
+
+  if (!trimmedName || trimmedName.includes('/') || trimmedName.includes('\\')) {
+    throw new Error('Invalid file or folder name.');
+  }
+
+  if (entryType === 'file' && extname(trimmedName) === '') {
+    return `${trimmedName}.md`;
+  }
+
+  return trimmedName;
+}
+
+function getAvailablePath(targetPath: string): string {
+  if (!existsSync(targetPath)) {
+    return targetPath;
+  }
+
+  const extension = extname(targetPath);
+  const nameWithoutExtension = extension ? basename(targetPath, extension) : basename(targetPath);
+  const parentPath = dirname(targetPath);
+
+  for (let index = 1; index < 1000; index += 1) {
+    const candidatePath = join(parentPath, `${nameWithoutExtension} ${index}${extension}`);
+
+    if (!existsSync(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
+  throw new Error('Unable to create a unique file path.');
+}
+
+function getCopyPath(sourcePath: string, targetDirectory: string): string {
+  const extension = extname(sourcePath);
+  const nameWithoutExtension = extension ? basename(sourcePath, extension) : basename(sourcePath);
+
+  return getAvailablePath(join(targetDirectory, `${nameWithoutExtension} copy${extension}`));
+}
+
+function isSameOrChildPath(parentPath: string, childPath: string): boolean {
+  const relativePath = relative(parentPath, childPath);
+  return relativePath === '' || (!relativePath.startsWith('..') && !relativePath.startsWith(sep));
 }

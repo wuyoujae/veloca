@@ -1,15 +1,22 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Clipboard,
+  Copy,
+  ExternalLink,
   FileText,
+  FilePlus,
   Folder,
   FolderPlus,
   Info,
   Moon,
+  Pencil,
   Settings,
+  Scissors,
   Sun,
+  Trash2,
   X
 } from 'lucide-react';
 
@@ -60,6 +67,18 @@ interface MarkdownSection {
   lines: string[];
 }
 
+interface FileClipboard {
+  mode: 'copy' | 'cut';
+  path: string;
+  name: string;
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  node: WorkspaceTreeNode;
+}
+
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
   tree: [],
@@ -78,6 +97,8 @@ export function App(): JSX.Element {
   const [focusMode, setFocusMode] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const sections = useMemo(() => {
@@ -114,6 +135,17 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     loadWorkspace();
+  }, []);
+
+  useEffect(() => {
+    const closeContextMenu = () => setContextMenu(null);
+    window.addEventListener('click', closeContextMenu);
+    window.addEventListener('resize', closeContextMenu);
+
+    return () => {
+      window.removeEventListener('click', closeContextMenu);
+      window.removeEventListener('resize', closeContextMenu);
+    };
   }, []);
 
   useEffect(() => {
@@ -207,6 +239,29 @@ export function App(): JSX.Element {
     }
   };
 
+  const refreshWorkspaceAfterOperation = async (snapshot: WorkspaceSnapshot, selectedPath?: string) => {
+    setWorkspace(snapshot);
+    openWorkspaceRoots(snapshot.tree);
+
+    if (selectedPath && selectedPath.endsWith('.md')) {
+      await readMarkdownFile(selectedPath);
+      return;
+    }
+
+    if (activeFile && findFileNodeByPath(snapshot.tree, activeFile.path)) {
+      await readMarkdownFile(activeFile.path);
+      return;
+    }
+
+    const nextFile = findFirstFile(snapshot.tree);
+
+    if (nextFile) {
+      await readMarkdownFile(nextFile.path);
+    } else {
+      setActiveFile(null);
+    }
+  };
+
   const readMarkdownFile = async (filePath: string) => {
     if (!window.veloca) {
       return;
@@ -258,6 +313,148 @@ export function App(): JSX.Element {
     });
   };
 
+  const openContextMenu = (event: MouseEvent, node: WorkspaceTreeNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      node
+    });
+  };
+
+  const createEntry = async (node: WorkspaceTreeNode, entryType: 'file' | 'folder') => {
+    const label = entryType === 'file' ? 'file' : 'folder';
+    const name = window.prompt(`New ${label} name`);
+
+    if (!name || !window.veloca) {
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.createEntry(node.path, entryType, name);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Create Failed',
+        description: `Unable to create that ${label}.`
+      });
+    }
+  };
+
+  const renameEntry = async (node: WorkspaceTreeNode) => {
+    const name = window.prompt('Rename', node.name);
+
+    if (!name || !window.veloca) {
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.renameEntry(node.path, name);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Rename Failed',
+        description: 'A file or folder with that name may already exist.'
+      });
+    }
+  };
+
+  const duplicateEntry = async (node: WorkspaceTreeNode) => {
+    if (!window.veloca) {
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.duplicateEntry(node.path);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Duplicate Failed',
+        description: 'Unable to duplicate that item.'
+      });
+    }
+  };
+
+  const pasteEntry = async (targetFolder: WorkspaceTreeNode) => {
+    if (!window.veloca || !fileClipboard || targetFolder.type !== 'folder') {
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.pasteEntry(
+        fileClipboard.path,
+        targetFolder.path,
+        fileClipboard.mode
+      );
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+
+      if (fileClipboard.mode === 'cut') {
+        setFileClipboard(null);
+      }
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Paste Failed',
+        description: 'Unable to paste the selected item here.'
+      });
+    }
+  };
+
+  const deleteEntry = async (node: WorkspaceTreeNode) => {
+    if (!window.veloca || !window.confirm(`Move "${node.name}" to Trash?`)) {
+      return;
+    }
+
+    try {
+      const snapshot = await window.veloca.workspace.deleteEntry(node.path);
+      await refreshWorkspaceAfterOperation(snapshot);
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Delete Failed',
+        description: 'Unable to move that item to Trash.'
+      });
+    }
+  };
+
+  const removeWorkspaceFolder = async (node: WorkspaceTreeNode) => {
+    if (!window.veloca) {
+      return;
+    }
+
+    try {
+      const snapshot = await window.veloca.workspace.removeFolder(node.workspaceFolderId);
+      await refreshWorkspaceAfterOperation(snapshot);
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Workspace Not Removed',
+        description: 'Unable to remove that folder from the workspace.'
+      });
+    }
+  };
+
+  const revealEntry = async (node: WorkspaceTreeNode) => {
+    await window.veloca?.workspace.reveal(node.path);
+  };
+
+  const openEntry = async (node: WorkspaceTreeNode) => {
+    await window.veloca?.workspace.openPath(node.path);
+  };
+
+  const copyEntryPath = async (node: WorkspaceTreeNode) => {
+    await window.veloca?.workspace.copyPath(node.path);
+    showToast({
+      type: 'success',
+      title: 'Path Copied',
+      description: node.path
+    });
+  };
+
   const showToast = (message: Omit<ToastMessage, 'id'>) => {
     const id = Date.now();
     setToasts((current) => [...current, { ...message, id }]);
@@ -300,8 +497,8 @@ export function App(): JSX.Element {
                 loading={loadingWorkspace}
                 openFolders={openFolders}
                 tree={workspace.tree}
-                totalMarkdownFiles={workspace.totalMarkdownFiles}
                 onAddFolder={addWorkspaceFolder}
+                onContextMenu={openContextMenu}
                 onFileSelect={readMarkdownFile}
                 onFolderToggle={toggleFolder}
               />
@@ -492,6 +689,25 @@ export function App(): JSX.Element {
           </div>
         ))}
       </div>
+
+      {contextMenu && (
+        <WorkspaceContextMenu
+          clipboard={fileClipboard}
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onCopy={(node) => setFileClipboard({ mode: 'copy', path: node.path, name: node.name })}
+          onCopyPath={copyEntryPath}
+          onCreate={createEntry}
+          onCut={(node) => setFileClipboard({ mode: 'cut', path: node.path, name: node.name })}
+          onDelete={deleteEntry}
+          onDuplicate={duplicateEntry}
+          onOpen={openEntry}
+          onPaste={pasteEntry}
+          onRemoveWorkspace={removeWorkspaceFolder}
+          onRename={renameEntry}
+          onReveal={revealEntry}
+        />
+      )}
     </div>
   );
 }
@@ -501,8 +717,8 @@ interface FileTreeProps {
   loading: boolean;
   openFolders: Record<string, boolean>;
   tree: WorkspaceTreeNode[];
-  totalMarkdownFiles: number;
   onAddFolder: () => void;
+  onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
   onFileSelect: (filePath: string) => void;
   onFolderToggle: (folderId: string) => void;
 }
@@ -512,15 +728,15 @@ function FileTree({
   loading,
   openFolders,
   tree,
-  totalMarkdownFiles,
   onAddFolder,
+  onContextMenu,
   onFileSelect,
   onFolderToggle
 }: FileTreeProps): JSX.Element {
   return (
     <nav aria-label="Workspace files">
       <div className="directory-toolbar">
-        <span>Directory</span>
+        <span>Workspace</span>
         <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
           <FolderPlus size={16} />
         </button>
@@ -543,14 +759,11 @@ function FileTree({
             key={node.id}
             node={node}
             openFolders={openFolders}
+            onContextMenu={onContextMenu}
             onFileSelect={onFileSelect}
             onFolderToggle={onFolderToggle}
           />
         ))}
-
-      {!loading && tree.length > 0 && (
-        <div className="directory-count">{totalMarkdownFiles} markdown file{totalMarkdownFiles === 1 ? '' : 's'}</div>
-      )}
     </nav>
   );
 }
@@ -560,6 +773,7 @@ interface TreeNodeProps {
   depth: number;
   node: WorkspaceTreeNode;
   openFolders: Record<string, boolean>;
+  onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
   onFileSelect: (filePath: string) => void;
   onFolderToggle: (folderId: string) => void;
 }
@@ -569,6 +783,7 @@ function TreeNode({
   depth,
   node,
   openFolders,
+  onContextMenu,
   onFileSelect,
   onFolderToggle
 }: TreeNodeProps): JSX.Element {
@@ -581,6 +796,7 @@ function TreeNode({
         className={activeFilePath === node.path ? 'tree-item active' : 'tree-item'}
         type="button"
         style={{ paddingLeft }}
+        onContextMenu={(event) => onContextMenu(event, node)}
         onClick={() => onFileSelect(node.path)}
       >
         <FileText size={14} />
@@ -595,6 +811,7 @@ function TreeNode({
         className="tree-item"
         type="button"
         style={{ paddingLeft }}
+        onContextMenu={(event) => onContextMenu(event, node)}
         onClick={() => onFolderToggle(node.id)}
       >
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -611,6 +828,7 @@ function TreeNode({
               key={child.id}
               node={child}
               openFolders={openFolders}
+              onContextMenu={onContextMenu}
               onFileSelect={onFileSelect}
               onFolderToggle={onFolderToggle}
             />
@@ -645,10 +863,6 @@ function OutlinePanel({
 
   return (
     <nav className="outline-panel" aria-label="Document outline">
-      <div className="outline-heading">
-        <FileText size={14} />
-        <span>{activeFile.name}</span>
-      </div>
       <div className="outline-list">
         {sections.map((section) => (
           <button
@@ -666,6 +880,123 @@ function OutlinePanel({
       </div>
     </nav>
   );
+}
+
+interface WorkspaceContextMenuProps {
+  clipboard: FileClipboard | null;
+  menu: ContextMenuState;
+  onClose: () => void;
+  onCopy: (node: WorkspaceTreeNode) => void;
+  onCopyPath: (node: WorkspaceTreeNode) => void;
+  onCreate: (node: WorkspaceTreeNode, entryType: 'file' | 'folder') => void;
+  onCut: (node: WorkspaceTreeNode) => void;
+  onDelete: (node: WorkspaceTreeNode) => void;
+  onDuplicate: (node: WorkspaceTreeNode) => void;
+  onOpen: (node: WorkspaceTreeNode) => void;
+  onPaste: (node: WorkspaceTreeNode) => void;
+  onRemoveWorkspace: (node: WorkspaceTreeNode) => void;
+  onRename: (node: WorkspaceTreeNode) => void;
+  onReveal: (node: WorkspaceTreeNode) => void;
+}
+
+function WorkspaceContextMenu({
+  clipboard,
+  menu,
+  onClose,
+  onCopy,
+  onCopyPath,
+  onCreate,
+  onCut,
+  onDelete,
+  onDuplicate,
+  onOpen,
+  onPaste,
+  onRemoveWorkspace,
+  onRename,
+  onReveal
+}: WorkspaceContextMenuProps): JSX.Element {
+  const node = menu.node;
+  const isFolder = node.type === 'folder';
+  const isWorkspaceRoot = isFolder && node.relativePath === '';
+
+  const runAction = (action: () => void) => {
+    action();
+    onClose();
+  };
+
+  return (
+    <div
+      className="context-menu"
+      style={{ left: menu.x, top: menu.y }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {isFolder && (
+        <>
+          <ContextMenuItem icon={<FilePlus size={14} />} label="New File" onClick={() => runAction(() => onCreate(node, 'file'))} />
+          <ContextMenuItem icon={<FolderPlus size={14} />} label="New Folder" onClick={() => runAction(() => onCreate(node, 'folder'))} />
+          {clipboard && (
+            <ContextMenuItem
+              icon={<Clipboard size={14} />}
+              label={`Paste ${clipboard.name}`}
+              onClick={() => runAction(() => onPaste(node))}
+            />
+          )}
+          <ContextMenuSeparator />
+        </>
+      )}
+
+      {isFolder && (
+        <ContextMenuItem icon={<ExternalLink size={14} />} label="Open in Finder" onClick={() => runAction(() => onOpen(node))} />
+      )}
+      <ContextMenuItem icon={<Folder size={14} />} label="Reveal in Finder" onClick={() => runAction(() => onReveal(node))} />
+      <ContextMenuItem icon={<Copy size={14} />} label="Copy Path" onClick={() => runAction(() => onCopyPath(node))} />
+
+      {!isWorkspaceRoot && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem icon={<Copy size={14} />} label="Copy" onClick={() => runAction(() => onCopy(node))} />
+          <ContextMenuItem icon={<Scissors size={14} />} label="Cut" onClick={() => runAction(() => onCut(node))} />
+          <ContextMenuItem icon={<Copy size={14} />} label="Duplicate" onClick={() => runAction(() => onDuplicate(node))} />
+          <ContextMenuItem icon={<Pencil size={14} />} label="Rename" onClick={() => runAction(() => onRename(node))} />
+          <ContextMenuSeparator />
+          <ContextMenuItem destructive icon={<Trash2 size={14} />} label="Delete" onClick={() => runAction(() => onDelete(node))} />
+        </>
+      )}
+
+      {isWorkspaceRoot && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            destructive
+            icon={<X size={14} />}
+            label="Remove from Workspace"
+            onClick={() => runAction(() => onRemoveWorkspace(node))}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+interface ContextMenuItemProps {
+  destructive?: boolean;
+  icon: JSX.Element;
+  label: string;
+  onClick: () => void;
+}
+
+function ContextMenuItem({ destructive = false, icon, label, onClick }: ContextMenuItemProps): JSX.Element {
+  return (
+    <button className={destructive ? 'context-menu-item destructive' : 'context-menu-item'} type="button" onClick={onClick}>
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function ContextMenuSeparator(): JSX.Element {
+  return <div className="context-menu-separator" />;
 }
 
 interface SwitchProps {

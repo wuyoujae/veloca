@@ -186,7 +186,6 @@ button {
   color: var(--foreground);
   font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
 }
 
 .toolbar-icon-btn,
@@ -260,7 +259,6 @@ button {
   animation: treeBranchEnter 0.2s ease;
 }
 
-.directory-count,
 .loading-state {
   padding: 10px;
   color: var(--muted-foreground);
@@ -490,44 +488,21 @@ button {
 .outline-panel {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-.outline-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  color: var(--foreground);
-  font-size: 13px;
-  font-weight: 600;
+  gap: 6px;
 }
 
 .outline-list {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding-left: 6px;
-}
-
-.outline-list::before {
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 13px;
-  width: 1px;
-  background: var(--border);
-  content: '';
+  padding: 4px 0;
 }
 
 .outline-item {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
   width: 100%;
-  padding: 7px 10px 7px 0;
+  padding: 7px 10px;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
@@ -544,34 +519,69 @@ button {
 }
 
 .outline-item.active {
+  background: var(--accent);
   color: var(--foreground);
   font-weight: 500;
 }
 
+.outline-item.level-1 {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
 .outline-item.level-2 {
-  padding-left: 16px;
+  padding-left: 20px;
 }
 
 .outline-item.level-3 {
-  padding-left: 32px;
+  padding-left: 36px;
 }
 
 .outline-marker {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--background);
-  transition: border-color 0.18s ease, background-color 0.18s ease;
+  display: none;
 }
 
-.outline-item.active .outline-marker {
-  border-color: var(--foreground);
-  background: var(--foreground);
+.context-menu {
+  position: fixed;
+  z-index: 1100;
+  width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--toast-background);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  animation: contextMenuEnter 0.14s ease;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.context-menu-item:hover {
+  background: var(--accent);
+}
+
+.context-menu-item.destructive {
+  color: #ef4444;
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border);
 }
 
 .settings-overlay {
@@ -881,6 +891,17 @@ button {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes contextMenuEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 

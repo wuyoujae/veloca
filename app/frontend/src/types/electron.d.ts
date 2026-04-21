@@ -31,6 +31,11 @@ interface MarkdownFileContent {
   workspaceFolderId: string;
 }
 
+interface FileOperationResult {
+  snapshot: WorkspaceSnapshot;
+  path?: string;
+}
+
 declare global {
   interface Window {
     veloca?: {
@@ -42,6 +47,23 @@ declare global {
         get: () => Promise<WorkspaceSnapshot>;
         addFolder: () => Promise<WorkspaceSnapshot>;
         readMarkdown: (filePath: string) => Promise<MarkdownFileContent>;
+        createEntry: (
+          parentPath: string,
+          entryType: 'file' | 'folder',
+          name: string
+        ) => Promise<FileOperationResult>;
+        renameEntry: (filePath: string, name: string) => Promise<FileOperationResult>;
+        duplicateEntry: (filePath: string) => Promise<FileOperationResult>;
+        pasteEntry: (
+          sourcePath: string,
+          targetFolderPath: string,
+          mode: 'copy' | 'cut'
+        ) => Promise<FileOperationResult>;
+        deleteEntry: (filePath: string) => Promise<WorkspaceSnapshot>;
+        removeFolder: (workspaceFolderId: string) => Promise<WorkspaceSnapshot>;
+        reveal: (filePath: string) => Promise<void>;
+        openPath: (filePath: string) => Promise<string>;
+        copyPath: (filePath: string) => Promise<void>;
       };
       app: {
         platform: NodeJS.Platform;

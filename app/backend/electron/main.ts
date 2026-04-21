@@ -1,11 +1,25 @@
-import { app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell,
+  type OpenDialogOptions
+} from 'electron';
 import { join } from 'node:path';
 import { closeDatabase, getDatabase } from '../database/connection';
 import { getTheme, setTheme, type ThemeMode } from '../services/settings-store';
 import {
   addWorkspaceFolders,
+  createWorkspaceEntry,
+  duplicateWorkspaceEntry,
   getWorkspaceSnapshot,
-  readMarkdownFile
+  pasteWorkspaceEntry,
+  readMarkdownFile,
+  removeWorkspaceFolder,
+  renameWorkspaceEntry,
+  validateWorkspacePath
 } from '../services/workspace-service';
 
 function createMainWindow(): void {
@@ -62,6 +76,44 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
     return readMarkdownFile(filePath);
+  });
+  ipcMain.handle(
+    'workspace:create-entry',
+    (_event, parentPath: string, entryType: 'file' | 'folder', name: string) => {
+      return createWorkspaceEntry(parentPath, entryType, name);
+    }
+  );
+  ipcMain.handle('workspace:rename-entry', (_event, filePath: string, name: string) => {
+    return renameWorkspaceEntry(filePath, name);
+  });
+  ipcMain.handle('workspace:duplicate-entry', (_event, filePath: string) => {
+    return duplicateWorkspaceEntry(filePath);
+  });
+  ipcMain.handle(
+    'workspace:paste-entry',
+    (_event, sourcePath: string, targetFolderPath: string, mode: 'copy' | 'cut') => {
+      return pasteWorkspaceEntry(sourcePath, targetFolderPath, mode);
+    }
+  );
+  ipcMain.handle('workspace:delete-entry', async (_event, filePath: string) => {
+    const resolvedPath = validateWorkspacePath(filePath);
+    await shell.trashItem(resolvedPath);
+    return getWorkspaceSnapshot();
+  });
+  ipcMain.handle('workspace:remove-folder', (_event, workspaceFolderId: string) => {
+    return removeWorkspaceFolder(workspaceFolderId);
+  });
+  ipcMain.handle('workspace:reveal', (_event, filePath: string) => {
+    const resolvedPath = validateWorkspacePath(filePath);
+    shell.showItemInFolder(resolvedPath);
+  });
+  ipcMain.handle('workspace:open-path', (_event, filePath: string) => {
+    const resolvedPath = validateWorkspacePath(filePath);
+    return shell.openPath(resolvedPath);
+  });
+  ipcMain.handle('workspace:copy-path', (_event, filePath: string) => {
+    const resolvedPath = validateWorkspacePath(filePath);
+    clipboard.writeText(resolvedPath);
   });
 }
 
