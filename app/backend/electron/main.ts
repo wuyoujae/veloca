@@ -12,7 +12,9 @@ import { closeDatabase, getDatabase } from '../database/connection';
 import { getTheme, setTheme, type ThemeMode } from '../services/settings-store';
 import {
   addWorkspaceFolders,
+  createDatabaseWorkspace,
   createWorkspaceEntry,
+  deleteWorkspaceEntry,
   duplicateWorkspaceEntry,
   getWorkspaceSnapshot,
   pasteWorkspaceEntry,
@@ -74,6 +76,9 @@ function registerIpcHandlers(): void {
 
     return addWorkspaceFolders(result.filePaths);
   });
+  ipcMain.handle('workspace:create-database-workspace', (_event, name: string) => {
+    return createDatabaseWorkspace(name);
+  });
   ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
     return readMarkdownFile(filePath);
   });
@@ -96,6 +101,10 @@ function registerIpcHandlers(): void {
     }
   );
   ipcMain.handle('workspace:delete-entry', async (_event, filePath: string) => {
+    if (filePath.startsWith('veloca-db://')) {
+      return deleteWorkspaceEntry(filePath);
+    }
+
     const resolvedPath = validateWorkspacePath(filePath);
     await shell.trashItem(resolvedPath);
     return getWorkspaceSnapshot();

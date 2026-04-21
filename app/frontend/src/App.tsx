@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Clipboard,
   Copy,
+  Database,
   ExternalLink,
   FileText,
   FilePlus,
@@ -35,6 +36,7 @@ interface WorkspaceTreeNode {
   id: string;
   name: string;
   type: 'folder' | 'file';
+  source: 'filesystem' | 'database';
   path: string;
   relativePath: string;
   workspaceFolderId: string;
@@ -235,6 +237,34 @@ export function App(): JSX.Element {
         type: 'info',
         title: 'Folder Not Added',
         description: 'Veloca could not load that folder.'
+      });
+    }
+  };
+
+  const createDatabaseWorkspace = async () => {
+    if (!window.veloca) {
+      return;
+    }
+
+    const name = window.prompt('New database workspace name');
+
+    if (!name) {
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.createDatabaseWorkspace(name);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+      showToast({
+        type: 'success',
+        title: 'Database Workspace Created',
+        description: name
+      });
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Create Failed',
+        description: 'Unable to create that database workspace.'
       });
     }
   };
@@ -498,6 +528,7 @@ export function App(): JSX.Element {
                 openFolders={openFolders}
                 tree={workspace.tree}
                 onAddFolder={addWorkspaceFolder}
+                onCreateDatabaseWorkspace={createDatabaseWorkspace}
                 onContextMenu={openContextMenu}
                 onFileSelect={readMarkdownFile}
                 onFolderToggle={toggleFolder}
@@ -559,10 +590,16 @@ export function App(): JSX.Element {
                 <FileText size={24} />
                 <h1>No Markdown Loaded</h1>
                 <p>Add a workspace folder to recursively load its markdown files.</p>
-                <button className="primary-action" type="button" onClick={addWorkspaceFolder}>
-                  <FolderPlus size={16} />
-                  Add Folder
-                </button>
+                <div className="empty-editor-actions">
+                  <button className="primary-action" type="button" onClick={addWorkspaceFolder}>
+                    <FolderPlus size={16} />
+                    Add Folder
+                  </button>
+                  <button className="secondary-action" type="button" onClick={createDatabaseWorkspace}>
+                    <Database size={16} />
+                    New Database Workspace
+                  </button>
+                </div>
               </div>
             )}
           </section>
@@ -718,6 +755,7 @@ interface FileTreeProps {
   openFolders: Record<string, boolean>;
   tree: WorkspaceTreeNode[];
   onAddFolder: () => void;
+  onCreateDatabaseWorkspace: () => void;
   onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
   onFileSelect: (filePath: string) => void;
   onFolderToggle: (folderId: string) => void;
@@ -729,6 +767,7 @@ function FileTree({
   openFolders,
   tree,
   onAddFolder,
+  onCreateDatabaseWorkspace,
   onContextMenu,
   onFileSelect,
   onFolderToggle
@@ -737,9 +776,14 @@ function FileTree({
     <nav aria-label="Workspace files">
       <div className="directory-toolbar">
         <span>Workspace</span>
-        <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
-          <FolderPlus size={16} />
-        </button>
+        <div className="directory-toolbar-actions">
+          <button className="toolbar-icon-btn" type="button" aria-label="New database workspace" onClick={onCreateDatabaseWorkspace}>
+            <Database size={16} />
+          </button>
+          <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
+            <FolderPlus size={16} />
+          </button>
+        </div>
       </div>
 
       {loading && <div className="loading-state">Loading workspace...</div>}
@@ -747,7 +791,7 @@ function FileTree({
       {!loading && tree.length === 0 && (
         <div className="empty-sidebar-state">
           <Folder size={18} />
-          <p>Add folders to load markdown files recursively.</p>
+          <p>Add a system folder or create a database workspace.</p>
         </div>
       )}
 
@@ -789,6 +833,8 @@ function TreeNode({
 }: TreeNodeProps): JSX.Element {
   const isOpen = openFolders[node.id] ?? false;
   const paddingLeft = 10 + depth * 18;
+  const isDatabaseRoot = node.source === 'database' && node.relativePath === '';
+  const FolderIcon = isDatabaseRoot ? Database : Folder;
 
   if (node.type === 'file') {
     return (
@@ -815,7 +861,7 @@ function TreeNode({
         onClick={() => onFolderToggle(node.id)}
       >
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <Folder size={14} />
+        <FolderIcon size={14} />
         <span>{node.name}</span>
       </button>
 
@@ -918,6 +964,7 @@ function WorkspaceContextMenu({
   const node = menu.node;
   const isFolder = node.type === 'folder';
   const isWorkspaceRoot = isFolder && node.relativePath === '';
+  const isFilesystemNode = node.source === 'filesystem';
 
   const runAction = (action: () => void) => {
     action();
@@ -946,10 +993,12 @@ function WorkspaceContextMenu({
         </>
       )}
 
-      {isFolder && (
+      {isFolder && isFilesystemNode && (
         <ContextMenuItem icon={<ExternalLink size={14} />} label="Open in Finder" onClick={() => runAction(() => onOpen(node))} />
       )}
-      <ContextMenuItem icon={<Folder size={14} />} label="Reveal in Finder" onClick={() => runAction(() => onReveal(node))} />
+      {isFilesystemNode && (
+        <ContextMenuItem icon={<Folder size={14} />} label="Reveal in Finder" onClick={() => runAction(() => onReveal(node))} />
+      )}
       <ContextMenuItem icon={<Copy size={14} />} label="Copy Path" onClick={() => runAction(() => onCopyPath(node))} />
 
       {!isWorkspaceRoot && (

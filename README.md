@@ -28,6 +28,7 @@ This keeps the first version small while leaving a clear path for future markdow
 - Interactive sidebar with Files and Outline modes.
 - Collapsible workspace file tree with real folder loading.
 - VS Code-style workspace roots where multiple folders can be added.
+- Database-backed workspace roots for quick projects that do not need a system folder.
 - Recursive `.md` file discovery from added folders.
 - Custom file tree context menu for common system-level operations.
 - Typora-style markdown preview surface.
@@ -106,7 +107,7 @@ Available environment variables:
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
 
-Workspace folders are stored in SQLite. Markdown file content is read from disk only after selecting a file in the tree.
+Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree. Database-backed workspaces store their virtual folders and markdown files directly in SQLite.
 
 ## Development Guide
 
@@ -135,26 +136,28 @@ Manual acceptance checks:
 2. Confirm the Electron window opens with the Veloca editor layout.
 3. Click the add-folder icon beside `Workspace`.
 4. Select a folder that contains `.md` files.
-5. Confirm only markdown files appear in the tree.
-6. Use the `Files` tab to collapse and expand folders.
-7. Right-click a folder and try `New File` or `New Folder`.
-8. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
-9. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
-10. Select different markdown files and confirm the editor content and breadcrumb update.
-11. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
-12. Click `Settings` in the sidebar.
-13. Switch between `Dark` and `Light`.
-14. Close and reopen the app, then confirm workspace folders and the selected theme are restored.
+5. Click the database icon beside `Workspace` and create a database-backed workspace.
+6. Confirm the database-backed workspace uses a different icon from system folders.
+7. Confirm only markdown files appear as files under system folders.
+8. Use the `Files` tab to collapse and expand folders.
+9. Right-click a folder and try `New File` or `New Folder`.
+10. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
+11. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
+12. Select different markdown files and confirm the editor content and breadcrumb update.
+13. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
+14. Click `Settings` in the sidebar.
+15. Switch between `Dark` and `Light`.
+16. Close and reopen the app, then confirm workspace folders, database-backed workspaces, and the selected theme are restored.
 
 Automated unit and integration tests should be added when real markdown editing, file IO, and persistence workflows are implemented.
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added. Use the `Workspace` toolbar button to add one or more folders. Veloca recursively scans those roots and shows only `.md` files as files. Selecting a markdown file updates the preview, breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the database button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file updates the preview, breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, recursive markdown discovery, file tree interactions, custom file context menu, and outline interactions.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, and outline interactions.
 - Next: markdown editor engine integration.
 - Next: local file save workflows.
 - Next: workspace folder indexing and real file tree.

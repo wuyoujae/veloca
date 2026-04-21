@@ -188,6 +188,13 @@ button {
   font-weight: 600;
 }
 
+.directory-toolbar-actions,
+.empty-editor-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .toolbar-icon-btn,
 .primary-action {
   display: inline-flex;
@@ -472,16 +479,27 @@ button {
   line-height: 1.6;
 }
 
-.primary-action {
+.primary-action,
+.secondary-action {
   gap: 8px;
   padding: 8px 12px;
-  background: var(--foreground);
-  color: var(--background);
   font-size: 13px;
   font-weight: 500;
 }
 
-.primary-action:hover {
+.primary-action {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.secondary-action {
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.primary-action:hover,
+.secondary-action:hover {
   transform: translateY(-1px);
 }
 

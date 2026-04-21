@@ -4,6 +4,7 @@ interface WorkspaceTreeNode {
   id: string;
   name: string;
   type: 'folder' | 'file';
+  source: 'filesystem' | 'database';
   path: string;
   relativePath: string;
   workspaceFolderId: string;
@@ -46,6 +47,7 @@ declare global {
       workspace: {
         get: () => Promise<WorkspaceSnapshot>;
         addFolder: () => Promise<WorkspaceSnapshot>;
+        createDatabaseWorkspace: (name: string) => Promise<FileOperationResult>;
         readMarkdown: (filePath: string) => Promise<MarkdownFileContent>;
         createEntry: (
           parentPath: string,

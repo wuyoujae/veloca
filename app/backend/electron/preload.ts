@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('veloca', {
   workspace: {
     get: () => ipcRenderer.invoke('workspace:get') as Promise<WorkspaceSnapshot>,
     addFolder: () => ipcRenderer.invoke('workspace:add-folder') as Promise<WorkspaceSnapshot>,
+    createDatabaseWorkspace: (name: string) =>
+      ipcRenderer.invoke('workspace:create-database-workspace', name) as Promise<FileOperationResult>,
     readMarkdown: (filePath: string) =>
       ipcRenderer.invoke('workspace:read-markdown', filePath) as Promise<MarkdownFileContent>,
     createEntry: (parentPath: string, entryType: 'file' | 'folder', name: string) =>

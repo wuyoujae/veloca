@@ -38,6 +38,34 @@ Stores folders added to the current local workspace. A workspace can contain mul
 | `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
 | `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
 
+### `virtual_workspaces`
+
+Stores database-backed workspace roots. These roots appear in the same tree as system folders but do not point to a real directory.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | UUID generated immediately before insert. |
+| `name` | `TEXT` | Display name shown in the workspace tree. |
+| `status` | `INTEGER` | `0` means active. |
+| `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
+| `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
+
+### `virtual_workspace_entries`
+
+Stores database-backed folders and markdown files inside a virtual workspace root.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `TEXT` | UUID generated immediately before insert. |
+| `workspace_id` | `TEXT` | Logical root workspace ID. No foreign key constraint is used. |
+| `parent_id` | `TEXT` | Logical parent folder ID, or `NULL` for root-level entries. |
+| `entry_type` | `INTEGER` | `0` is folder, `1` is markdown file. |
+| `name` | `TEXT` | Entry display name. |
+| `content` | `TEXT` | Markdown content for database files. Empty for folders. |
+| `status` | `INTEGER` | `0` means active. |
+| `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
+| `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
+
 ## Theme Flow
 
 1. Renderer asks `window.veloca.settings.getTheme()` for the stored theme.
@@ -55,6 +83,9 @@ When the app is opened in a normal browser during frontend-only development, the
 - The file tree supports folder expand/collapse and real markdown file switching.
 - The `Workspace` toolbar exposes an add-folder action.
 - Added folders are persisted in SQLite and reloaded on next launch.
+- Database-backed workspace roots can be created directly from the toolbar without selecting a system folder.
+- Database-backed roots use a different icon from system folders.
+- Database-backed files and folders are stored in SQLite and participate in the same tree interactions as system files.
 - Workspace scanning recursively loads `.md` files only. Common generated folders such as `node_modules`, `.git`, `dist`, `out`, and `release` are skipped.
 - The file tree supports a custom context menu for creating files/folders, opening in Finder, copying paths, deleting, renaming, duplicating, copying, cutting, and pasting.
 - Root workspace folders can be removed from the workspace through the context menu.
