@@ -360,39 +360,6 @@ button {
   gap: 10px;
 }
 
-.save-status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  font-size: 12px;
-  font-weight: 500;
-  transition: background-color 0.18s ease, color 0.18s ease;
-}
-
-.save-status-chip.saved {
-  color: var(--foreground);
-}
-
-.save-status-chip.failed {
-  color: #ef4444;
-}
-
-.save-status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: currentColor;
-}
-
-.save-status-chip.saving .save-status-dot,
-.save-status-chip.unsaved .save-status-dot {
-  animation: pulseDot 1s ease-in-out infinite;
-}
-
 .save-button {
   display: inline-flex;
   align-items: center;
@@ -420,6 +387,10 @@ button {
 
 .save-button.saving {
   box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+.save-button.saved {
+  animation: pulseSaved 0.3s ease;
 }
 
 .save-button-icon.spinning {
@@ -728,15 +699,16 @@ button {
   }
 }
 
-@keyframes pulseDot {
-  0%,
-  100% {
-    opacity: 0.45;
-    transform: scale(0.86);
+@keyframes pulseSaved {
+  0% {
+    transform: scale(0.98);
   }
 
   50% {
-    opacity: 1;
+    transform: scale(1.03);
+  }
+
+  100% {
     transform: scale(1);
   }
 }

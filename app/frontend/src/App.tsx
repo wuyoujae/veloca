@@ -861,15 +861,8 @@ export function App(): JSX.Element {
             </div>
 
             <div className="editor-actions">
-              {activeFile && autoSave && (
-                <span className={`save-status-chip ${saveStatus}`} aria-live="polite">
-                  <span className="save-status-dot" />
-                  <span>{getAutoSaveLabel(saveStatus)}</span>
-                </span>
-              )}
-
               <button
-                className={`save-button ${saveStatus === 'saving' ? 'saving' : ''}`}
+                className={`save-button ${saveStatus}`}
                 type="button"
                 onClick={() => void saveCurrentDocument()}
                 disabled={!activeFile || saveStatus === 'saving'}
@@ -1708,7 +1701,7 @@ function getSaveStatusLabel(status: SaveStatus): string {
 
 function getSaveButtonLabel(status: SaveStatus, autoSave: boolean): string {
   if (status === 'saving') {
-    return autoSave ? 'Auto Saving' : 'Saving';
+    return 'Saving';
   }
 
   if (status === 'saved') {
@@ -1720,22 +1713,6 @@ function getSaveButtonLabel(status: SaveStatus, autoSave: boolean): string {
   }
 
   return 'Save';
-}
-
-function getAutoSaveLabel(status: SaveStatus): string {
-  if (status === 'saving') {
-    return 'Auto Save';
-  }
-
-  if (status === 'failed') {
-    return 'Auto Save Paused';
-  }
-
-  if (status === 'unsaved') {
-    return 'Pending Save';
-  }
-
-  return 'Auto Save On';
 }
 
 function parseMarkdownSections(content: string, fallbackTitle: string): MarkdownSection[] {
