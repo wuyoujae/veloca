@@ -34,6 +34,8 @@ import {
   isAudioUrl,
   isImageUrl,
   isVideoUrl,
+  transformMarkdownForEditor,
+  transformMarkdownFromEditor,
   type WorkspaceAssetPayload,
   type WorkspaceResolvedAsset
 } from './rich-markdown';
@@ -1448,7 +1450,7 @@ function MarkdownEditor({
 
   const editor = useEditor(
     {
-      content,
+      content: transformMarkdownForEditor(content),
       contentType: 'markdown',
       editorProps: {
         attributes: {
@@ -1498,7 +1500,7 @@ function MarkdownEditor({
           return;
         }
 
-        const nextMarkdown = currentEditor.getMarkdown();
+        const nextMarkdown = transformMarkdownFromEditor(currentEditor.getMarkdown());
         lastEditorContentRef.current = nextMarkdown;
 
         if (nextMarkdown !== contentRef.current) {
@@ -1525,13 +1527,13 @@ function MarkdownEditor({
       return;
     }
 
-    if (!fileChanged && editor.getMarkdown() === content) {
+    if (!fileChanged && transformMarkdownFromEditor(editor.getMarkdown()) === content) {
       lastEditorContentRef.current = content;
       return;
     }
 
     syncingRef.current = true;
-    editor.commands.setContent(content, {
+    editor.commands.setContent(transformMarkdownForEditor(content), {
       contentType: 'markdown',
       emitUpdate: false
     });

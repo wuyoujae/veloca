@@ -1053,6 +1053,13 @@ button {
   background: color-mix(in srgb, var(--background) 82%, var(--muted) 18%);
 }
 
+.veloca-html-block--callout,
+.veloca-html-block--footnotes {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .veloca-html-block details {
   overflow: hidden;
   margin: 0;
@@ -1084,6 +1091,96 @@ button {
 
 .veloca-html-block details > :not(summary) {
   padding: 0 0 0.25rem;
+}
+
+.veloca-html-block .callout {
+  --callout-accent: #3b82f6;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid var(--callout-accent);
+  border-radius: var(--radius);
+  background: #f8fafc;
+}
+
+.veloca-html-block .callout[data-callout-type='tip'] {
+  --callout-accent: #3b82f6;
+}
+
+.veloca-html-block .callout[data-callout-type='info'] {
+  --callout-accent: #0ea5e9;
+}
+
+.veloca-html-block .callout[data-callout-type='warning'] {
+  --callout-accent: #f59e0b;
+}
+
+.veloca-html-block .callout[data-callout-type='danger'],
+.veloca-html-block .callout[data-callout-type='error'] {
+  --callout-accent: #ef4444;
+}
+
+.veloca-html-block .callout[data-callout-type='success'] {
+  --callout-accent: #22c55e;
+}
+
+.veloca-html-block .callout-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0.5rem;
+  color: #0f172a;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+.veloca-html-block .callout-title::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--callout-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--callout-accent) 16%, transparent);
+}
+
+.veloca-html-block .callout-body,
+.veloca-html-block .callout-body > * {
+  color: #334155;
+}
+
+.veloca-html-block .callout-body > *:last-child {
+  margin-bottom: 0;
+}
+
+.veloca-editor .ProseMirror a[href^='#veloca-fn-'],
+.veloca-html-block .footnotes a[href^='#veloca-fn-'],
+.markdown-body a[href^='#veloca-fn-'] {
+  position: relative;
+  top: -0.5em;
+  font-size: 0.75em;
+  line-height: 0;
+  text-decoration: none;
+}
+
+.veloca-html-block .footnotes {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+}
+
+.veloca-html-block .footnotes ol {
+  margin: 0;
+  padding-left: 1.5em;
+}
+
+.veloca-html-block .footnotes li + li {
+  margin-top: 0.6rem;
+}
+
+.veloca-html-block .footnotes p {
+  margin: 0;
 }
 
 .veloca-editor .ProseMirror .tiptap-mathematics-render,

@@ -30,6 +30,7 @@ import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
 import StarterKit from '@tiptap/starter-kit';
 import { common, createLowlight } from 'lowlight';
+import { marked } from 'marked';
 
 const purifier = typeof window === 'undefined' ? null : DOMPurify(window);
 const lowlight = createLowlight(common);
@@ -81,6 +82,11 @@ export interface WorkspaceResolvedAsset {
   isExternal: boolean;
   mimeType: string;
   url: string;
+}
+
+interface FootnoteDefinition {
+  content: string;
+  id: string;
 }
 
 export const VelocaImage = Image.extend({
@@ -351,6 +357,30 @@ export const HtmlBlockNode = Node.create({
             html: sanitizeHtml(element.dataset.html ?? '')
           };
         }
+      },
+      {
+        tag: 'section[data-veloca-callout]',
+        getAttrs: (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return false;
+          }
+
+          return {
+            html: sanitizeHtml(element.outerHTML)
+          };
+        }
+      },
+      {
+        tag: 'section[data-veloca-footnotes]',
+        getAttrs: (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return false;
+          }
+
+          return {
+            html: sanitizeHtml(element.outerHTML)
+          };
+        }
       }
     ];
   },
@@ -374,12 +404,13 @@ export const HtmlBlockNode = Node.create({
   addNodeView() {
     return ({ node }) => {
       const dom = document.createElement('section');
-      dom.className = 'veloca-html-block';
       dom.dataset.velocaHtmlBlock = 'true';
       dom.contentEditable = 'false';
 
       const render = () => {
-        dom.innerHTML = sanitizeHtml((node.attrs as HtmlBlockAttrs).html);
+        const html = sanitizeHtml((node.attrs as HtmlBlockAttrs).html);
+        dom.className = `veloca-html-block ${getHtmlBlockVariantClass(html)}`.trim();
+        dom.innerHTML = html;
       };
 
       render();
@@ -767,11 +798,272 @@ export function sanitizeHtml(html: string): string {
   }
 
   return purifier.sanitize(html, {
-    ADD_ATTR: ['allow', 'allowfullscreen', 'controls', 'data-veloca-html-block', 'poster', 'src', 'title'],
+    ADD_ATTR: [
+      'allow',
+      'allowfullscreen',
+      'class',
+      'controls',
+      'data-callout-type',
+      'data-veloca-callout',
+      'data-veloca-footnotes',
+      'data-veloca-html-block',
+      'data-veloca-original-markdown',
+      'href',
+      'id',
+      'poster',
+      'src',
+      'title'
+    ],
     ADD_TAGS: ['audio', 'details', 'iframe', 'section', 'source', 'summary', 'video'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'srcdoc'],
     FORBID_TAGS: ['script']
   });
+}
+
+export function transformMarkdownForEditor(content: string): string {
+  return transformFootnotesForEditor(transformCalloutsForEditor(content));
+}
+
+export function transformMarkdownFromEditor(content: string): string {
+  return restoreFootnotesFromEditor(restoreCalloutsFromEditor(content));
+}
+
+function transformCalloutsForEditor(content: string): string {
+  const lines = content.split('\n');
+  const output: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const matched = line.match(/^>\s*\[!([A-Z0-9_-]+)\]\s*(.*)$/i);
+
+    if (!matched) {
+      output.push(line);
+      continue;
+    }
+
+    const blockLines = [line];
+    let nextIndex = index + 1;
+
+    while (nextIndex < lines.length && /^>\s?/.test(lines[nextIndex])) {
+      blockLines.push(lines[nextIndex]);
+      nextIndex += 1;
+    }
+
+    output.push(renderCalloutHtml(blockLines, matched[1], matched[2]));
+    index = nextIndex - 1;
+  }
+
+  return output.join('\n');
+}
+
+function renderCalloutHtml(lines: string[], type: string, rawTitle: string): string {
+  const originalMarkdown = lines.join('\n');
+  const normalizedType = type.trim().toLowerCase();
+  const bodyLines = lines.slice(1).map((line) => line.replace(/^>\s?/, ''));
+  const bodyMarkdown = bodyLines.join('\n').trim();
+  const title = rawTitle.trim() || formatCalloutTitle(normalizedType);
+  const titleHtml = renderMarkdownHtml(title, true).trim();
+  const bodyHtml = bodyMarkdown
+    ? renderMarkdownHtml(bodyMarkdown).trim()
+    : '<p class="callout-content"></p>';
+
+  return [
+    `<section class="callout" data-callout-type="${escapeHtmlAttribute(normalizedType)}" data-veloca-callout="true" data-veloca-original-markdown="${encodeOriginalMarkdown(originalMarkdown)}">`,
+    `<div class="callout-title">${titleHtml}</div>`,
+    `<div class="callout-body">${bodyHtml}</div>`,
+    '</section>'
+  ].join('');
+}
+
+function restoreCalloutsFromEditor(content: string): string {
+  return content.replace(
+    /<section\b[^>]*data-veloca-callout="true"[^>]*data-veloca-original-markdown="([^"]+)"[^>]*>[\s\S]*?<\/section>/gi,
+    (_match, encodedMarkdown: string) => decodeOriginalMarkdown(encodedMarkdown)
+  );
+}
+
+function transformFootnotesForEditor(content: string): string {
+  const extracted = extractFootnoteDefinitions(content);
+
+  if (!extracted.definitions.length) {
+    return content;
+  }
+
+  const footnoteIndex = new Map<string, number>();
+
+  extracted.definitions.forEach((definition, index) => {
+    footnoteIndex.set(definition.id, index + 1);
+  });
+
+  const contentWithReferences = extracted.content.replace(/\[\^([^\]\n]+)\]/g, (match, id: string, offset: number, input) => {
+    const preceding = input.slice(Math.max(0, offset - 1), offset);
+
+    if (preceding === '[') {
+      return match;
+    }
+
+    const index = footnoteIndex.get(id);
+
+    if (!index) {
+      return match;
+    }
+
+    return `[${index}](#veloca-fn-${slugifyFootnoteId(id)})`;
+  });
+
+  return `${contentWithReferences.trimEnd()}\n\n${renderFootnotesHtml(extracted.definitions)}`;
+}
+
+function restoreFootnotesFromEditor(content: string): string {
+  const contentWithReferences = content.replace(
+    /\[(\d+)\]\(#veloca-fn-([^)]+)\)/g,
+    (_match, _index: string, slug: string) => `[^${unslugifyFootnoteId(slug)}]`
+  );
+
+  return contentWithReferences.replace(
+    /<section\b[^>]*data-veloca-footnotes="true"[^>]*data-veloca-original-markdown="([^"]+)"[^>]*>[\s\S]*?<\/section>/gi,
+    (_match, encodedMarkdown: string) => `\n\n${decodeOriginalMarkdown(encodedMarkdown)}`
+  );
+}
+
+function extractFootnoteDefinitions(content: string): {
+  content: string;
+  definitions: FootnoteDefinition[];
+} {
+  const lines = content.split('\n');
+  const output: string[] = [];
+  const definitions: FootnoteDefinition[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const matched = line.match(/^\[\^([^\]]+)\]:\s?(.*)$/);
+
+    if (!matched) {
+      output.push(line);
+      continue;
+    }
+
+    const id = matched[1];
+    const definitionLines = [matched[2]];
+    let nextIndex = index + 1;
+
+    while (nextIndex < lines.length) {
+      const nextLine = lines[nextIndex];
+
+      if (/^( {2,}|\t)/.test(nextLine)) {
+        definitionLines.push(nextLine.replace(/^( {2,}|\t)/, ''));
+        nextIndex += 1;
+        continue;
+      }
+
+      if (nextLine.trim() === '') {
+        definitionLines.push('');
+        nextIndex += 1;
+        continue;
+      }
+
+      break;
+    }
+
+    definitions.push({
+      content: definitionLines.join('\n').trim(),
+      id
+    });
+    index = nextIndex - 1;
+  }
+
+  return {
+    content: output.join('\n').replace(/\n{3,}/g, '\n\n'),
+    definitions
+  };
+}
+
+function renderFootnotesHtml(definitions: FootnoteDefinition[]): string {
+  const originalMarkdown = definitions
+    .map((definition) => `[^${definition.id}]: ${definition.content.replace(/\n/g, '\n  ')}`)
+    .join('\n');
+  const items = definitions
+    .map((definition) => {
+      const html = renderMarkdownHtml(definition.content).trim();
+      const body = stripSingleParagraphWrapper(html);
+
+      return [
+        `<li id="veloca-fn-${slugifyFootnoteId(definition.id)}">`,
+        `${body} <a href="#veloca-fnref-${slugifyFootnoteId(definition.id)}">↩</a>`,
+        '</li>'
+      ].join('');
+    })
+    .join('');
+
+  return [
+    `<section class="footnotes" data-veloca-footnotes="true" data-veloca-original-markdown="${encodeOriginalMarkdown(originalMarkdown)}">`,
+    '<ol>',
+    items,
+    '</ol>',
+    '</section>'
+  ].join('');
+}
+
+function stripSingleParagraphWrapper(html: string): string {
+  const matched = html.match(/^<p>([\s\S]*)<\/p>$/i);
+
+  return matched ? matched[1] : html;
+}
+
+function formatCalloutTitle(type: string): string {
+  return type
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function renderMarkdownHtml(value: string, inline = false): string {
+  const rendered = inline
+    ? marked.parseInline(value, { gfm: true, breaks: false })
+    : marked.parse(value, { gfm: true, breaks: false });
+
+  return typeof rendered === 'string' ? rendered : value;
+}
+
+function slugifyFootnoteId(id: string): string {
+  return encodeURIComponent(id);
+}
+
+function unslugifyFootnoteId(id: string): string {
+  try {
+    return decodeURIComponent(id);
+  } catch {
+    return id;
+  }
+}
+
+function encodeOriginalMarkdown(value: string): string {
+  return escapeHtmlAttribute(encodeURIComponent(value));
+}
+
+function decodeOriginalMarkdown(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function getHtmlBlockVariantClass(html: string): string {
+  if (/data-veloca-callout="true"/i.test(html)) {
+    return 'veloca-html-block--callout';
+  }
+
+  if (/data-veloca-footnotes="true"/i.test(html)) {
+    return 'veloca-html-block--footnotes';
+  }
+
+  if (/<details\b/i.test(html)) {
+    return 'veloca-html-block--details';
+  }
+
+  return '';
 }
 
 function convertMarkdownTableHeaderToTable(editor: Editor): boolean {

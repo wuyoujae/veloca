@@ -98,16 +98,17 @@ When the app is opened in a normal browser during frontend-only development, the
 ## Editing and Save Flow
 
 1. Renderer opens a markdown file through `window.veloca.workspace.readMarkdown(path)`.
-2. The active markdown source is loaded into TipTap using `contentType: 'markdown'`.
-3. TipTap rich nodes are serialized back into Markdown through `editor.getMarkdown()`.
-4. Renderer state updates outline data, word count, character count, and save status.
-5. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
-6. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
-7. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
-8. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
-9. Media files dropped or pasted into the editor are persisted through `workspace:save-asset` and inserted back into the document as Markdown or safe HTML-backed rich nodes.
-10. Relative media paths are resolved into renderable URLs through `workspace:resolve-asset`, then served through `veloca-asset://`.
-11. The editor header exposes a manual save button, and Auto Save reuses that same button for animated `Saving` and `Saved` feedback instead of showing a separate label.
+2. Before content enters TipTap, Veloca applies a lightweight compatibility transform so prototype-specific markdown features such as Obsidian-style callouts and footnotes can render inside the WYSIWYG surface without changing the stored source format.
+3. The active markdown source is loaded into TipTap using `contentType: 'markdown'`.
+4. TipTap rich nodes are serialized back into Markdown through `editor.getMarkdown()`, then the compatibility layer restores callouts and footnotes back to their source markdown form before save.
+5. Renderer state updates outline data, word count, character count, and save status.
+6. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
+7. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
+8. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
+9. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
+10. Media files dropped or pasted into the editor are persisted through `workspace:save-asset` and inserted back into the document as Markdown or safe HTML-backed rich nodes.
+11. Relative media paths are resolved into renderable URLs through `workspace:resolve-asset`, then served through `veloca-asset://`.
+12. The editor header exposes a manual save button, and Auto Save reuses that same button for animated `Saving` and `Saved` feedback instead of showing a separate label.
 
 ## Current UI Behavior
 
@@ -127,12 +128,12 @@ When the app is opened in a normal browser during frontend-only development, the
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
 - The editor surface uses TipTap with `@tiptap/markdown`, rich Markdown extensions, and no visible third-party toolbar.
 - The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
-- The live editor typography now follows the `propertypes/word.html` specification across headings, links, lists, task lists, quotes, code blocks, tables, media, formulas, horizontal rules, and details blocks so the shipped renderer stays aligned with the approved markdown prototype.
+- The live editor typography now follows the `propertypes/word.html` specification across headings, links, lists, task lists, quotes, callouts, code blocks, tables, media, formulas, horizontal rules, details blocks, and footnotes so the shipped renderer stays aligned with the approved markdown prototype.
 - List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
 - Typora-style table authoring is supported: typing a single header row such as `| Head 1 | Head 2 |` in a normal paragraph and pressing `Enter` immediately converts it into a rendered table, auto-inserting the standard Markdown separator row and an empty body row.
 - Tables now use a dedicated interaction layer: `Enter` inserts an in-cell line break, `Shift+Enter` inserts a new body row below the current row and keeps the same column focused, and arrowing above or below the table boundary exits into a real paragraph block.
 - In-table line breaks persist as `<br>` inside Markdown table cells so table editing remains stable after save and reload.
-- The editor supports richer Markdown blocks including tables, task lists, code highlighting, inline and block LaTeX formulas, emoji input, images, audio, video, iframe embeds, and safe HTML `details` blocks.
+- The editor supports richer Markdown blocks including tables, task lists, code highlighting, inline and block LaTeX formulas, emoji input, images, audio, video, iframe embeds, safe HTML `details` blocks, Obsidian-style callouts, and markdown footnotes.
 - Filesystem workspaces save pasted or dropped media beside the current markdown file in a `<document>.assets` directory and keep relative markdown paths.
 - Database-backed workspaces store pasted or dropped media inside SQLite and resolve them through the same asset protocol used by renderer media nodes.
 - The editor saves markdown changes automatically by default and supports manual `Cmd/Ctrl+S` saves.
