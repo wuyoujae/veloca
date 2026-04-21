@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - The Premium Markdown Editor</title>
+    <!-- 引入 Lucide 图标库 (Shadcn 御用图标) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SHADCN UI DARK THEME SYSTEM 
+         */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --background: #09090b;
+            --foreground: #fafafa;
+            --muted: #27272a;
+            --muted-foreground: #a1a1aa;
+            --border: #27272a;
+            --accent: #27272a;
+            --accent-foreground: #fafafa;
+            --radius: 0.5rem;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--background);
+            color: var(--foreground);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+        /* 
+         * 顶部标题栏 (Electron 可拖拽区域) 
+         */
+        .titlebar {
+            height: 38px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            border-bottom: 1px solid var(--border);
+            /* Electron 关键属性：允许拖拽 */
+            -webkit-app-region: drag; 
+            background: var(--background);
+            z-index: 100;
+        }
+
+        .titlebar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 8px;
+            /* 按钮区域不可拖拽 */
+            -webkit-app-region: no-drag; 
+        }
+
+        .control-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--muted);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .control-dot:hover { background-color: var(--foreground); }
+
+        /* 
+         * 主体布局 (侧边栏 + 编辑器) 
+         */
+        .app-layout {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 38px);
+        }
+
+        /* 
+         * 左侧边栏 
+         */
+        .sidebar {
+            width: 260px;
+            min-width: 200px;
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            background-color: #09090b; /* 纯黑 */
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        /* Shadcn Tabs 风格 */
+        .tabs-list {
+            display: flex;
+            background-color: var(--muted);
+            padding: 4px;
+            border-radius: var(--radius);
+        }
+
+        .tab-trigger {
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 8px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--muted-foreground);
+            background: transparent;
+            border: none;
+            border-radius: calc(var(--radius) - 2px);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tab-trigger.active {
+            background-color: var(--background);
+            color: var(--foreground);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+        }
+
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        /* 文件树样式 */
+        .tree-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            font-size: 13px;
+            color: var(--muted-foreground);
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            margin-bottom: 2px;
+        }
+
+        .tree-item:hover {
+            background-color: var(--accent);
+            color: var(--accent-foreground);
+        }
+
+        .tree-item.active {
+            background-color: var(--foreground);
+            color: var(--background);
+            font-weight: 500;
+        }
+
+        .tree-indent { margin-left: 20px; }
+
+        /* 
+         * 中央编辑器区域 (Typora 沉浸式风格) 
+         */
+        .editor-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--background);
+            position: relative;
+        }
+
+        .editor-header {
+            height: 48px;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid transparent; /* 悬浮时显示 */
+            transition: border-color 0.3s;
+        }
+        
+        .editor-container:hover .editor-header {
+            border-bottom: 1px solid var(--border);
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--muted-foreground);
+        }
+
+        .editor-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .icon-btn {
+            background: transparent;
+            border: none;
+            color: var(--muted-foreground);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: var(--radius);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-btn:hover {
+            background-color: var(--accent);
+            color: var(--foreground);
+        }
+
+        /* Typora式的写作区域 */
+        .editor-scroll-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px 0 100px 0;
+            display: flex;
+            justify-content: center;
+        }
+
+        .markdown-body {
+            width: 100%;
+            max-width: 720px; /* 控制最佳阅读行长 */
+            padding: 0 40px;
+        }
+
+        /* 极致的 Markdown 排版 */
+        .markdown-body h1 {
+            font-size: 2.25rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 24px;
+            line-height: 1.2;
+        }
+
+        .markdown-body h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            margin-top: 48px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .markdown-body p {
+            font-size: 1rem;
+            line-height: 1.75;
+            color: #d4d4d8;
+            margin-bottom: 20px;
+        }
+
+        .markdown-body blockquote {
+            border-left: 2px solid var(--foreground);
+            padding-left: 16px;
+            margin: 24px 0;
+            color: var(--muted-foreground);
+            font-style: italic;
+        }
+
+        .markdown-body code {
+            font-family: var(--font-mono);
+            background-color: var(--muted);
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: var(--foreground);
+        }
+
+        .markdown-body pre {
+            background-color: #000000;
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: var(--radius);
+            overflow-x: auto;
+            margin: 24px 0;
+        }
+
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+            font-size: 0.9em;
+            color: #d4d4d8;
+        }
+
+        /* 光标模拟 */
+        .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1.2em;
+            background-color: var(--foreground);
+            vertical-align: middle;
+            animation: blink 1s step-end infinite;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        /* 底部状态栏 */
+        .statusbar {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            padding: 8px 16px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            color: var(--muted-foreground);
+            display: flex;
+            gap: 16px;
+            background: linear-gradient(to top, var(--background) 50%, transparent);
+            width: 100%;
+            justify-content: flex-end;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Electron 顶部标题栏 -->
+    <div class="titlebar">
+        <div class="titlebar-left">
+            <i data-lucide="feather" style="width: 14px; height: 14px;"></i>
+            <span>Veloca</span>
+        </div>
+        <!-- MacOS 风格或自定义关闭按钮占位 -->
+        <div class="window-controls">
+            <div class="control-dot" style="background-color: var(--border);"></div>
+            <div class="control-dot" style="background-color: var(--border);"></div>
+            <div class="control-dot" style="background-color: var(--border);"></div>
+        </div>
+    </div>
+
+    <div class="app-layout">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <!-- Shadcn 风格切换 Tabs -->
+                <div class="tabs-list">
+                    <button class="tab-trigger active">Files</button>
+                    <button class="tab-trigger">Outline</button>
+                </div>
+            </div>
+            
+            <div class="sidebar-content">
+                <!-- 文件树结构 -->
+                <div class="tree-item">
+                    <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+                    <i data-lucide="folder" style="width: 14px; height: 14px;"></i>
+                    <span>Project Veloca</span>
+                </div>
+                
+                <div class="tree-item tree-indent">
+                    <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+                    <i data-lucide="folder" style="width: 14px; height: 14px;"></i>
+                    <span>docs</span>
+                </div>
+                <div class="tree-item tree-indent" style="margin-left: 40px;">
+                    <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                    <span>architecture.md</span>
+                </div>
+                <!-- 激活态文件 -->
+                <div class="tree-item tree-indent active" style="margin-left: 40px;">
+                    <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                    <span>manifesto.md</span>
+                </div>
+
+                <div class="tree-item tree-indent">
+                    <i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i>
+                    <i data-lucide="folder" style="width: 14px; height: 14px;"></i>
+                    <span>components</span>
+                </div>
+                <div class="tree-item tree-indent">
+                    <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                    <span>readme.md</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 中央编辑器 -->
+        <main class="editor-container">
+            <!-- 悬浮才会明显显现的低调 Header -->
+            <header class="editor-header">
+                <div class="breadcrumb">
+                    docs <i data-lucide="chevron-right" style="width: 12px; height: 12px;"></i> manifesto.md
+                </div>
+                <div class="editor-actions">
+                    <button class="icon-btn" title="Search (Cmd+F)"><i data-lucide="search" style="width: 16px; height: 16px;"></i></button>
+                    <button class="icon-btn" title="Reading Mode"><i data-lucide="book-open" style="width: 16px; height: 16px;"></i></button>
+                    <button class="icon-btn" title="Export / Share"><i data-lucide="share" style="width: 16px; height: 16px;"></i></button>
+                </div>
+            </header>
+
+            <div class="editor-scroll-area">
+                <div class="markdown-body">
+                    <h1>Veloca Manifesto</h1>
+                    
+                    <p>Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.</p>
+                    
+                    <blockquote>
+                        "Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away." — Antoine de Saint-Exupéry
+                    </blockquote>
+
+                    <h2>Design Language</h2>
+                    
+                    <p>We strictly adhere to a monochrome color palette. No gradients, no messy shadows. Just stark <code>#000000</code>, crisp <code>#FFFFFF</code>, and perfectly measured grays for borders.</p>
+
+                    <pre><code>// Shadcn configuration for Veloca
+const config = {
+  theme: 'dark',
+  radius: '0.5rem',
+  colors: {
+    background: '#09090b',
+    foreground: '#fafafa',
+    border: '#27272a'
+  }
+}</code></pre>
+
+                    <h2>Typographic Scale</h2>
+                    
+                    <p>Like Typora, Veloca is essentially a live-preview markdown editor. However, we bring the premium <strong>Shadcn UI</strong> aesthetic into the text area. Notice the letter spacing on the headings, the font choices (Inter & JetBrains Mono), and the structural line-heights.<span class="cursor"></span></p>
+
+                </div>
+            </div>
+
+            <!-- 底部状态字数统计 -->
+            <div class="statusbar">
+                <span>124 Words</span>
+                <span>842 Characters</span>
+                <span>UTF-8</span>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // 初始化 Lucide 图标
+        lucide.createIcons();
+
+        // 简单的 Tabs 交互逻辑，演示用
+        document.querySelectorAll('.tab-trigger').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                document.querySelectorAll('.tab-trigger').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

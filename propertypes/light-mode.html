@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - Premium Light Theme</title>
+    <!-- 引入 Lucide 图标库 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SHADCN UI LIGHT THEME SYSTEM 
+         */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            /* 浅色系核心色板 */
+            --background: #ffffff;
+            --foreground: #09090b;
+            --muted: #f4f4f5;
+            --muted-foreground: #71717a;
+            --border: #e4e4e7;
+            --accent: #f4f4f5;
+            --accent-foreground: #09090b;
+            --radius: 0.5rem;
+            
+            /* 字体排版 */
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            /* Toast 状态颜色 (在浅色下依然保持鲜明但不过分刺眼) */
+            --success: #10b981; 
+            --error: #ef4444;   
+            --warning: #f59e0b; 
+            --info: #3b82f6;    
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--background);
+            color: var(--foreground);
+            height: 100vh; display: flex; flex-direction: column;
+            overflow: hidden; -webkit-font-smoothing: antialiased;
+        }
+
+        /* 滚动条美化 (浅色适配) */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
+        /* --- 1. 顶部标题栏 --- */
+        .titlebar {
+            height: 38px; display: flex; align-items: center; justify-content: space-between;
+            padding: 0 16px; border-bottom: 1px solid var(--border);
+            -webkit-app-region: drag; background: var(--background); z-index: 50;
+        }
+        .titlebar-left { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
+        .window-controls { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+        /* MacOS风格按钮占位，使用浅灰色 */
+        .control-dot { width: 12px; height: 12px; border-radius: 50%; background-color: #e4e4e7; cursor: pointer; transition: background 0.2s; }
+        .control-dot:hover { background-color: #a1a1aa; }
+
+        /* --- 2. 主体布局 & 左侧边栏 --- */
+        .app-layout { display: flex; flex: 1; height: calc(100vh - 38px); }
+
+        .sidebar {
+            width: 260px; min-width: 200px; border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; background-color: #fafafa; /* 侧边栏轻微灰度区分 */
+        }
+        .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+        
+        /* 侧边栏 Tabs */
+        .tabs-list { display: flex; background-color: var(--border); padding: 3px; border-radius: var(--radius); }
+        .tab-trigger {
+            flex: 1; display: inline-flex; align-items: center; justify-content: center;
+            padding: 4px 8px; font-size: 13px; font-weight: 500; color: var(--muted-foreground);
+            background: transparent; border: none; border-radius: calc(var(--radius) - 2px); cursor: pointer; transition: all 0.2s;
+        }
+        .tab-trigger.active { background-color: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        
+        /* 侧边栏文件树 */
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 12px; }
+        .tree-item {
+            display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+            font-size: 13px; color: var(--muted-foreground); border-radius: var(--radius);
+            cursor: pointer; transition: all 0.15s; margin-bottom: 2px;
+        }
+        .tree-item:hover { background-color: var(--muted); color: var(--foreground); }
+        /* 激活状态使用极高反差黑底白字 */
+        .tree-item.active { background-color: var(--foreground); color: var(--background); font-weight: 500; }
+        .tree-indent { margin-left: 20px; }
+
+        .sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+        .nav-btn {
+            width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            font-size: 13px; color: var(--muted-foreground); border: none; background: transparent;
+            border-radius: var(--radius); cursor: pointer; transition: all 0.2s;
+        }
+        .nav-btn:hover { background-color: var(--muted); color: var(--foreground); }
+
+        /* --- 3. 中央编辑器 --- */
+        .editor-container { flex: 1; display: flex; flex-direction: column; position: relative; background-color: var(--background); }
+        
+        /* 悬浮才显示的边框线 */
+        .editor-header {
+            height: 48px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid transparent; transition: border-color 0.3s;
+        }
+        .editor-container:hover .editor-header { border-bottom: 1px solid var(--border); }
+        
+        .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground); font-weight: 500;}
+        .editor-actions { display: flex; gap: 8px; }
+        
+        .icon-btn { background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; padding: 6px; border-radius: var(--radius); transition: all 0.2s; }
+        .icon-btn:hover { background-color: var(--muted); color: var(--foreground); }
+
+        /* 测试按钮 */
+        .demo-btn {
+            background-color: var(--background); border: 1px solid var(--border);
+            color: var(--foreground); font-size: 12px; font-weight: 500; padding: 4px 12px;
+            border-radius: var(--radius); cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .demo-btn:hover { background-color: var(--muted); }
+
+        /* 浅色系 Markdown 排版 */
+        .editor-scroll-area { flex: 1; overflow-y: auto; padding: 40px 0 100px 0; display: flex; justify-content: center; }
+        .markdown-body { width: 100%; max-width: 720px; padding: 0 40px; }
+        .markdown-body h1 { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 24px; color: var(--foreground); }
+        .markdown-body h2 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; margin-top: 48px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--foreground); }
+        .markdown-body p { font-size: 1rem; line-height: 1.75; color: #3f3f46; margin-bottom: 20px; }
+        .markdown-body blockquote { border-left: 3px solid var(--foreground); padding-left: 16px; margin: 24px 0; color: var(--muted-foreground); font-style: italic; background: #fafafa; padding-top: 8px; padding-bottom: 8px; border-radius: 0 var(--radius) var(--radius) 0; }
+        .markdown-body code { font-family: var(--font-mono); background-color: var(--muted); padding: 3px 6px; border-radius: 4px; font-size: 0.85em; color: var(--foreground); }
+        .markdown-body pre { background-color: #fafafa; border: 1px solid var(--border); padding: 16px; border-radius: var(--radius); overflow-x: auto; margin: 24px 0; }
+        .markdown-body pre code { background-color: transparent; padding: 0; font-size: 0.9em; color: #3f3f46; }
+
+        /* --- 4. SETTINGS MODAL (浅色毛玻璃) --- */
+        .settings-overlay {
+            position: fixed; inset: 0;
+            background-color: rgba(255, 255, 255, 0.4); /* 浅色半透明遮罩 */
+            backdrop-filter: blur(8px); /* 强毛玻璃效果 */
+            z-index: 1000; display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+        }
+        .settings-overlay.open { opacity: 1; pointer-events: auto; }
+
+        .settings-window {
+            width: 860px; height: 600px; max-width: 90vw; max-height: 85vh;
+            background-color: var(--background); border: 1px solid var(--border);
+            border-radius: calc(var(--radius) + 4px);
+            /* 浅色系高级弥散阴影 */
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0,0,0,0.02);
+            display: flex; overflow: hidden; transform: scale(0.98); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .settings-overlay.open .settings-window { transform: scale(1); }
+
+        .settings-sidebar {
+            width: 220px; background-color: #fafafa; border-right: 1px solid var(--border);
+            padding: 24px 12px; display: flex; flex-direction: column;
+        }
+        .settings-title { font-size: 16px; font-weight: 600; margin-bottom: 24px; padding: 0 12px; }
+        .settings-nav-item {
+            padding: 8px 12px; margin-bottom: 4px; font-size: 13px; font-weight: 500;
+            color: var(--muted-foreground); border-radius: var(--radius); cursor: pointer; transition: all 0.2s;
+        }
+        .settings-nav-item:hover { background-color: var(--border); color: var(--foreground); }
+        .settings-nav-item.active { background-color: var(--border); color: var(--foreground); }
+
+        .settings-content-wrapper { flex: 1; display: flex; flex-direction: column; position: relative; background: var(--background); }
+        .settings-close-btn {
+            position: absolute; top: 16px; right: 16px; z-index: 10;
+            background: transparent; border: none; color: var(--muted-foreground);
+            cursor: pointer; padding: 6px; border-radius: var(--radius); transition: all 0.2s;
+        }
+        .settings-close-btn:hover { background-color: var(--muted); color: var(--foreground); }
+        
+        .settings-scroll-area { flex: 1; overflow-y: auto; padding: 32px 48px; }
+        .settings-section-title { font-size: 18px; font-weight: 600; margin-bottom: 24px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+        
+        .setting-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border); }
+        .setting-info { display: flex; flex-direction: column; gap: 4px; max-width: 70%; }
+        .setting-label { font-size: 14px; font-weight: 500; color: var(--foreground); }
+        .setting-desc { font-size: 12px; color: var(--muted-foreground); line-height: 1.5; }
+
+        /* 浅色系 Switch 组件 */
+        .shadcn-switch {
+            width: 40px; height: 24px; background-color: #d4d4d8; border-radius: 9999px;
+            position: relative; cursor: pointer; transition: background-color 0.2s; border: none; outline: none;
+        }
+        .shadcn-switch[data-state="checked"] { background-color: var(--foreground); } /* 开启时纯黑 */
+        .shadcn-switch-thumb {
+            display: block; width: 18px; height: 18px; background-color: var(--background);
+            border-radius: 50%; position: absolute; top: 3px; left: 3px;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .shadcn-switch[data-state="checked"] .shadcn-switch-thumb { transform: translateX(16px); }
+
+        /* 浅色系 Select 组件 */
+        .shadcn-select {
+            display: inline-flex; align-items: center; justify-content: space-between;
+            width: 140px; padding: 8px 12px; font-size: 13px; font-weight: 500; color: var(--foreground);
+            background-color: var(--background); border: 1px solid var(--border);
+            border-radius: var(--radius); cursor: pointer; outline: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .shadcn-select:focus { border-color: var(--foreground); }
+
+        /* --- 5. TOAST NOTIFICATION SYSTEM (浅色毛玻璃) --- */
+        .toast-viewport {
+            position: fixed; top: 48px; right: 24px; display: flex; flex-direction: column; gap: 12px;
+            width: 340px; max-width: 100vw; z-index: 9999; pointer-events: none;
+        }
+
+        .toast {
+            pointer-events: auto; display: flex; align-items: flex-start; gap: 12px;
+            background-color: rgba(255, 255, 255, 0.85); /* 浅色半透明 */
+            backdrop-filter: blur(12px); border: 1px solid var(--border);
+            padding: 16px; border-radius: var(--radius);
+            /* 浅色系悬浮阴影 */
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+            animation: toastSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            position: relative; overflow: hidden; transition: all 0.3s ease;
+        }
+        .toast.closing { animation: toastFadeOut 0.3s ease forwards; }
+
+        @keyframes toastSlideIn { 0% { transform: translateX(100%); opacity: 0; } 100% { transform: translateX(0); opacity: 1; } }
+        @keyframes toastFadeOut { 0% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(10px); opacity: 0; } }
+
+        .toast-icon { display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+        .toast.success .toast-icon { color: var(--success); }
+        .toast.error .toast-icon { color: var(--error); }
+        .toast.warning .toast-icon { color: var(--warning); }
+        .toast.info .toast-icon { color: var(--info); }
+
+        .toast-content { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+        .toast-title { font-size: 14px; font-weight: 600; color: var(--foreground); line-height: 1.2; }
+        .toast-desc { font-size: 13px; color: var(--muted-foreground); line-height: 1.4; }
+
+        .toast-close {
+            background: transparent; border: none; color: var(--muted-foreground); cursor: pointer;
+            padding: 2px; border-radius: 4px; transition: color 0.2s, background 0.2s;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .toast-close:hover { color: var(--foreground); background: rgba(0, 0, 0, 0.05); }
+
+    </style>
+</head>
+<body>
+
+    <!-- 顶部标题栏 -->
+    <div class="titlebar">
+        <div class="titlebar-left">
+            <i data-lucide="feather" style="width: 14px; height: 14px;"></i>
+            <span>Veloca</span>
+        </div>
+        <div class="window-controls">
+            <div class="control-dot"></div><div class="control-dot"></div><div class="control-dot"></div>
+        </div>
+    </div>
+
+    <!-- 主体 -->
+    <div class="app-layout">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="tabs-list">
+                    <button class="tab-trigger active">Files</button>
+                    <button class="tab-trigger">Outline</button>
+                </div>
+            </div>
+            
+            <div class="sidebar-content">
+                <div class="tree-item"><i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i><i data-lucide="folder" style="width: 14px; height: 14px;"></i><span>Project Veloca</span></div>
+                <!-- 注意：浅色模式下，激活态是黑底白字，极其高级 -->
+                <div class="tree-item tree-indent active" style="margin-left: 40px;"><i data-lucide="file-text" style="width: 14px; height: 14px;"></i><span>manifesto.md</span></div>
+                <div class="tree-item tree-indent" style="margin-left: 40px;"><i data-lucide="file-text" style="width: 14px; height: 14px;"></i><span>design_system.md</span></div>
+            </div>
+
+            <!-- 底部 Settings 按钮 -->
+            <div class="sidebar-footer">
+                <button class="nav-btn" id="openSettingsBtn">
+                    <i data-lucide="settings" style="width: 16px; height: 16px;"></i>
+                    <span>Settings</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- 中央编辑器 -->
+        <main class="editor-container">
+            <header class="editor-header">
+                <div class="breadcrumb">docs <i data-lucide="chevron-right" style="width: 12px; height: 12px;"></i> manifesto.md</div>
+                
+                <!-- Toast 演示按钮 -->
+                <div class="editor-actions">
+                    <button class="demo-btn" onclick="triggerToast('success')">Success</button>
+                    <button class="demo-btn" onclick="triggerToast('info')">Info</button>
+                    <button class="demo-btn" onclick="triggerToast('warning')">Warn</button>
+                    <button class="demo-btn" onclick="triggerToast('error')">Error</button>
+                    <div style="width: 1px; background: var(--border); margin: 0 4px;"></div>
+                    <button class="icon-btn" title="Search"><i data-lucide="search" style="width: 16px; height: 16px;"></i></button>
+                </div>
+            </header>
+
+            <div class="editor-scroll-area">
+                <div class="markdown-body">
+                    <h1>Veloca Manifesto (Light)</h1>
+                    <p>Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.</p>
+                    
+                    <blockquote>
+                        "Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away."
+                    </blockquote>
+                    
+                    <h2>Premium Light Mode</h2>
+                    <p>Unlike standard light modes that blast pure white into your eyes, we balance `#FFFFFF` with precise layers of `#F4F4F5` and incredibly subtle `#E4E4E7` borders.</p>
+                    
+                    <pre><code>// Shadcn Light Theme Config
+const config = {
+  theme: 'light',
+  colors: {
+    background: '#ffffff',
+    foreground: '#09090b',
+    border: '#e4e4e7'
+  }
+}</code></pre>
+
+                    <p>Click the <strong>Settings</strong> button in the bottom left, or test the <strong>Toast Notifications</strong> in the top right header.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div class="settings-overlay" id="settingsModal">
+        <div class="settings-window">
+            <!-- 左侧导航 -->
+            <div class="settings-sidebar">
+                <div class="settings-title">Settings</div>
+                <div class="settings-nav-item active">Editor</div>
+                <div class="settings-nav-item">Appearance</div>
+                <div class="settings-nav-item">File & Sync</div>
+                <div class="settings-nav-item">Shortcuts</div>
+            </div>
+
+            <!-- 右侧内容 -->
+            <div class="settings-content-wrapper">
+                <button class="settings-close-btn" id="closeSettingsBtn"><i data-lucide="x" style="width: 20px; height: 20px;"></i></button>
+                <div class="settings-scroll-area">
+                    <h2 class="settings-section-title">Editor Settings</h2>
+
+                    <div class="setting-row">
+                        <div class="setting-info">
+                            <div class="setting-label">Font Family</div>
+                            <div class="setting-desc">Controls the font family of the Markdown editor.</div>
+                        </div>
+                        <select class="shadcn-select">
+                            <option>Inter (Default)</option>
+                            <option>Geist</option>
+                            <option>JetBrains Mono</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-row">
+                        <div class="setting-info">
+                            <div class="setting-label">Line Numbers</div>
+                            <div class="setting-desc">Render line numbers alongside the markdown source code.</div>
+                        </div>
+                        <button class="shadcn-switch" data-state="checked" onclick="toggleSwitch(this)"><span class="shadcn-switch-thumb"></span></button>
+                    </div>
+
+                    <div class="setting-row">
+                        <div class="setting-info">
+                            <div class="setting-label">Focus Mode</div>
+                            <div class="setting-desc">Dim all text except the current paragraph you are editing.</div>
+                        </div>
+                        <button class="shadcn-switch" data-state="unchecked" onclick="toggleSwitch(this)"><span class="shadcn-switch-thumb"></span></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST VIEWPORT -->
+    <div class="toast-viewport" id="toastViewport"></div>
+
+    <script>
+        // 1. 初始化图标
+        lucide.createIcons();
+
+        // 2. Settings Modal 交互逻辑
+        const modal = document.getElementById('settingsModal');
+        document.getElementById('openSettingsBtn').addEventListener('click', () => modal.classList.add('open'));
+        document.getElementById('closeSettingsBtn').addEventListener('click', () => modal.classList.remove('open'));
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('open')) modal.classList.remove('open'); });
+
+        // 3. Switch 组件交互逻辑
+        function toggleSwitch(element) {
+            element.setAttribute('data-state', element.getAttribute('data-state') === 'checked' ? 'unchecked' : 'checked');
+        }
+
+        // 4. Toast 通知系统逻辑
+        const toastIcons = { success: 'check-circle-2', error: 'x-circle', warning: 'alert-triangle', info: 'info' };
+
+        function showToast({ type = 'info', title, description, duration = 4000 }) {
+            const viewport = document.getElementById('toastViewport');
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast ${type}`;
+            
+            toastEl.innerHTML = `
+                <div class="toast-icon"><i data-lucide="${toastIcons[type]}" style="width: 18px; height: 18px;"></i></div>
+                <div class="toast-content">
+                    ${title ? `<div class="toast-title">${title}</div>` : ''}
+                    ${description ? `<div class="toast-desc">${description}</div>` : ''}
+                </div>
+                <button class="toast-close"><i data-lucide="x" style="width: 16px; height: 16px;"></i></button>
+            `;
+            
+            viewport.appendChild(toastEl);
+            lucide.createIcons({ root: toastEl });
+
+            const closeToast = () => {
+                toastEl.classList.add('closing');
+                setTimeout(() => { if (viewport.contains(toastEl)) viewport.removeChild(toastEl); }, 300);
+            };
+
+            toastEl.querySelector('.toast-close').addEventListener('click', closeToast);
+            if (duration > 0) setTimeout(closeToast, duration);
+        }
+
+        function triggerToast(type) {
+            const data = {
+                success: { title: "Document Saved", desc: "Your markdown file has been successfully synced." },
+                info: { title: "Update Available", desc: "Veloca v2.0 is now available for download." },
+                warning: { title: "Unsaved Changes", desc: "You have offline edits that haven't been pushed." },
+                error: { title: "Connection Lost", desc: "Unable to reach the synchronization server." }
+            };
+            showToast({ type: type, title: data[type].title, description: data[type].desc });
+        }
+    </script>
+</body>
+</html>

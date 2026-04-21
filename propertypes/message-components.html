@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - The Premium Markdown Editor</title>
+    <!-- 引入 Lucide 图标库 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SHADCN UI DARK THEME SYSTEM 
+         */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --background: #09090b;
+            --foreground: #fafafa;
+            --muted: #27272a;
+            --muted-foreground: #a1a1aa;
+            --border: #27272a;
+            --accent: #27272a;
+            --accent-foreground: #fafafa;
+            --radius: 0.5rem;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            /* Toast 状态颜色 */
+            --success: #10b981; /* 翡翠绿 */
+            --error: #ef4444;   /* 宝石红 */
+            --warning: #f59e0b; /* 琥珀黄 */
+            --info: #3b82f6;    /* 天空蓝 */
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans); background-color: var(--background);
+            color: var(--foreground); height: 100vh; display: flex;
+            flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased;
+        }
+
+        /* 基础布局省略（保持原有） */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 10px; }
+        
+        .titlebar { height: 38px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border); -webkit-app-region: drag; background: var(--background); z-index: 50; }
+        .titlebar-left { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; }
+        .window-controls { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+        .control-dot { width: 12px; height: 12px; border-radius: 50%; background-color: var(--muted); cursor: pointer; }
+        
+        .app-layout { display: flex; flex: 1; height: calc(100vh - 38px); }
+        
+        .sidebar { width: 260px; min-width: 200px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background-color: #09090b; }
+        .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+        .tabs-list { display: flex; background-color: var(--muted); padding: 4px; border-radius: var(--radius); }
+        .tab-trigger { flex: 1; display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); background: transparent; border: none; border-radius: calc(var(--radius) - 2px); cursor: pointer; }
+        .tab-trigger.active { background-color: var(--background); color: var(--foreground); box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 12px; }
+        .tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; color: var(--muted-foreground); border-radius: var(--radius); cursor: pointer; margin-bottom: 2px; }
+        .tree-item:hover { background-color: var(--accent); color: var(--accent-foreground); }
+        .tree-item.active { background-color: var(--foreground); color: var(--background); font-weight: 500; }
+        .tree-indent { margin-left: 20px; }
+
+        .editor-container { flex: 1; display: flex; flex-direction: column; position: relative; }
+        .editor-header { height: 48px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+        .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground); }
+        .editor-actions { display: flex; gap: 8px; }
+        
+        /* 演示按钮样式 */
+        .demo-btn {
+            background-color: var(--background); border: 1px solid var(--border);
+            color: var(--foreground); font-size: 12px; padding: 4px 12px;
+            border-radius: var(--radius); cursor: pointer; transition: all 0.2s;
+        }
+        .demo-btn:hover { background-color: var(--accent); }
+
+        .editor-scroll-area { flex: 1; overflow-y: auto; padding: 40px 0 100px 0; display: flex; justify-content: center; }
+        .markdown-body { width: 100%; max-width: 720px; padding: 0 40px; }
+        .markdown-body h1 { font-size: 2.25rem; font-weight: 700; margin-bottom: 24px; }
+        .markdown-body p { font-size: 1rem; line-height: 1.75; color: #d4d4d8; margin-bottom: 20px; }
+
+
+        /* 
+         * ==========================================
+         * TOAST NOTIFICATION SYSTEM (高级消息组件)
+         * ==========================================
+         */
+        
+        /* 消息渲染视口（固定在右上角） */
+        .toast-viewport {
+            position: fixed;
+            top: 48px;  /* 避开标题栏 */
+            right: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px; /* 消息之间的间距 */
+            width: 340px;
+            max-width: 100vw;
+            z-index: 9999;
+            pointer-events: none; /* 视口本身不阻挡点击 */
+        }
+
+        /* 核心卡片设计 */
+        .toast {
+            pointer-events: auto;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            background-color: rgba(9, 9, 11, 0.85); /* 深色透明底 */
+            backdrop-filter: blur(12px); /* 毛玻璃效果 */
+            border: 1px solid var(--border);
+            padding: 16px;
+            border-radius: var(--radius);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            /* 关键动画 */
+            animation: toastSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .toast.closing {
+            animation: toastFadeOut 0.3s ease forwards;
+        }
+
+        /* 进场动画：从右侧滑入并带一点点弹性 */
+        @keyframes toastSlideIn {
+            0% { transform: translateX(100%); opacity: 0; }
+            100% { transform: translateX(0); opacity: 1; }
+        }
+
+        /* 退场动画：向右侧淡出 */
+        @keyframes toastFadeOut {
+            0% { transform: translateX(0); opacity: 1; }
+            100% { transform: translateX(10px); opacity: 0; }
+        }
+
+        /* 左侧 Icon 区域 */
+        .toast-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        /* 各类型颜色注入 */
+        .toast.success .toast-icon { color: var(--success); }
+        .toast.error .toast-icon { color: var(--error); }
+        .toast.warning .toast-icon { color: var(--warning); }
+        .toast.info .toast-icon { color: var(--info); }
+
+        /* 内容区域 */
+        .toast-content {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+        }
+
+        .toast-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--foreground);
+            line-height: 1.2;
+        }
+
+        .toast-desc {
+            font-size: 13px;
+            color: var(--muted-foreground);
+            line-height: 1.4;
+        }
+
+        /* 关闭按钮 (悬浮时稍微亮起) */
+        .toast-close {
+            background: transparent;
+            border: none;
+            color: var(--muted-foreground);
+            cursor: pointer;
+            padding: 2px;
+            border-radius: 4px;
+            transition: color 0.2s, background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toast-close:hover {
+            color: var(--foreground);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 顶部标题栏 -->
+    <div class="titlebar">
+        <div class="titlebar-left">
+            <i data-lucide="feather" style="width: 14px; height: 14px;"></i>
+            <span>Veloca</span>
+        </div>
+        <div class="window-controls">
+            <div class="control-dot"></div><div class="control-dot"></div><div class="control-dot"></div>
+        </div>
+    </div>
+
+    <!-- 主体 -->
+    <div class="app-layout">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="tabs-list">
+                    <button class="tab-trigger active">Files</button>
+                    <button class="tab-trigger">Outline</button>
+                </div>
+            </div>
+            <div class="sidebar-content">
+                <div class="tree-item"><i data-lucide="folder" style="width: 14px; height: 14px;"></i><span>Project Veloca</span></div>
+            </div>
+        </aside>
+
+        <!-- 中央编辑器 -->
+        <main class="editor-container">
+            <header class="editor-header">
+                <div class="breadcrumb">Test the Toast System</div>
+                
+                <!-- 触发测试的按钮群 -->
+                <div class="editor-actions">
+                    <button class="demo-btn" onclick="triggerToast('success')">Success</button>
+                    <button class="demo-btn" onclick="triggerToast('info')">Info</button>
+                    <button class="demo-btn" onclick="triggerToast('warning')">Warning</button>
+                    <button class="demo-btn" onclick="triggerToast('error')">Error</button>
+                </div>
+            </header>
+
+            <div class="editor-scroll-area">
+                <div class="markdown-body">
+                    <h1>Toast Notification Design</h1>
+                    <p>Click the buttons in the top right corner of the editor to test the notification system.</p>
+                    <p>Notice how the background remains a consistent, dark glass-morphism texture, while only the <b>Icons</b> change color to indicate state. This is the hallmark of modern, premium interface design.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 消息组件存放视口 (必须保留) -->
+    <div class="toast-viewport" id="toastViewport"></div>
+
+    <script>
+        // 初始化全局图标
+        lucide.createIcons();
+
+        /*
+         * ==========================================
+         * TOAST JS LOGIC
+         * ==========================================
+         */
+
+        // 各类型的 Icon 映射
+        const toastIcons = {
+            success: 'check-circle-2',
+            error: 'x-circle',
+            warning: 'alert-triangle',
+            info: 'info'
+        };
+
+        // 核心创建函数
+        function showToast({ type = 'info', title, description, duration = 4000 }) {
+            const viewport = document.getElementById('toastViewport');
+            
+            // 创建外层卡片
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast ${type}`;
+
+            // 获取对应类型的 Icon
+            const iconName = toastIcons[type] || 'info';
+
+            // 构建内部 HTML 结构
+            toastEl.innerHTML = `
+                <div class="toast-icon">
+                    <i data-lucide="${iconName}" style="width: 18px; height: 18px;"></i>
+                </div>
+                <div class="toast-content">
+                    ${title ? `<div class="toast-title">${title}</div>` : ''}
+                    ${description ? `<div class="toast-desc">${description}</div>` : ''}
+                </div>
+                <button class="toast-close">
+                    <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+                </button>
+            `;
+
+            // 插入到 DOM 中
+            viewport.appendChild(toastEl);
+            
+            // 必须重新初始化新插入的 Lucide 图标
+            lucide.createIcons({ root: toastEl });
+
+            // 绑定关闭逻辑
+            const closeBtn = toastEl.querySelector('.toast-close');
+            let timer;
+
+            const closeToast = () => {
+                // 添加关闭动画 class
+                toastEl.classList.add('closing');
+                // 动画结束后移除 DOM
+                setTimeout(() => {
+                    if (viewport.contains(toastEl)) {
+                        viewport.removeChild(toastEl);
+                    }
+                }, 300); // 对应 CSS 中 0.3s 的 fadeOut
+            };
+
+            closeBtn.addEventListener('click', closeToast);
+
+            // 自动销毁定时器
+            if (duration > 0) {
+                timer = setTimeout(closeToast, duration);
+            }
+        }
+
+        // ---- 测试触发函数 ----
+        function triggerToast(type) {
+            const data = {
+                success: {
+                    title: "File Saved",
+                    desc: "Your markdown file has been successfully saved to local disk."
+                },
+                info: {
+                    title: "Sync in progress",
+                    desc: "Veloca is syncing your workspace to the cloud."
+                },
+                warning: {
+                    title: "Disk space low",
+                    desc: "You have less than 500MB of storage remaining."
+                },
+                error: {
+                    title: "Export Failed",
+                    desc: "An error occurred while generating the PDF document."
+                }
+            };
+
+            showToast({
+                type: type,
+                title: data[type].title,
+                description: data[type].desc
+            });
+        }
+    </script>
+</body>
+</html>
