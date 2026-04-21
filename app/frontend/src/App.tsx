@@ -1280,7 +1280,12 @@ interface MarkdownEditorProps {
 function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Vditor | null>(null);
+  const contentRef = useRef(content);
   const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -1293,7 +1298,10 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
       return undefined;
     }
 
-    const editor = new Vditor(container, {
+    let disposed = false;
+    let editor: Vditor;
+
+    editor = new Vditor(container, {
       cache: {
         enable: false
       },
@@ -1316,30 +1324,61 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
       typewriterMode: false,
       value: content,
       width: '100%',
+      after: () => {
+        if (disposed) {
+          destroyReadyEditor(editor);
+          return;
+        }
+
+        editorRef.current = editor;
+        editor.setTheme(theme === 'dark' ? 'dark' : 'classic');
+
+        if (editor.getValue() !== contentRef.current) {
+          editor.setValue(contentRef.current, true);
+        }
+      },
       input: (value) => onChangeRef.current(value)
     });
 
-    editorRef.current = editor;
-
     return () => {
-      editor.destroy();
-      editorRef.current = null;
+      disposed = true;
+
+      if (editorRef.current === editor) {
+        editorRef.current = null;
+      }
+
+      destroyReadyEditor(editor);
+      container.innerHTML = '';
     };
   }, [filePath]);
 
   useEffect(() => {
     const editor = editorRef.current;
 
-    if (editor && editor.getValue() !== content) {
+    if (isVditorReady(editor) && editor.getValue() !== content) {
       editor.setValue(content, true);
     }
   }, [content]);
 
   useEffect(() => {
-    editorRef.current?.setTheme(theme === 'dark' ? 'dark' : 'classic');
+    const editor = editorRef.current;
+
+    if (isVditorReady(editor)) {
+      editor.setTheme(theme === 'dark' ? 'dark' : 'classic');
+    }
   }, [theme]);
 
   return <div className="veloca-vditor" ref={containerRef} />;
+}
+
+function isVditorReady(editor: Vditor | null): editor is Vditor {
+  return Boolean(editor?.vditor);
+}
+
+function destroyReadyEditor(editor: Vditor): void {
+  if (isVditorReady(editor)) {
+    editor.destroy();
+  }
 }
 
 interface NameDialogProps {
