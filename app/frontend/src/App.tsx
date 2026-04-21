@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import Vditor from 'vditor';
-import 'vditor/dist/index.css';
+import Placeholder from '@tiptap/extension-placeholder';
+import StarterKit from '@tiptap/starter-kit';
+import { EditorContent, useEditor } from '@tiptap/react';
 import {
   CheckCircle2,
   ChevronDown,
@@ -21,6 +22,8 @@ import {
   Trash2,
   X
 } from 'lucide-react';
+import { marked } from 'marked';
+import TurndownService from 'turndown';
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
@@ -101,6 +104,30 @@ const emptyWorkspace: WorkspaceSnapshot = {
   tree: [],
   totalMarkdownFiles: 0
 };
+
+marked.setOptions({
+  async: false,
+  breaks: false,
+  gfm: true
+});
+
+const turndownService = new TurndownService({
+  bulletListMarker: '-',
+  codeBlockStyle: 'fenced',
+  emDelimiter: '_',
+  headingStyle: 'atx',
+  hr: '---',
+  strongDelimiter: '**'
+});
+
+turndownService.addRule('strikethrough', {
+  filter(node) {
+    return ['del', 's', 'strike'].includes(node.nodeName.toLowerCase());
+  },
+  replacement(content: string) {
+    return `~~${content}~~`;
+  }
+});
 
 export function App(): JSX.Element {
   const [theme, setTheme] = useState<ThemeMode>('dark');
@@ -499,7 +526,7 @@ export function App(): JSX.Element {
 
     window.requestAnimationFrame(() => {
       const editorHeadings = document.querySelectorAll<HTMLElement>(
-        '.veloca-vditor .vditor-reset h1, .veloca-vditor .vditor-reset h2, .veloca-vditor .vditor-reset h3, .veloca-vditor .vditor-reset h4, .veloca-vditor .vditor-reset h5, .veloca-vditor .vditor-reset h6'
+        '.veloca-editor .ProseMirror h1, .veloca-editor .ProseMirror h2, .veloca-editor .ProseMirror h3, .veloca-editor .ProseMirror h4, .veloca-editor .ProseMirror h5, .veloca-editor .ProseMirror h6'
       );
       const targetHeading = headingIndex >= 0 ? editorHeadings[headingIndex] : null;
 
@@ -1278,10 +1305,9 @@ interface MarkdownEditorProps {
 }
 
 function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorProps): JSX.Element {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<Vditor | null>(null);
   const contentRef = useRef(content);
   const onChangeRef = useRef(onChange);
+  const syncingRef = useRef(false);
 
   useEffect(() => {
     contentRef.current = content;
@@ -1291,94 +1317,82 @@ function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorPr
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (!container) {
-      return undefined;
-    }
-
-    let disposed = false;
-    let editor: Vditor;
-
-    editor = new Vditor(container, {
-      cache: {
-        enable: false
+  const editor = useEditor(
+    {
+      content: markdownToEditorHtml(content),
+      editorProps: {
+        attributes: {
+          class: theme === 'dark' ? 'veloca-prosemirror theme-dark' : 'veloca-prosemirror theme-light'
+        }
       },
-      counter: {
-        enable: false
-      },
-      height: 'auto',
-      minHeight: 480,
-      mode: 'ir',
-      placeholder: 'Start writing in Markdown...',
-      resize: {
-        enable: false
-      },
-      theme: theme === 'dark' ? 'dark' : 'classic',
-      toolbar: [],
-      toolbarConfig: {
-        hide: true,
-        pin: false
-      },
-      typewriterMode: false,
-      value: content,
-      width: '100%',
-      after: () => {
-        if (disposed) {
-          destroyReadyEditor(editor);
+      extensions: [
+        StarterKit.configure({
+          codeBlock: {
+            HTMLAttributes: {
+              class: 'veloca-code-block'
+            }
+          },
+          heading: {
+            levels: [1, 2, 3, 4, 5, 6]
+          }
+        }),
+        Placeholder.configure({
+          placeholder: 'Start writing in Markdown...'
+        })
+      ],
+      immediatelyRender: false,
+      onUpdate: ({ editor: currentEditor }) => {
+        if (syncingRef.current) {
           return;
         }
 
-        editorRef.current = editor;
-        editor.setTheme(theme === 'dark' ? 'dark' : 'classic');
+        const nextMarkdown = editorHtmlToMarkdown(currentEditor.getHTML());
 
-        if (editor.getValue() !== contentRef.current) {
-          editor.setValue(contentRef.current, true);
+        if (nextMarkdown !== contentRef.current) {
+          onChangeRef.current(nextMarkdown);
         }
-      },
-      input: (value) => onChangeRef.current(value)
-    });
-
-    return () => {
-      disposed = true;
-
-      if (editorRef.current === editor) {
-        editorRef.current = null;
       }
-
-      destroyReadyEditor(editor);
-      container.innerHTML = '';
-    };
-  }, [filePath]);
+    },
+    [filePath]
+  );
 
   useEffect(() => {
-    const editor = editorRef.current;
-
-    if (isVditorReady(editor) && editor.getValue() !== content) {
-      editor.setValue(content, true);
+    if (!editor) {
+      return;
     }
-  }, [content]);
+
+    const nextHtml = markdownToEditorHtml(content);
+
+    if (editor.getHTML() === nextHtml) {
+      return;
+    }
+
+    syncingRef.current = true;
+    editor.commands.setContent(nextHtml, {
+      emitUpdate: false
+    });
+    syncingRef.current = false;
+  }, [content, editor, filePath]);
 
   useEffect(() => {
-    const editor = editorRef.current;
-
-    if (isVditorReady(editor)) {
-      editor.setTheme(theme === 'dark' ? 'dark' : 'classic');
+    if (!editor) {
+      return;
     }
-  }, [theme]);
 
-  return <div className="veloca-vditor" ref={containerRef} />;
-}
+    editor.setOptions({
+      editorProps: {
+        attributes: {
+          class: theme === 'dark' ? 'veloca-prosemirror theme-dark' : 'veloca-prosemirror theme-light'
+        }
+      }
+    });
+  }, [editor, theme]);
 
-function isVditorReady(editor: Vditor | null): editor is Vditor {
-  return Boolean(editor?.vditor);
-}
-
-function destroyReadyEditor(editor: Vditor): void {
-  if (isVditorReady(editor)) {
-    editor.destroy();
-  }
+  return (
+    <div className="veloca-editor">
+      <EditorContent editor={editor} />
+    </div>
+  );
 }
 
 interface NameDialogProps {
@@ -1598,6 +1612,26 @@ function Switch({ checked, onChange }: SwitchProps): JSX.Element {
       <span className="shadcn-switch-thumb" />
     </button>
   );
+}
+
+function markdownToEditorHtml(markdown: string): string {
+  if (!markdown.trim()) {
+    return '<p></p>';
+  }
+
+  const rendered = marked.parse(markdown);
+  return typeof rendered === 'string' ? rendered : '<p></p>';
+}
+
+function editorHtmlToMarkdown(html: string): string {
+  if (!html.trim()) {
+    return '';
+  }
+
+  return turndownService
+    .turndown(html)
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd();
 }
 
 function getSaveStatusLabel(status: SaveStatus): string {

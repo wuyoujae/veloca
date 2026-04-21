@@ -428,64 +428,67 @@ button {
   color: var(--editor-copy);
 }
 
-.veloca-vditor {
+.veloca-editor {
   width: 100%;
   min-height: 480px;
   color: var(--editor-copy);
 }
 
-.veloca-vditor .vditor {
-  border: 0;
-  background: transparent;
-  color: var(--editor-copy);
-  --border-color: var(--border);
-  --toolbar-background-color: var(--background);
-  --textarea-background-color: var(--background);
-  --textarea-text-color: var(--editor-copy);
-  --panel-background-color: var(--code-background);
-  --second-color: var(--muted-foreground);
-  --heading-color: var(--foreground);
-  --ir-heading-color: var(--muted-foreground);
-  --ir-bi-color: var(--foreground);
-  --ir-link-color: var(--info);
-  --ir-bracket-color: var(--info);
-  --ir-paren-color: var(--muted-foreground);
-  --ir-title-color: var(--foreground);
+.veloca-editor .tiptap {
+  width: 100%;
 }
 
-.veloca-vditor .vditor-content,
-.veloca-vditor .vditor-ir,
-.veloca-vditor .vditor-ir pre.vditor-reset {
-  background: transparent;
-}
-
-.veloca-vditor .vditor-ir pre.vditor-reset {
+.veloca-editor .ProseMirror {
   min-height: 480px;
   padding: 0;
   color: var(--editor-copy);
   font-family: var(--font-sans);
   font-size: 1rem;
   line-height: 1.75;
+  outline: 0;
+  white-space: pre-wrap;
+  caret-color: var(--foreground);
 }
 
-.veloca-vditor .vditor-reset h1,
-.veloca-vditor .vditor-reset h2,
-.veloca-vditor .vditor-reset h3,
-.veloca-vditor .vditor-reset h4,
-.veloca-vditor .vditor-reset h5,
-.veloca-vditor .vditor-reset h6 {
+.veloca-editor .ProseMirror::selection,
+.veloca-editor .ProseMirror *::selection {
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.veloca-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--muted-foreground);
+}
+
+.veloca-editor .ProseMirror > *:first-child {
+  margin-top: 0;
+}
+
+.veloca-editor .ProseMirror > *:last-child {
+  margin-bottom: 0;
+}
+
+.veloca-editor .ProseMirror h1,
+.veloca-editor .ProseMirror h2,
+.veloca-editor .ProseMirror h3,
+.veloca-editor .ProseMirror h4,
+.veloca-editor .ProseMirror h5,
+.veloca-editor .ProseMirror h6 {
   color: var(--foreground);
   line-height: 1.2;
   letter-spacing: 0;
 }
 
-.veloca-vditor .vditor-reset h1 {
+.veloca-editor .ProseMirror h1 {
   margin: 0 0 24px;
   font-size: 2.25rem;
   font-weight: 700;
 }
 
-.veloca-vditor .vditor-reset h2 {
+.veloca-editor .ProseMirror h2 {
   margin: 48px 0 16px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
@@ -493,44 +496,73 @@ button {
   font-weight: 600;
 }
 
-.veloca-vditor .vditor-reset h3 {
+.veloca-editor .ProseMirror h3 {
   margin: 32px 0 12px;
   font-size: 1.1rem;
   font-weight: 600;
 }
 
-.veloca-vditor .vditor-reset p,
-.veloca-vditor .vditor-reset li {
+.veloca-editor .ProseMirror p,
+.veloca-editor .ProseMirror li {
   color: var(--editor-copy);
   font-size: 1rem;
   line-height: 1.75;
 }
 
-.veloca-vditor .vditor-reset blockquote {
-  border-left: 2px solid var(--foreground);
-  color: var(--muted-foreground);
+.veloca-editor .ProseMirror p {
+  margin: 0 0 20px;
 }
 
-.veloca-vditor .vditor-reset code:not(.hljs):not(.highlight-chroma) {
+.veloca-editor .ProseMirror ul,
+.veloca-editor .ProseMirror ol {
+  margin: 0 0 20px;
+  padding-left: 24px;
+}
+
+.veloca-editor .ProseMirror li + li {
+  margin-top: 6px;
+}
+
+.veloca-editor .ProseMirror blockquote {
+  margin: 24px 0;
+  padding: 8px 0 8px 16px;
+  border-left: 2px solid var(--foreground);
+  color: var(--muted-foreground);
+  font-style: italic;
+}
+
+.veloca-editor .ProseMirror code {
   border-radius: 4px;
   background: var(--muted);
   color: var(--foreground);
   font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.15em 0.35em;
 }
 
-.veloca-vditor .vditor-reset pre {
+.veloca-editor .ProseMirror pre {
+  margin: 24px 0;
+  padding: 16px;
+  overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--code-background);
 }
 
-.markdown-body.focus-mode .vditor-ir__node {
+.veloca-editor .ProseMirror pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--editor-copy);
+}
+
+.markdown-body.focus-mode .ProseMirror > * {
   opacity: 0.42;
   transition: opacity 0.18s ease;
 }
 
-.markdown-body.focus-mode .vditor-ir__node--expand,
-.markdown-body.focus-mode .vditor-ir__node:focus-within {
+.markdown-body.focus-mode .ProseMirror > *:hover,
+.markdown-body.focus-mode .ProseMirror:focus-within > * {
   opacity: 1;
 }
 

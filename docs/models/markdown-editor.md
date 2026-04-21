@@ -2,7 +2,7 @@
 
 ## Scope
 
-The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, recursive markdown file loading, and a Vditor-powered instant-rendering markdown editor.
+The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, recursive markdown file loading, and a TipTap-powered markdown editor that is styled entirely by Veloca.
 
 ## Implemented Architecture
 
@@ -10,7 +10,7 @@ The current Veloca milestone provides the foundation for a Typora-like markdown 
 - `app/backend/electron`: Electron main and preload scripts. The main process creates the desktop window and exposes safe IPC handlers. The preload script exposes a minimal `window.veloca` API to the renderer.
 - `app/backend/database`: SQLite connection setup using `better-sqlite3`. Foreign key enforcement is explicitly disabled to match the project database rule.
 - `app/backend/services`: Backend service layer for app settings and workspace scanning.
-- `vditor`: MIT-licensed markdown editor engine used in `ir` instant-rendering mode to provide the Typora-like writing surface.
+- `tiptap`: MIT-licensed rich-text editor engine used as the writing surface, with Markdown converted into and out of the editor through a local conversion layer.
 
 ## Data Model
 
@@ -79,12 +79,13 @@ When the app is opened in a normal browser during frontend-only development, the
 ## Editing and Save Flow
 
 1. Renderer opens a markdown file through `window.veloca.workspace.readMarkdown(path)`.
-2. The active markdown source is passed into Vditor in `ir` mode with the Vditor cache disabled.
-3. Editor input updates renderer state, outline data, word count, character count, and save status.
-4. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
-5. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
-6. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
-7. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
+2. The active markdown source is converted into HTML and passed into TipTap.
+3. Editor updates are converted back into Markdown and stored in renderer state.
+4. Renderer state updates outline data, word count, character count, and save status.
+5. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
+6. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
+7. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
+8. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
 
 ## Current UI Behavior
 
@@ -102,7 +103,8 @@ When the app is opened in a normal browser during frontend-only development, the
 - New files and folders are created with default names directly inside the tree, then immediately enter inline rename mode, matching Typora-style creation behavior.
 - Root workspace folders can be removed from the workspace through the context menu.
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
-- The editor surface uses Vditor instant-rendering mode for Typora-like single-pane markdown writing.
+- The editor surface uses TipTap with a Markdown conversion layer and no visible third-party toolbar.
+- The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
 - The editor saves markdown changes automatically by default and supports manual `Cmd/Ctrl+S` saves.
 - The status bar shows save state, word count, character count, and encoding.
 - The outline panel reflects the active editor content using a Typora-style indented list without connector lines.

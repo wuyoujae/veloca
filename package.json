@@ -13,13 +13,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tiptap/extension-placeholder": "^3.22.4",
+    "@tiptap/react": "^3.22.4",
+    "@tiptap/starter-kit": "^3.22.4",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^11.9.1",
     "electron-vite": "^3.0.0",
     "lucide-react": "^0.468.0",
+    "marked": "^18.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "vditor": "^3.11.2"
+    "turndown": "^7.2.4"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
@@ -27,6 +31,7 @@
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/turndown": "^5.0.6",
     "electron": "^33.2.1",
     "eslint": "^9.17.0",
     "typescript": "^5.7.2",

@@ -2,7 +2,7 @@
 
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
-The current version is a foundation build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, and a Vditor-powered instant-rendering editor based on the provided prototype.
+The current version is a foundation build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, and a TipTap-powered editor that is fully styled through Veloca's own UI system.
 
 ## Project Overview
 
@@ -19,7 +19,7 @@ Veloca separates desktop, backend, and renderer responsibilities:
 - Node services own persistent application behavior.
 - SQLite stores local application data with a minimal schema aligned to current requirements, including app settings and workspace folder roots.
 
-Vditor is used as the markdown editor engine because it is MIT licensed, supports instant-rendering markdown editing, and can be embedded into the existing React/Electron surface without forcing a separate document model.
+TipTap is used as the editor engine because it is MIT licensed, gives Veloca more control over the final writing experience, and allows the editing surface to fully inherit the application's own layout, typography, and theme tokens.
 
 ## Core Features
 
@@ -31,7 +31,7 @@ Vditor is used as the markdown editor engine because it is MIT licensed, support
 - Database-backed workspace roots for quick projects that do not need a system folder.
 - Recursive `.md` file discovery from added folders.
 - Custom file tree context menu for common system-level operations.
-- Typora-like Vditor instant-rendering markdown editor.
+- TipTap-powered markdown editor with Veloca-native styling.
 - Auto Save enabled by default, with `Cmd/Ctrl+S` manual save support.
 - Save status in the editor status bar.
 - Settings modal with polished dark/light theme switching.
@@ -40,7 +40,7 @@ Vditor is used as the markdown editor engine because it is MIT licensed, support
 
 ## Tech Stack
 
-- Frontend: React, TypeScript, Vite, Lucide React, Vditor, CSS
+- Frontend: React, TypeScript, Vite, Lucide React, TipTap, Marked, Turndown, CSS
 - Desktop shell: Electron, electron-vite
 - Backend: Node.js, TypeScript
 - Database: SQLite through `better-sqlite3`
@@ -147,7 +147,7 @@ Manual acceptance checks:
 9. Right-click a folder and try `New File` or `New Folder`; confirm a default item appears in the tree and enters inline rename mode.
 10. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
 11. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
-12. Select a markdown file and edit headings, paragraphs, lists, blockquotes, and code blocks in the instant-rendering editor.
+12. Select a markdown file and edit headings, paragraphs, lists, blockquotes, and code blocks in the TipTap editor.
 13. Wait for Auto Save and confirm the status bar returns to `Saved`.
 14. Select a different file, then return to the edited file and confirm the saved content is still present.
 15. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
@@ -160,11 +160,11 @@ Automated unit and integration tests should be added around file IO, save failur
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the instant-rendering editor and updates the breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, Vditor editor integration, Auto Save, manual save, and outline interactions.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, TipTap editor integration, Auto Save, manual save, and outline interactions.
 - Next: image and attachment handling.
 - Next: markdown export and search.
 - Later: plugin or extension system if product requirements justify it.
@@ -195,7 +195,7 @@ Recommended commit style:
 
 ```text
 feat: add markdown editor foundation
-feat: integrate vditor markdown editing
+feat: integrate tiptap markdown editing
 fix: persist editor theme setting
 docs: document markdown editor model
 ```
