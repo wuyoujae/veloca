@@ -324,6 +324,7 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   height: 48px;
   padding: 0 24px;
   border-bottom: 1px solid transparent;
@@ -335,16 +336,94 @@ button {
 }
 
 .breadcrumb {
+  min-width: 0;
+  flex: 1;
   gap: 6px;
   color: var(--muted-foreground);
   font-size: 13px;
   font-weight: 500;
+  overflow: hidden;
 }
 
 .breadcrumb-segment {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.editor-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.save-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.save-status-chip.saved {
+  color: var(--foreground);
+}
+
+.save-status-chip.failed {
+  color: #ef4444;
+}
+
+.save-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.save-status-chip.saving .save-status-dot,
+.save-status-chip.unsaved .save-status-dot {
+  animation: pulseDot 1s ease-in-out infinite;
+}
+
+.save-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease,
+    transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.save-button:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.save-button:disabled {
+  cursor: default;
+  opacity: 0.68;
+}
+
+.save-button.saving {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+.save-button-icon.spinning {
+  animation: spin 0.9s linear infinite;
 }
 
 .editor-scroll-area {
@@ -392,18 +471,26 @@ button {
 }
 
 .markdown-body p {
-  margin: 0 0 20px;
+  margin: 0 0 14px;
   color: var(--editor-copy);
   font-size: 1rem;
   line-height: 1.75;
 }
 
 .markdown-body blockquote {
-  margin: 24px 0;
-  padding: 8px 0 8px 16px;
+  margin: 18px 0;
+  padding: 6px 0 6px 14px;
   border-left: 2px solid var(--foreground);
   color: var(--muted-foreground);
   font-style: italic;
+}
+
+.markdown-body blockquote > * + * {
+  margin-top: 8px;
+}
+
+.markdown-body blockquote p {
+  margin: 0;
 }
 
 .markdown-body code {
@@ -510,25 +597,37 @@ button {
 }
 
 .veloca-editor .ProseMirror p {
-  margin: 0 0 20px;
+  margin: 0 0 14px;
 }
 
 .veloca-editor .ProseMirror ul,
 .veloca-editor .ProseMirror ol {
-  margin: 0 0 20px;
+  margin: 0 0 14px;
   padding-left: 24px;
 }
 
+.veloca-editor .ProseMirror li > p {
+  margin: 0;
+}
+
 .veloca-editor .ProseMirror li + li {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .veloca-editor .ProseMirror blockquote {
-  margin: 24px 0;
-  padding: 8px 0 8px 16px;
+  margin: 18px 0;
+  padding: 6px 0 6px 14px;
   border-left: 2px solid var(--foreground);
   color: var(--muted-foreground);
   font-style: italic;
+}
+
+.veloca-editor .ProseMirror blockquote p {
+  margin: 0;
+}
+
+.veloca-editor .ProseMirror blockquote > * + * {
+  margin-top: 8px;
 }
 
 .veloca-editor .ProseMirror code {
@@ -617,6 +716,29 @@ button {
 .primary-action {
   background: var(--foreground);
   color: var(--background);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.86);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .secondary-action {

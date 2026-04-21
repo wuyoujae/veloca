@@ -14,8 +14,10 @@ import {
   Folder,
   FolderPlus,
   Info,
+  LoaderCircle,
   Moon,
   Pencil,
+  Save,
   Settings,
   Scissors,
   Sun,
@@ -857,6 +859,29 @@ export function App(): JSX.Element {
                 <span>No markdown file selected</span>
               )}
             </div>
+
+            <div className="editor-actions">
+              {activeFile && autoSave && (
+                <span className={`save-status-chip ${saveStatus}`} aria-live="polite">
+                  <span className="save-status-dot" />
+                  <span>{getAutoSaveLabel(saveStatus)}</span>
+                </span>
+              )}
+
+              <button
+                className={`save-button ${saveStatus === 'saving' ? 'saving' : ''}`}
+                type="button"
+                onClick={() => void saveCurrentDocument()}
+                disabled={!activeFile || saveStatus === 'saving'}
+              >
+                {saveStatus === 'saving' ? (
+                  <LoaderCircle className="save-button-icon spinning" size={14} />
+                ) : (
+                  <Save className="save-button-icon" size={14} />
+                )}
+                <span>{getSaveButtonLabel(saveStatus, autoSave)}</span>
+              </button>
+            </div>
           </header>
 
           <section className="editor-scroll-area" aria-label="Markdown editor preview">
@@ -1681,29 +1706,53 @@ function getSaveStatusLabel(status: SaveStatus): string {
   return 'Saved';
 }
 
+function getSaveButtonLabel(status: SaveStatus, autoSave: boolean): string {
+  if (status === 'saving') {
+    return autoSave ? 'Auto Saving' : 'Saving';
+  }
+
+  if (status === 'saved') {
+    return autoSave ? 'Saved' : 'Save';
+  }
+
+  if (status === 'failed') {
+    return 'Retry Save';
+  }
+
+  return 'Save';
+}
+
+function getAutoSaveLabel(status: SaveStatus): string {
+  if (status === 'saving') {
+    return 'Auto Save';
+  }
+
+  if (status === 'failed') {
+    return 'Auto Save Paused';
+  }
+
+  if (status === 'unsaved') {
+    return 'Pending Save';
+  }
+
+  return 'Auto Save On';
+}
+
 function parseMarkdownSections(content: string, fallbackTitle: string): MarkdownSection[] {
-  const lines = content.split(/\r?\n/);
   const sections: MarkdownSection[] = [];
+  const tokens = marked.lexer(content);
 
-  lines.forEach((line, index) => {
-    const match = /^(#{1,6})\s+(.+)$/.exec(line);
+  collectHeadingTokens(tokens, sections);
 
-    if (match) {
-      sections.push({
-        id: slugify(match[2], sections.length),
-        level: match[1].length,
-        title: match[2].trim()
-      });
-    }
-
-    if (index === lines.length - 1 && sections.length === 0) {
-      sections.push({
+  if (!sections.length) {
+    return [
+      {
         id: 'document',
         level: 1,
         title: fallbackTitle
-      });
-    }
-  });
+      }
+    ];
+  }
 
   return sections;
 }
@@ -1716,6 +1765,66 @@ function slugify(value: string, index: number): string {
     .replace(/^-+|-+$/g, '');
 
   return slug ? `${slug}-${index}` : `heading-${index}`;
+}
+
+interface MarkdownToken {
+  depth?: number;
+  items?: MarkdownListItemToken[];
+  text?: string;
+  tokens?: MarkdownToken[];
+  type?: string;
+}
+
+interface MarkdownListItemToken {
+  tokens?: MarkdownToken[];
+}
+
+function collectHeadingTokens(tokens: MarkdownToken[], sections: MarkdownSection[]): void {
+  tokens.forEach((token) => {
+    if (token.type === 'heading' && typeof token.depth === 'number') {
+      const title = extractMarkdownText(token.tokens).trim() || decodeMarkdownEscapes(token.text ?? '').trim();
+
+      sections.push({
+        id: slugify(title, sections.length),
+        level: token.depth,
+        title
+      });
+    }
+
+    if (token.tokens?.length) {
+      collectHeadingTokens(token.tokens, sections);
+    }
+
+    token.items?.forEach((item) => {
+      if (item.tokens?.length) {
+        collectHeadingTokens(item.tokens, sections);
+      }
+    });
+  });
+}
+
+function extractMarkdownText(tokens?: MarkdownToken[]): string {
+  if (!tokens?.length) {
+    return '';
+  }
+
+  return tokens
+    .map((token) => {
+      if (token.type === 'escape') {
+        return token.text ?? '';
+      }
+
+      if (token.tokens?.length) {
+        return extractMarkdownText(token.tokens);
+      }
+
+      return token.text ?? '';
+    })
+    .join('');
+}
+
+function decodeMarkdownEscapes(value: string): string {
+  return value.replace(/\\([\\`*_{}[\]()#+\-.!|>])/g, '$1');
 }
 
 function findFirstFile(nodes: WorkspaceTreeNode[]): WorkspaceTreeNode | null {

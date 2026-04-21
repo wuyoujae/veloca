@@ -86,6 +86,7 @@ When the app is opened in a normal browser during frontend-only development, the
 6. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
 7. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
 8. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
+9. The editor header exposes a manual save button, while Auto Save surfaces animated saving feedback in the same header area.
 
 ## Current UI Behavior
 
@@ -105,9 +106,11 @@ When the app is opened in a normal browser during frontend-only development, the
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
 - The editor surface uses TipTap with a Markdown conversion layer and no visible third-party toolbar.
 - The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
+- List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
 - The editor saves markdown changes automatically by default and supports manual `Cmd/Ctrl+S` saves.
+- The editor header shows both the current file path and save controls, including animated Auto Save feedback while writes are in flight.
 - The status bar shows save state, word count, character count, and encoding.
-- The outline panel reflects the active editor content using a Typora-style indented list without connector lines.
+- The outline panel reflects the active editor content using a Typora-style indented list without connector lines, and heading labels are derived from parsed Markdown tokens so escaped punctuation renders correctly.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.
 - The Theme segmented control switches between dark and light modes.
