@@ -922,6 +922,7 @@ button {
 .veloca-editor .ProseMirror th p,
 .veloca-editor .ProseMirror td p {
   margin: 0;
+  min-height: 1.5em;
 }
 
 .veloca-editor .ProseMirror th > * + *,
@@ -948,16 +949,12 @@ button {
 .veloca-editor .ProseMirror td,
 .veloca-editor .ProseMirror th {
   position: relative;
+  cursor: text;
 }
 
 .veloca-editor .ProseMirror td:focus-within,
 .veloca-editor .ProseMirror th:focus-within {
   background: color-mix(in srgb, var(--table-selected) 75%, transparent);
-}
-
-.veloca-editor .ProseMirror td .ProseMirror-trailingBreak,
-.veloca-editor .ProseMirror th .ProseMirror-trailingBreak {
-  display: none;
 }
 
 .veloca-editor .ProseMirror ul[data-type='taskList'] {
