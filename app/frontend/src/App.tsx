@@ -1105,7 +1105,7 @@ function FileTree({
         <span>Workspace</span>
         <div className="directory-toolbar-actions">
           <button className="toolbar-icon-btn" type="button" aria-label="New database workspace" onClick={onCreateDatabaseWorkspace}>
-            <FilePlus size={16} />
+            <FolderStarPlusIcon size={16} />
           </button>
           <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
             <FolderPlus size={16} />
@@ -1616,7 +1616,7 @@ function NameDialog({
         }}
       >
         <div className="name-dialog-header">
-          <FilePlus size={18} />
+          <FolderStarPlusIcon size={18} />
           <h2>{title}</h2>
         </div>
         <p>{description}</p>
@@ -1779,6 +1779,28 @@ function FolderStarIcon({ size }: FolderStarIconProps): JSX.Element {
     >
       <path d="M3 6.75A2.75 2.75 0 0 1 5.75 4h4.1c.73 0 1.42.29 1.93.8l1.02 1.02c.3.3.7.47 1.13.47h4.32A2.75 2.75 0 0 1 21 9.04v7.21A2.75 2.75 0 0 1 18.25 19H5.75A2.75 2.75 0 0 1 3 16.25Z" />
       <path d="m16.2 10.35.48 1.02 1.1.15-.8.78.2 1.1-.98-.52-.98.52.19-1.1-.79-.78 1.1-.15Z" />
+    </svg>
+  );
+}
+
+function FolderStarPlusIcon({ size }: FolderStarIconProps): JSX.Element {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height={size}
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width={size}
+    >
+      <path d="M3 6.75A2.75 2.75 0 0 1 5.75 4h4.1c.73 0 1.42.29 1.93.8l1.02 1.02c.3.3.7.47 1.13.47h2.82A2.75 2.75 0 0 1 19.5 9.04v1.2" />
+      <path d="M3 9.25h16.5v7A2.75 2.75 0 0 1 16.75 19H5.75A2.75 2.75 0 0 1 3 16.25Z" />
+      <path d="m14.35 10.15.42.87.95.13-.69.67.17.94-.85-.45-.84.45.16-.94-.68-.67.95-.13Z" />
+      <path d="M20 14.5v5" />
+      <path d="M17.5 17h5" />
     </svg>
   );
 }
