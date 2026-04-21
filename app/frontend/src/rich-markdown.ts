@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify';
-import { mergeAttributes, Node, type Editor } from '@tiptap/core';
+import { Extension, mergeAttributes, Node, type Editor } from '@tiptap/core';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Emoji from '@tiptap/extension-emoji';
 import FileHandler from '@tiptap/extension-file-handler';
@@ -17,6 +17,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
+import { TextSelection } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import { common, createLowlight } from 'lowlight';
 
@@ -389,6 +390,16 @@ export const HtmlBlockNode = Node.create({
   }
 });
 
+const TyporaTableInput = Extension.create({
+  name: 'typoraTableInput',
+
+  addKeyboardShortcuts() {
+    return {
+      Enter: () => convertMarkdownTableHeaderToTable(this.editor)
+    };
+  }
+});
+
 export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
   return [
     StarterKit.configure({
@@ -420,6 +431,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     TaskItem.configure({
       nested: true
     }),
+    TyporaTableInput,
     Table.configure({
       resizable: false
     }),
@@ -692,6 +704,147 @@ export function sanitizeHtml(html: string): string {
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'srcdoc'],
     FORBID_TAGS: ['script']
   });
+}
+
+function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
+  const { selection, schema, tr } = editor.state;
+
+  if (!selection.empty || !selection.$from.parent.isTextblock) {
+    return false;
+  }
+
+  const { $from } = selection;
+
+  if ($from.parent.type.name !== 'paragraph' || $from.parentOffset !== $from.parent.content.size) {
+    return false;
+  }
+
+  if (!isRootParagraphContext($from)) {
+    return false;
+  }
+
+  const headerCells = parseMarkdownTableHeader($from.parent.textBetween(0, $from.parent.content.size, ''));
+
+  if (!headerCells) {
+    return false;
+  }
+
+  const tableNode = buildMarkdownTableNode(schema, headerCells);
+  const paragraphStart = $from.before();
+  const paragraphEnd = paragraphStart + $from.parent.nodeSize;
+
+  tr.replaceWith(paragraphStart, paragraphEnd, tableNode);
+
+  const selectionPos = getFirstTableBodyCellSelection(paragraphStart, tableNode);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(selectionPos)));
+  tr.scrollIntoView();
+
+  editor.view.dispatch(tr);
+
+  return true;
+}
+
+function isRootParagraphContext($from: Editor['state']['selection']['$from']): boolean {
+  for (let depth = $from.depth - 1; depth >= 0; depth -= 1) {
+    const ancestorName = $from.node(depth).type.name;
+
+    if (ancestorName === 'doc') {
+      return true;
+    }
+
+    if (ancestorName === 'blockquote' || ancestorName === 'bulletList' || ancestorName === 'orderedList') {
+      return false;
+    }
+
+    if (
+      ancestorName === 'listItem' ||
+      ancestorName === 'taskItem' ||
+      ancestorName === 'tableCell' ||
+      ancestorName === 'tableHeader' ||
+      ancestorName === 'codeBlock'
+    ) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+function parseMarkdownTableHeader(value: string): string[] | null {
+  const normalized = value.trim();
+
+  if (!normalized.startsWith('|') || !normalized.endsWith('|')) {
+    return null;
+  }
+
+  const columns = splitMarkdownTableColumns(normalized);
+
+  if (!columns || columns.length < 2) {
+    return null;
+  }
+
+  return columns;
+}
+
+function splitMarkdownTableColumns(value: string): string[] | null {
+  const columns: string[] = [];
+  let current = '';
+  let isEscaping = false;
+
+  for (let index = 1; index < value.length - 1; index += 1) {
+    const character = value[index];
+
+    if (isEscaping) {
+      current += character;
+      isEscaping = false;
+      continue;
+    }
+
+    if (character === '\\') {
+      isEscaping = true;
+      continue;
+    }
+
+    if (character === '|') {
+      columns.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += character;
+  }
+
+  if (isEscaping) {
+    current += '\\';
+  }
+
+  columns.push(current.trim());
+
+  return columns.every((column) => column.length > 0) ? columns : null;
+}
+
+function buildMarkdownTableNode(schema: Editor['schema'], headerCells: string[]) {
+  const createParagraph = (text = '') =>
+    schema.nodes.paragraph.create(
+      null,
+      text ? schema.text(text) : undefined
+    );
+  const createHeaderCell = (text: string) => schema.nodes.tableHeader.create(null, createParagraph(text));
+  const createBodyCell = () => schema.nodes.tableCell.create(null, createParagraph());
+  const headerRow = schema.nodes.tableRow.create(null, headerCells.map(createHeaderCell));
+  const bodyRow = schema.nodes.tableRow.create(null, headerCells.map(() => createBodyCell()));
+
+  return schema.nodes.table.create(null, [headerRow, bodyRow]);
+}
+
+function getFirstTableBodyCellSelection(tableStart: number, tableNode: ReturnType<typeof buildMarkdownTableNode>): number {
+  const headerRow = tableNode.firstChild;
+
+  if (!headerRow) {
+    return tableStart + 1;
+  }
+
+  return tableStart + headerRow.nodeSize + 4;
 }
 
 function sanitizeUrl(value: string | null): string | null {

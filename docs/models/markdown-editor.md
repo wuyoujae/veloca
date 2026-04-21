@@ -128,6 +128,7 @@ When the app is opened in a normal browser during frontend-only development, the
 - The editor surface uses TipTap with `@tiptap/markdown`, rich Markdown extensions, and no visible third-party toolbar.
 - The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
 - List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
+- Typora-style table authoring is supported: typing a single header row such as `| Head 1 | Head 2 |` in a normal paragraph and pressing `Enter` immediately converts it into a rendered table, auto-inserting the standard Markdown separator row and an empty body row.
 - The editor supports richer Markdown blocks including tables, task lists, code highlighting, inline and block LaTeX formulas, emoji input, images, audio, video, iframe embeds, and safe HTML `details` blocks.
 - Filesystem workspaces save pasted or dropped media beside the current markdown file in a `<document>.assets` directory and keep relative markdown paths.
 - Database-backed workspaces store pasted or dropped media inside SQLite and resolve them through the same asset protocol used by renderer media nodes.
