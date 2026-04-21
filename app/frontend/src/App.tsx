@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import Vditor from 'vditor';
+import 'vditor/dist/index.css';
 import {
   CheckCircle2,
   ChevronDown,
@@ -22,6 +24,7 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
+type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type ToastType = 'success' | 'info';
 
 interface ToastMessage {
@@ -65,7 +68,6 @@ interface MarkdownSection {
   id: string;
   level: number;
   title: string;
-  lines: string[];
 }
 
 interface FileClipboard {
@@ -106,6 +108,7 @@ export function App(): JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [activeFile, setActiveFile] = useState<MarkdownFileContent | null>(null);
+  const [documentContent, setDocumentContent] = useState('');
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
@@ -113,32 +116,53 @@ export function App(): JSX.Element {
   const [editingNode, setEditingNode] = useState<EditingNodeState | null>(null);
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
+  const [autoSave, setAutoSave] = useState(true);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const activeFileRef = useRef<MarkdownFileContent | null>(null);
+  const autoSaveRef = useRef(autoSave);
+  const documentContentRef = useRef(documentContent);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sections = useMemo(() => {
-    return parseMarkdownSections(activeFile?.content ?? '', activeFile?.name ?? 'Untitled');
-  }, [activeFile]);
+    return parseMarkdownSections(documentContent, activeFile?.name ?? 'Untitled');
+  }, [activeFile?.name, documentContent]);
 
   const wordCount = useMemo(() => {
-    return activeFile?.content.trim().split(/\s+/).filter(Boolean).length ?? 0;
-  }, [activeFile]);
+    return documentContent.trim().split(/\s+/).filter(Boolean).length;
+  }, [documentContent]);
 
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
       applyTheme(storedTheme);
       setTheme(storedTheme);
     });
+    window.veloca?.settings.getAutoSave().then(setAutoSave);
 
     if (!window.veloca) {
       const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
+      const fallbackAutoSave = localStorage.getItem('veloca-auto-save') !== 'false';
       applyTheme(fallbackTheme);
       setTheme(fallbackTheme);
+      setAutoSave(fallbackAutoSave);
     }
   }, []);
+
+  useEffect(() => {
+    activeFileRef.current = activeFile;
+  }, [activeFile]);
+
+  useEffect(() => {
+    autoSaveRef.current = autoSave;
+  }, [autoSave]);
+
+  useEffect(() => {
+    documentContentRef.current = documentContent;
+  }, [documentContent]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -187,6 +211,84 @@ export function App(): JSX.Element {
     });
   };
 
+  const updateAutoSave = async (enabled: boolean) => {
+    setAutoSave(enabled);
+    localStorage.setItem('veloca-auto-save', enabled ? 'true' : 'false');
+    await window.veloca?.settings.setAutoSave(enabled);
+    showToast({
+      type: 'success',
+      title: 'Editor Updated',
+      description: `Auto Save is now ${enabled ? 'enabled' : 'disabled'}.`
+    });
+  };
+
+  const clearSaveTimer = () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  };
+
+  const saveCurrentDocument = async () => {
+    const file = activeFileRef.current;
+    const content = documentContentRef.current;
+
+    if (!file || !window.veloca) {
+      setSaveStatus('saved');
+      return true;
+    }
+
+    clearSaveTimer();
+    setSaveStatus('saving');
+
+    try {
+      const savedFile = await window.veloca.workspace.saveMarkdown(file.path, content);
+
+      if (activeFileRef.current?.path === savedFile.path) {
+        setActiveFile(savedFile);
+        setSaveStatus(documentContentRef.current === content ? 'saved' : 'unsaved');
+      }
+
+      return true;
+    } catch {
+      setSaveStatus('failed');
+      showToast({
+        type: 'info',
+        title: 'Save Failed',
+        description: 'Veloca could not save the current markdown file.'
+      });
+      return false;
+    }
+  };
+
+  const canLeaveActiveFile = async (targetPath?: string) => {
+    const currentFile = activeFileRef.current;
+    const hasUnsavedChanges = Boolean(currentFile && documentContentRef.current !== currentFile.content);
+
+    if (!currentFile || currentFile.path === targetPath || !hasUnsavedChanges) {
+      return true;
+    }
+
+    if (!autoSaveRef.current) {
+      const shouldDiscard = window.confirm('Discard unsaved changes before switching files?');
+
+      if (shouldDiscard) {
+        clearSaveTimer();
+      }
+
+      return shouldDiscard;
+    }
+
+    return saveCurrentDocument();
+  };
+
+  const updateDocumentContent = (content: string) => {
+    setDocumentContent(content);
+
+    const savedContent = activeFileRef.current?.content ?? '';
+    setSaveStatus(content === savedContent ? 'saved' : 'unsaved');
+  };
+
   const loadWorkspace = async () => {
     if (!window.veloca) {
       setLoadingWorkspace(false);
@@ -208,6 +310,8 @@ export function App(): JSX.Element {
         await readMarkdownFile(nextFile.path);
       } else {
         setActiveFile(null);
+        setDocumentContent('');
+        setSaveStatus('saved');
       }
     } catch {
       showToast({
@@ -321,6 +425,8 @@ export function App(): JSX.Element {
       await readMarkdownFile(nextFile.path);
     } else {
       setActiveFile(null);
+      setDocumentContent('');
+      setSaveStatus('saved');
     }
   };
 
@@ -333,7 +439,18 @@ export function App(): JSX.Element {
 
   const readMarkdownFile = async (filePath: string) => {
     if (!window.veloca) {
-      return;
+      return false;
+    }
+
+    if (activeFileRef.current?.path === filePath) {
+      setSidebarTab('files');
+      return true;
+    }
+
+    const canLeave = await canLeaveActiveFile(filePath);
+
+    if (!canLeave) {
+      return false;
     }
 
     setLoadingFile(true);
@@ -341,13 +458,17 @@ export function App(): JSX.Element {
     try {
       const file = await window.veloca.workspace.readMarkdown(filePath);
       setActiveFile(file);
+      setDocumentContent(file.content);
+      setSaveStatus('saved');
       setSidebarTab('files');
+      return true;
     } catch {
       showToast({
         type: 'info',
         title: 'File Not Loaded',
         description: 'Only markdown files inside the current workspace can be opened.'
       });
+      return false;
     } finally {
       setLoadingFile(false);
     }
@@ -374,8 +495,15 @@ export function App(): JSX.Element {
 
   const selectHeading = (headingId: string) => {
     setActiveHeadingId(headingId);
+    const headingIndex = sections.findIndex((section) => section.id === headingId);
+
     window.requestAnimationFrame(() => {
-      document.getElementById(headingId)?.scrollIntoView({
+      const editorHeadings = document.querySelectorAll<HTMLElement>(
+        '.veloca-vditor .vditor-reset h1, .veloca-vditor .vditor-reset h2, .veloca-vditor .vditor-reset h3, .veloca-vditor .vditor-reset h4, .veloca-vditor .vditor-reset h5, .veloca-vditor .vditor-reset h6'
+      );
+      const targetHeading = headingIndex >= 0 ? editorHeadings[headingIndex] : null;
+
+      targetHeading?.scrollIntoView({
         block: 'start',
         behavior: 'smooth'
       });
@@ -586,6 +714,31 @@ export function App(): JSX.Element {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   };
 
+  useEffect(() => {
+    if (!autoSave || saveStatus !== 'unsaved' || !activeFile) {
+      return undefined;
+    }
+
+    clearSaveTimer();
+    saveTimerRef.current = setTimeout(() => {
+      void saveCurrentDocument();
+    }, 800);
+
+    return clearSaveTimer;
+  }, [activeFile, autoSave, documentContent, saveStatus]);
+
+  useEffect(() => {
+    const saveOnShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void saveCurrentDocument();
+      }
+    };
+
+    window.addEventListener('keydown', saveOnShortcut);
+    return () => window.removeEventListener('keydown', saveOnShortcut);
+  }, []);
+
   return (
     <div className="app-shell">
       <header className="titlebar" aria-label="Window title bar" />
@@ -665,19 +818,12 @@ export function App(): JSX.Element {
           <section className="editor-scroll-area" aria-label="Markdown editor preview">
             {activeFile ? (
               <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
-                {sections.map((section) => (
-                  <section
-                    className={
-                      activeHeadingId === section.id ? 'document-section active' : 'document-section'
-                    }
-                    id={section.id}
-                    key={section.id}
-                    onMouseEnter={() => setActiveHeadingId(section.id)}
-                  >
-                    {renderHeading(section)}
-                    {renderMarkdownLines(section.lines)}
-                  </section>
-                ))}
+                <MarkdownEditor
+                  content={documentContent}
+                  filePath={activeFile.path}
+                  theme={theme}
+                  onChange={updateDocumentContent}
+                />
                 {loadingFile && <div className="loading-state">Loading file...</div>}
               </article>
             ) : (
@@ -700,8 +846,9 @@ export function App(): JSX.Element {
           </section>
 
           <footer className="statusbar">
+            <span>{getSaveStatusLabel(saveStatus)}</span>
             <span>{wordCount} Words</span>
-            <span>{activeFile?.content.length ?? 0} Characters</span>
+            <span>{documentContent.length} Characters</span>
             <span>UTF-8</span>
           </footer>
         </main>
@@ -782,6 +929,14 @@ export function App(): JSX.Element {
                     <option value="system">System</option>
                     <option value="mono">JetBrains Mono</option>
                   </select>
+                </div>
+
+                <div className="setting-row">
+                  <div className="setting-info">
+                    <span className="setting-label">Auto Save</span>
+                    <span className="setting-desc">Save markdown changes after a short pause while writing.</span>
+                  </div>
+                  <Switch checked={autoSave} onChange={updateAutoSave} />
                 </div>
 
                 <div className="setting-row">
@@ -1115,6 +1270,78 @@ function OutlinePanel({
   );
 }
 
+interface MarkdownEditorProps {
+  content: string;
+  filePath: string;
+  theme: ThemeMode;
+  onChange: (content: string) => void;
+}
+
+function MarkdownEditor({ content, filePath, theme, onChange }: MarkdownEditorProps): JSX.Element {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<Vditor | null>(null);
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+
+    if (!container) {
+      return undefined;
+    }
+
+    const editor = new Vditor(container, {
+      cache: {
+        enable: false
+      },
+      counter: {
+        enable: false
+      },
+      height: 'auto',
+      minHeight: 480,
+      mode: 'ir',
+      placeholder: 'Start writing in Markdown...',
+      resize: {
+        enable: false
+      },
+      theme: theme === 'dark' ? 'dark' : 'classic',
+      toolbar: [],
+      toolbarConfig: {
+        hide: true,
+        pin: false
+      },
+      typewriterMode: false,
+      value: content,
+      width: '100%',
+      input: (value) => onChangeRef.current(value)
+    });
+
+    editorRef.current = editor;
+
+    return () => {
+      editor.destroy();
+      editorRef.current = null;
+    };
+  }, [filePath]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+
+    if (editor && editor.getValue() !== content) {
+      editor.setValue(content, true);
+    }
+  }, [content]);
+
+  useEffect(() => {
+    editorRef.current?.setTheme(theme === 'dark' ? 'dark' : 'classic');
+  }, [theme]);
+
+  return <div className="veloca-vditor" ref={containerRef} />;
+}
+
 interface NameDialogProps {
   description: string;
   name: string;
@@ -1334,130 +1561,47 @@ function Switch({ checked, onChange }: SwitchProps): JSX.Element {
   );
 }
 
+function getSaveStatusLabel(status: SaveStatus): string {
+  if (status === 'saving') {
+    return 'Saving';
+  }
+
+  if (status === 'unsaved') {
+    return 'Unsaved';
+  }
+
+  if (status === 'failed') {
+    return 'Save Failed';
+  }
+
+  return 'Saved';
+}
+
 function parseMarkdownSections(content: string, fallbackTitle: string): MarkdownSection[] {
   const lines = content.split(/\r?\n/);
   const sections: MarkdownSection[] = [];
-  let current: MarkdownSection | null = null;
 
-  for (const line of lines) {
+  lines.forEach((line, index) => {
     const match = /^(#{1,6})\s+(.+)$/.exec(line);
 
     if (match) {
-      if (current) {
-        sections.push(current);
-      }
-
-      current = {
+      sections.push({
         id: slugify(match[2], sections.length),
         level: match[1].length,
-        title: match[2].trim(),
-        lines: []
-      };
-      continue;
+        title: match[2].trim()
+      });
     }
 
-    if (!current) {
-      current = {
+    if (index === lines.length - 1 && sections.length === 0) {
+      sections.push({
         id: 'document',
         level: 1,
-        title: fallbackTitle,
-        lines: []
-      };
+        title: fallbackTitle
+      });
     }
+  });
 
-    current.lines.push(line);
-  }
-
-  if (current) {
-    sections.push(current);
-  }
-
-  return sections.length > 0
-    ? sections
-    : [
-        {
-          id: 'document',
-          level: 1,
-          title: fallbackTitle,
-          lines: []
-        }
-      ];
-}
-
-function renderHeading(section: MarkdownSection): JSX.Element {
-  if (section.level === 1) {
-    return <h1>{section.title}</h1>;
-  }
-
-  if (section.level === 2) {
-    return <h2>{section.title}</h2>;
-  }
-
-  return <h3>{section.title}</h3>;
-}
-
-function renderMarkdownLines(lines: string[]): JSX.Element[] {
-  const elements: JSX.Element[] = [];
-  let paragraph: string[] = [];
-  let codeLines: string[] = [];
-  let inCodeBlock = false;
-
-  const flushParagraph = () => {
-    if (paragraph.length === 0) {
-      return;
-    }
-
-    elements.push(<p key={`p-${elements.length}`}>{paragraph.join(' ')}</p>);
-    paragraph = [];
-  };
-
-  const flushCode = () => {
-    elements.push(
-      <pre key={`code-${elements.length}`}>
-        <code>{codeLines.join('\n')}</code>
-      </pre>
-    );
-    codeLines = [];
-  };
-
-  for (const line of lines) {
-    if (line.startsWith('```')) {
-      if (inCodeBlock) {
-        flushCode();
-        inCodeBlock = false;
-      } else {
-        flushParagraph();
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeLines.push(line);
-      continue;
-    }
-
-    if (line.startsWith('>')) {
-      flushParagraph();
-      elements.push(<blockquote key={`quote-${elements.length}`}>{line.replace(/^>\s?/, '')}</blockquote>);
-      continue;
-    }
-
-    if (line.trim() === '') {
-      flushParagraph();
-      continue;
-    }
-
-    paragraph.push(line.trim());
-  }
-
-  flushParagraph();
-
-  if (inCodeBlock) {
-    flushCode();
-  }
-
-  return elements;
+  return sections;
 }
 
 function slugify(value: string, index: number): string {

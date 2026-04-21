@@ -9,7 +9,13 @@ import {
 } from 'electron';
 import { join } from 'node:path';
 import { closeDatabase, getDatabase } from '../database/connection';
-import { getTheme, setTheme, type ThemeMode } from '../services/settings-store';
+import {
+  getAutoSave,
+  getTheme,
+  setAutoSave,
+  setTheme,
+  type ThemeMode
+} from '../services/settings-store';
 import {
   addWorkspaceFolders,
   createDatabaseWorkspace,
@@ -21,6 +27,7 @@ import {
   readMarkdownFile,
   removeWorkspaceFolder,
   renameWorkspaceEntry,
+  saveMarkdownFile,
   validateWorkspacePath
 } from '../services/workspace-service';
 
@@ -59,6 +66,10 @@ function registerIpcHandlers(): void {
 
     return setTheme(theme);
   });
+  ipcMain.handle('settings:get-auto-save', () => getAutoSave());
+  ipcMain.handle('settings:set-auto-save', (_event, enabled: boolean) => {
+    return setAutoSave(Boolean(enabled));
+  });
   ipcMain.handle('workspace:get', () => getWorkspaceSnapshot());
   ipcMain.handle('workspace:add-folder', async (event) => {
     const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
@@ -81,6 +92,9 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
     return readMarkdownFile(filePath);
+  });
+  ipcMain.handle('workspace:save-markdown', (_event, filePath: string, content: string) => {
+    return saveMarkdownFile(filePath, content);
   });
   ipcMain.handle(
     'workspace:create-entry',

@@ -43,12 +43,15 @@ declare global {
       settings: {
         getTheme: () => Promise<'dark' | 'light'>;
         setTheme: (theme: 'dark' | 'light') => Promise<'dark' | 'light'>;
+        getAutoSave: () => Promise<boolean>;
+        setAutoSave: (enabled: boolean) => Promise<boolean>;
       };
       workspace: {
         get: () => Promise<WorkspaceSnapshot>;
         addFolder: () => Promise<WorkspaceSnapshot>;
         createDatabaseWorkspace: (name: string) => Promise<FileOperationResult>;
         readMarkdown: (filePath: string) => Promise<MarkdownFileContent>;
+        saveMarkdown: (filePath: string, content: string) => Promise<MarkdownFileContent>;
         createEntry: (
           parentPath: string,
           entryType: 'file' | 'folder',

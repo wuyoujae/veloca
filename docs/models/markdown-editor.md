@@ -2,7 +2,7 @@
 
 ## Scope
 
-The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, and recursive markdown file loading.
+The current Veloca milestone provides the foundation for a Typora-like markdown editor. It includes the Electron desktop shell, React renderer, Node backend surface, SQLite-backed settings persistence, workspace folder persistence, recursive markdown file loading, and a Vditor-powered instant-rendering markdown editor.
 
 ## Implemented Architecture
 
@@ -10,6 +10,7 @@ The current Veloca milestone provides the foundation for a Typora-like markdown 
 - `app/backend/electron`: Electron main and preload scripts. The main process creates the desktop window and exposes safe IPC handlers. The preload script exposes a minimal `window.veloca` API to the renderer.
 - `app/backend/database`: SQLite connection setup using `better-sqlite3`. Foreign key enforcement is explicitly disabled to match the project database rule.
 - `app/backend/services`: Backend service layer for app settings and workspace scanning.
+- `vditor`: MIT-licensed markdown editor engine used in `ir` instant-rendering mode to provide the Typora-like writing surface.
 
 ## Data Model
 
@@ -20,7 +21,7 @@ Stores application-level settings that must persist across sessions.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `id` | `TEXT` | UUID generated immediately before insert. |
-| `setting_key` | `TEXT` | Unique logical key, such as `theme`. |
+| `setting_key` | `TEXT` | Unique logical key, such as `theme` or `autoSave`. |
 | `setting_value` | `TEXT` | Stored value. |
 | `created_at` | `INTEGER` | Unix timestamp in milliseconds. |
 | `updated_at` | `INTEGER` | Unix timestamp in milliseconds. |
@@ -75,6 +76,16 @@ Stores database-backed folders and markdown files inside a virtual workspace roo
 
 When the app is opened in a normal browser during frontend-only development, the renderer falls back to `localStorage`.
 
+## Editing and Save Flow
+
+1. Renderer opens a markdown file through `window.veloca.workspace.readMarkdown(path)`.
+2. The active markdown source is passed into Vditor in `ir` mode with the Vditor cache disabled.
+3. Editor input updates renderer state, outline data, word count, character count, and save status.
+4. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
+5. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
+6. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
+7. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
+
 ## Current UI Behavior
 
 - Dark mode is the default.
@@ -91,12 +102,16 @@ When the app is opened in a normal browser during frontend-only development, the
 - New files and folders are created with default names directly inside the tree, then immediately enter inline rename mode, matching Typora-style creation behavior.
 - Root workspace folders can be removed from the workspace through the context menu.
 - Delete operations move files or folders to the system Trash instead of permanently deleting them.
-- The outline panel reflects the active document headings using a Typora-style indented list without connector lines.
+- The editor surface uses Vditor instant-rendering mode for Typora-like single-pane markdown writing.
+- The editor saves markdown changes automatically by default and supports manual `Cmd/Ctrl+S` saves.
+- The status bar shows save state, word count, character count, and encoding.
+- The outline panel reflects the active editor content using a Typora-style indented list without connector lines.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.
 - The Theme segmented control switches between dark and light modes.
+- The Auto Save switch persists the user's preferred save behavior.
 - The editor page follows the prototype structure: title bar, file sidebar, editor header, markdown typography, and bottom status bar.
 
 ## Next Development Notes
 
-The next practical feature should be markdown editing and save behavior. Before adding it, define whether edits are written directly to disk, staged in memory, or saved through a recovery buffer for crash safety.
+The next practical feature should be image and attachment handling. Before adding it, define local asset storage, image compression rules, and how markdown links should be generated for filesystem and database-backed workspaces.

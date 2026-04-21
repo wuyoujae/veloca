@@ -9,7 +9,10 @@ import type {
 contextBridge.exposeInMainWorld('veloca', {
   settings: {
     getTheme: () => ipcRenderer.invoke('settings:get-theme') as Promise<ThemeMode>,
-    setTheme: (theme: ThemeMode) => ipcRenderer.invoke('settings:set-theme', theme) as Promise<ThemeMode>
+    setTheme: (theme: ThemeMode) => ipcRenderer.invoke('settings:set-theme', theme) as Promise<ThemeMode>,
+    getAutoSave: () => ipcRenderer.invoke('settings:get-auto-save') as Promise<boolean>,
+    setAutoSave: (enabled: boolean) =>
+      ipcRenderer.invoke('settings:set-auto-save', enabled) as Promise<boolean>
   },
   workspace: {
     get: () => ipcRenderer.invoke('workspace:get') as Promise<WorkspaceSnapshot>,
@@ -18,6 +21,8 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('workspace:create-database-workspace', name) as Promise<FileOperationResult>,
     readMarkdown: (filePath: string) =>
       ipcRenderer.invoke('workspace:read-markdown', filePath) as Promise<MarkdownFileContent>,
+    saveMarkdown: (filePath: string, content: string) =>
+      ipcRenderer.invoke('workspace:save-markdown', filePath, content) as Promise<MarkdownFileContent>,
     createEntry: (parentPath: string, entryType: 'file' | 'folder', name: string) =>
       ipcRenderer.invoke('workspace:create-entry', parentPath, entryType, name) as Promise<FileOperationResult>,
     renameEntry: (filePath: string, name: string) =>

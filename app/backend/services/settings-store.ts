@@ -3,6 +3,7 @@ import { getDatabase } from '../database/connection';
 
 export type ThemeMode = 'dark' | 'light';
 
+const autoSaveKey = 'autoSave';
 const themeKey = 'theme';
 
 export function getTheme(): ThemeMode {
@@ -14,6 +15,24 @@ export function getTheme(): ThemeMode {
 }
 
 export function setTheme(theme: ThemeMode): ThemeMode {
+  setSetting(themeKey, theme);
+  return theme;
+}
+
+export function getAutoSave(): boolean {
+  const row = getDatabase()
+    .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+    .get(autoSaveKey) as { setting_value: string } | undefined;
+
+  return row?.setting_value === 'false' ? false : true;
+}
+
+export function setAutoSave(enabled: boolean): boolean {
+  setSetting(autoSaveKey, enabled ? 'true' : 'false');
+  return enabled;
+}
+
+function setSetting(key: string, value: string): void {
   const now = Date.now();
 
   getDatabase()
@@ -26,7 +45,5 @@ export function setTheme(theme: ThemeMode): ThemeMode {
         updated_at = excluded.updated_at
       `
     )
-    .run(randomUUID(), themeKey, theme, now, now);
-
-  return theme;
+    .run(randomUUID(), key, value, now, now);
 }

@@ -200,7 +200,35 @@ export function readMarkdownFile(filePath: string): MarkdownFileContent {
     path: resolvedPath,
     name: basename(resolvedPath),
     content: readFileSync(resolvedPath, 'utf8'),
-    relativePath: relative(folder.path, resolvedPath),
+    relativePath: relative(folder.path, resolvedPath).split(sep).join('/'),
+    workspaceFolderId: folder.id
+  };
+}
+
+export function saveMarkdownFile(filePath: string, content: string): MarkdownFileContent {
+  if (isDatabasePath(filePath)) {
+    return saveDatabaseMarkdownFile(filePath, content);
+  }
+
+  const resolvedPath = resolveExistingWorkspacePath(filePath);
+
+  if (!isMarkdownFile(resolvedPath)) {
+    throw new Error('Only markdown files can be saved.');
+  }
+
+  const folder = findWorkspaceFolderForPath(resolvedPath);
+
+  if (!folder) {
+    throw new Error('The selected file is outside the current workspace.');
+  }
+
+  writeFileSync(resolvedPath, content, 'utf8');
+
+  return {
+    path: resolvedPath,
+    name: basename(resolvedPath),
+    content,
+    relativePath: relative(folder.path, resolvedPath).split(sep).join('/'),
     workspaceFolderId: folder.id
   };
 }
@@ -523,6 +551,26 @@ function readDatabaseMarkdownFile(filePath: string): MarkdownFileContent {
     path: getDatabaseEntryPath(entry.id),
     name: entry.name,
     content: entry.content,
+    relativePath: getDatabaseRelativePath(entry),
+    workspaceFolderId: entry.workspace_id
+  };
+}
+
+function saveDatabaseMarkdownFile(filePath: string, content: string): MarkdownFileContent {
+  const entry = getDatabaseEntryByPath(filePath);
+
+  if (entry.entry_type !== 1) {
+    throw new Error('The selected database entry is not a markdown file.');
+  }
+
+  getDatabase()
+    .prepare('UPDATE virtual_workspace_entries SET content = ?, updated_at = ? WHERE id = ? AND status = 0')
+    .run(content, Date.now(), entry.id);
+
+  return {
+    path: getDatabaseEntryPath(entry.id),
+    name: entry.name,
+    content,
     relativePath: getDatabaseRelativePath(entry),
     workspaceFolderId: entry.workspace_id
   };
