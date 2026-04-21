@@ -25,8 +25,8 @@ import TaskList from '@tiptap/extension-task-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
-import { CellSelection, TableMap, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
+import { TextSelection } from '@tiptap/pm/state';
+import { CellSelection, TableMap, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
 import StarterKit from '@tiptap/starter-kit';
 import { common, createLowlight } from 'lowlight';
 
@@ -407,41 +407,45 @@ const VelocaTable = Table.extend({
 
 const TyporaTableInput = Extension.create({
   name: 'typoraTableInput',
+  priority: 1000,
 
-  addProseMirrorPlugins() {
+  addKeyboardShortcuts() {
     const editor = this.editor;
 
-    return [
-      new Plugin({
-        key: new PluginKey('veloca-table-input'),
-        props: {
-          handleKeyDown(view, event) {
-            if (event.isComposing || view.composing || event.altKey) {
-              return false;
-            }
-
-            if (handleTableKeyboardInteraction(editor, event)) {
-              event.preventDefault();
-              return true;
-            }
-
-            if (
-              event.key === 'Enter' &&
-              !event.shiftKey &&
-              !event.metaKey &&
-              !event.ctrlKey &&
-              !event.altKey &&
-              convertMarkdownTableHeaderToTable(editor)
-            ) {
-              event.preventDefault();
-              return true;
-            }
-
-            return false;
-          }
+    return {
+      Enter: () => {
+        if (editor.view.composing) {
+          return false;
         }
-      })
-    ];
+
+        if (handleTableKeyboardInteraction(editor, 'enter')) {
+          return true;
+        }
+
+        return convertMarkdownTableHeaderToTable(editor);
+      },
+      'Shift-Enter': () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'shift-enter');
+      },
+      ArrowDown: () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'arrow-down');
+      },
+      ArrowUp: () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'arrow-up');
+      }
+    };
   }
 });
 
@@ -789,26 +793,29 @@ function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
   return true;
 }
 
-function handleTableKeyboardInteraction(editor: Editor, event: KeyboardEvent): boolean {
+function handleTableKeyboardInteraction(
+  editor: Editor,
+  action: 'enter' | 'shift-enter' | 'arrow-down' | 'arrow-up'
+): boolean {
   const context = getActiveTableContext(editor);
 
   if (!context) {
     return false;
   }
 
-  if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
-    if (event.shiftKey) {
-      return insertBodyRowBelowSelection(editor, context);
-    }
-
+  if (action === 'enter') {
     return insertTableHardBreak(editor, context);
   }
 
-  if (event.key === 'ArrowDown' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+  if (action === 'shift-enter') {
+      return insertBodyRowBelowSelection(editor, context);
+  }
+
+  if (action === 'arrow-down') {
     return maybeExitTable(editor, context, 'down');
   }
 
-  if (event.key === 'ArrowUp' && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
+  if (action === 'arrow-up') {
     return maybeExitTable(editor, context, 'up');
   }
 
@@ -872,61 +879,21 @@ function insertBodyRowBelowSelection(editor: Editor, context: TableSelectionCont
   const insertRowIndex = context.rect.bottom;
   const targetColumn = context.rect.left;
   const transaction = editor.state.tr;
-  const inserted = insertPlainTableRow(transaction, context.table, context.tableMap, insertRowIndex);
+  addRow(transaction, context.rect, insertRowIndex);
 
-  if (!inserted) {
+  const tableNode = transaction.doc.nodeAt(context.rect.tableStart - 1);
+
+  if (!tableNode) {
     return false;
   }
 
-  const nextTable = transaction.doc.nodeAt(context.table.pos);
-
-  if (!nextTable) {
-    return false;
-  }
-
-  const nextTableMap = TableMap.get(nextTable);
-  const cellOffset = nextTableMap.positionAt(insertRowIndex, targetColumn, nextTable);
-  const selectionPos = context.table.start + cellOffset + 2;
+  const nextTableMap = TableMap.get(tableNode);
+  const cellOffset = nextTableMap.positionAt(insertRowIndex, targetColumn, tableNode);
+  const selectionPos = context.rect.tableStart + cellOffset + 2;
 
   transaction.setSelection(TextSelection.near(transaction.doc.resolve(selectionPos)));
   transaction.scrollIntoView();
   editor.view.dispatch(transaction);
-
-  return true;
-}
-
-function insertPlainTableRow(
-  transaction: Editor['state']['tr'],
-  table: TableSelectionContext['table'],
-  tableMap: TableSelectionContext['tableMap'],
-  rowIndex: number
-): boolean {
-  if (rowIndex < 0 || rowIndex > tableMap.height) {
-    return false;
-  }
-
-  let rowPos = table.start;
-
-  for (let index = 0; index < rowIndex; index += 1) {
-    rowPos += table.node.child(index).nodeSize;
-  }
-
-  const cellType = table.node.type.schema.nodes.tableCell;
-  const rowType = table.node.type.schema.nodes.tableRow;
-
-  if (!cellType || !rowType) {
-    return false;
-  }
-
-  const cells = Array.from({ length: tableMap.width }, () => cellType.createAndFill()).filter(
-    (cell): cell is ProseMirrorNode => Boolean(cell)
-  );
-
-  if (cells.length !== tableMap.width) {
-    return false;
-  }
-
-  transaction.insert(rowPos, rowType.create(null, cells));
 
   return true;
 }
