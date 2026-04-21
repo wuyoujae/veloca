@@ -785,10 +785,11 @@ function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
   tr.replaceWith(paragraphStart, paragraphEnd, tableNode);
 
   const selectionPos = getFirstTableBodyCellSelection(paragraphStart, tableNode);
-  tr.setSelection(TextSelection.near(tr.doc.resolve(selectionPos)));
+  tr.setSelection(TextSelection.create(tr.doc, selectionPos));
   tr.scrollIntoView();
 
   editor.view.dispatch(tr);
+  editor.view.focus();
 
   return true;
 }
@@ -891,9 +892,10 @@ function insertBodyRowBelowSelection(editor: Editor, context: TableSelectionCont
   const cellOffset = nextTableMap.positionAt(insertRowIndex, targetColumn, tableNode);
   const selectionPos = context.rect.tableStart + cellOffset + 2;
 
-  transaction.setSelection(TextSelection.near(transaction.doc.resolve(selectionPos)));
+  transaction.setSelection(TextSelection.create(transaction.doc, selectionPos));
   transaction.scrollIntoView();
   editor.view.dispatch(transaction);
+  editor.view.focus();
 
   return true;
 }
@@ -921,14 +923,15 @@ function exitTableToParagraph(editor: Editor, table: TableSelectionContext['tabl
     const $after = transaction.doc.resolve(afterPos);
 
     if ($after.nodeAfter?.type.name === 'paragraph') {
-      transaction.setSelection(TextSelection.near(transaction.doc.resolve(afterPos + 1), 1));
+      transaction.setSelection(TextSelection.create(transaction.doc, afterPos + 1));
     } else {
       transaction.insert(afterPos, editor.state.schema.nodes.paragraph.create());
-      transaction.setSelection(TextSelection.near(transaction.doc.resolve(afterPos + 1), 1));
+      transaction.setSelection(TextSelection.create(transaction.doc, afterPos + 1));
     }
 
     transaction.scrollIntoView();
     editor.view.dispatch(transaction);
+    editor.view.focus();
     return true;
   }
 
@@ -936,14 +939,15 @@ function exitTableToParagraph(editor: Editor, table: TableSelectionContext['tabl
   const $before = transaction.doc.resolve(beforePos);
 
   if ($before.nodeBefore?.type.name === 'paragraph') {
-    transaction.setSelection(TextSelection.near(transaction.doc.resolve(Math.max(1, beforePos - 1)), -1));
+    transaction.setSelection(TextSelection.create(transaction.doc, Math.max(1, beforePos - 1)));
   } else {
     transaction.insert(beforePos, editor.state.schema.nodes.paragraph.create());
-    transaction.setSelection(TextSelection.near(transaction.doc.resolve(beforePos + 1), -1));
+    transaction.setSelection(TextSelection.create(transaction.doc, beforePos + 1));
   }
 
   transaction.scrollIntoView();
   editor.view.dispatch(transaction);
+  editor.view.focus();
   return true;
 }
 
