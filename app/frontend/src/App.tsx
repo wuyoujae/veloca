@@ -874,16 +874,18 @@ export function App(): JSX.Element {
 
           <section className="editor-scroll-area" aria-label="Markdown editor preview">
             {activeFile ? (
-              <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
-                <MarkdownEditor
-                  content={documentContent}
-                  filePath={activeFile.path}
-                  theme={theme}
-                  onChange={updateDocumentContent}
-                  onToast={showToast}
-                />
-                {loadingFile && <div className="loading-state">Loading file...</div>}
-              </article>
+              <div className="editor-safe-area">
+                <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
+                  <MarkdownEditor
+                    content={documentContent}
+                    filePath={activeFile.path}
+                    theme={theme}
+                    onChange={updateDocumentContent}
+                    onToast={showToast}
+                  />
+                  {loadingFile && <div className="loading-state">Loading file...</div>}
+                </article>
+              </div>
             ) : (
               <div className="empty-editor-state">
                 <FileText size={24} />
