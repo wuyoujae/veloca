@@ -139,6 +139,7 @@ When the app is opened in a normal browser during frontend-only development, the
 - The editor saves markdown changes automatically by default and supports manual `Cmd/Ctrl+S` saves.
 - The editor header shows both the current file path and a single save button that reflects auto-save activity through its own animated state changes.
 - The status bar shows save state, word count, character count, and encoding.
+- The status bar now floats as a frosted-glass panel in the bottom-right corner, and the editor reserves extra bottom writing space so the last line never sits underneath it.
 - The outline panel reflects the active editor content using a Typora-style indented list without connector lines, and heading labels are derived from parsed Markdown tokens so escaped punctuation renders correctly.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.

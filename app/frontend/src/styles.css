@@ -326,6 +326,8 @@ button {
 }
 
 .editor-container {
+  --statusbar-height: 42px;
+  --statusbar-offset: 16px;
   position: relative;
   display: flex;
   flex: 1;
@@ -417,7 +419,7 @@ button {
   flex: 1;
   justify-content: center;
   min-height: 0;
-  padding: 40px 0 100px;
+  padding: 40px 0 calc(var(--statusbar-height) + var(--statusbar-offset) + 40px);
   overflow-y: auto;
 }
 
@@ -626,7 +628,7 @@ button {
 
 .veloca-editor .ProseMirror {
   min-height: 480px;
-  padding: 0;
+  padding: 0 0 calc(var(--statusbar-height) + 28px);
   color: var(--editor-copy);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -1225,18 +1227,24 @@ button {
 
 .statusbar {
   position: absolute;
-  right: 0;
-  bottom: 0;
+  right: 16px;
+  bottom: 16px;
   display: flex;
   justify-content: flex-end;
-  width: 100%;
+  align-items: center;
   gap: 16px;
-  padding: 8px 16px;
-  background: linear-gradient(to top, var(--background) 45%, transparent);
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 38%, transparent);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: 11px;
   pointer-events: none;
+  z-index: 2;
 }
 
 .empty-editor-state {
