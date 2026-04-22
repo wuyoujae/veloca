@@ -919,7 +919,29 @@ button {
   max-width: 100%;
   margin: 2em 0;
   min-width: 0;
+  padding-bottom: 6px;
   overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
+.veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar {
+  height: 10px;
+}
+
+.veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar-track {
+  background: var(--muted);
+  border-radius: 999px;
+}
+
+.veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border: 2px solid var(--muted);
+  border-radius: 999px;
+}
+
+.veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
 }
 
 .veloca-editor .ProseMirror table {
