@@ -418,14 +418,17 @@ button {
   display: flex;
   flex: 1;
   justify-content: center;
+  min-width: 0;
   min-height: 0;
   padding: 40px 0 calc(var(--statusbar-height) + var(--statusbar-offset) + 40px);
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
 .markdown-body {
   width: 100%;
   max-width: 760px;
+  min-width: 0;
   padding: 80px 40px 120px;
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   color: var(--editor-copy);
@@ -618,15 +621,18 @@ button {
 
 .veloca-editor {
   width: 100%;
+  min-width: 0;
   min-height: 480px;
   color: var(--editor-copy);
 }
 
 .veloca-editor .tiptap {
   width: 100%;
+  min-width: 0;
 }
 
 .veloca-editor .ProseMirror {
+  min-width: 0;
   min-height: 480px;
   padding: 0 0 calc(var(--statusbar-height) + 36px);
   color: var(--editor-copy);
@@ -910,13 +916,15 @@ button {
 
 .veloca-editor .ProseMirror .tableWrapper {
   width: 100%;
+  max-width: 100%;
   margin: 2em 0;
+  min-width: 0;
   overflow-x: auto;
 }
 
 .veloca-editor .ProseMirror table {
-  width: 100%;
-  min-width: 460px;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 0.9em;
 }
