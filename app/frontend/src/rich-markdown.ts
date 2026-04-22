@@ -1,6 +1,7 @@
 import DOMPurify from 'dompurify';
 import {
   Extension,
+  InputRule,
   mergeAttributes,
   Node,
   type Editor,
@@ -28,8 +29,8 @@ import TaskList from '@tiptap/extension-task-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { TextSelection } from '@tiptap/pm/state';
+import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import {
   CellSelection,
   TableMap,
@@ -590,6 +591,62 @@ const VelocaHardBreak = HardBreak.extend({
   }
 });
 
+const VelocaMarkdownInput = Extension.create({
+  name: 'velocaMarkdownInput',
+  priority: 950,
+
+  addInputRules() {
+    return [
+      new InputRule({
+        find: /^\[([ xX])\]\s$/,
+        handler: ({ state, range, match }) => {
+          applyTaskListShortcut(state, range, match[1].toLowerCase() === 'x');
+        }
+      }),
+      new InputRule({
+        find: /(?<!\!)\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)$/,
+        handler: ({ state, range, match }) => {
+          applyMarkdownLinkShortcut(state, range, match[1], match[2], match[3] ?? null);
+        }
+      }),
+      new InputRule({
+        find: /(?<!\$)\$\$([^$\n]+)\$\$(?!\$)$/,
+        handler: ({ state, range, match }) => {
+          applyInlineBlockMathShortcut(state, range, match[1]);
+        }
+      }),
+      new InputRule({
+        find: /(?<!\$)\$([^$\n]+)\$(?!\$)$/,
+        handler: ({ state, range, match }) => {
+          applyInlineMathShortcut(state, range, match[1]);
+        }
+      })
+    ];
+  },
+
+  addKeyboardShortcuts() {
+    const editor = this.editor;
+
+    return {
+      Enter: () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        if (convertDelimitedBlockMath(editor)) {
+          return true;
+        }
+
+        if (finalizeCalloutOnExit(editor)) {
+          return true;
+        }
+
+        return normalizeFootnotesOnBlankLine(editor);
+      }
+    };
+  }
+});
+
 export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
   return [
     StarterKit.configure({
@@ -617,8 +674,10 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       lowlight
     }),
     Highlight,
+    VelocaMarkdownInput,
     Link.configure({
       autolink: true,
+      defaultProtocol: 'https',
       HTMLAttributes: {
         rel: 'noreferrer noopener',
         target: '_blank'
@@ -938,7 +997,7 @@ function transformCalloutsForEditor(content: string): string {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const matched = line.match(/^>\[!([A-Z0-9_-]+)\]\s*(.*)$/i);
+    const matched = line.match(/^>\s?\[!([A-Z0-9_-]+)\]\s*(.*)$/i);
 
     if (!matched) {
       output.push(line);
@@ -1154,6 +1213,444 @@ function decodeOriginalMarkdown(value: string): string {
   }
 }
 
+function applyTaskListShortcut(
+  state: Editor['state'],
+  _range: { from: number; to: number },
+  checked: boolean
+): void {
+  const { selection, schema, tr } = state;
+  const { $from } = selection;
+  const taskList = schema.nodes.taskList;
+  const taskItem = schema.nodes.taskItem;
+
+  if (!selection.empty || !taskList || !taskItem || $from.parent.type.name !== 'paragraph') {
+    return;
+  }
+
+  const listItemDepth = findAncestorDepth($from, 'listItem');
+  const bulletListDepth = findAncestorDepth($from, 'bulletList');
+
+  if (listItemDepth > 0 && bulletListDepth === listItemDepth - 1) {
+    const bulletListNode = $from.node(bulletListDepth);
+    const bulletListPos = $from.before(bulletListDepth);
+    const listItemIndex = $from.index(bulletListDepth);
+    const currentListItem = bulletListNode.child(listItemIndex);
+    const replacementNodes: ProseMirrorNode[] = [];
+    const beforeItems: ProseMirrorNode[] = [];
+    const afterItems: ProseMirrorNode[] = [];
+
+    for (let index = 0; index < listItemIndex; index += 1) {
+      beforeItems.push(bulletListNode.child(index));
+    }
+
+    for (let index = listItemIndex + 1; index < bulletListNode.childCount; index += 1) {
+      afterItems.push(bulletListNode.child(index));
+    }
+
+    if (beforeItems.length) {
+      replacementNodes.push(schema.nodes.bulletList.create(bulletListNode.attrs, beforeItems));
+    }
+
+    replacementNodes.push(taskList.create(null, [buildTaskItemFromListItem(schema, currentListItem, checked)]));
+
+    if (afterItems.length) {
+      replacementNodes.push(schema.nodes.bulletList.create(bulletListNode.attrs, afterItems));
+    }
+
+    const taskListPos = bulletListPos + (beforeItems.length ? replacementNodes[0].nodeSize : 0);
+
+    tr.replaceWith(
+      bulletListPos,
+      bulletListPos + bulletListNode.nodeSize,
+      Fragment.fromArray(replacementNodes)
+    );
+    tr.setSelection(TextSelection.near(tr.doc.resolve(taskListPos + 3), 1));
+    return;
+  }
+
+  if (!isRootParagraphContext($from)) {
+    return;
+  }
+
+  const paragraphPos = $from.before();
+  const nextTaskList = taskList.create(null, [
+    taskItem.create({ checked }, [schema.nodes.paragraph.create()])
+  ]);
+
+  tr.replaceWith(paragraphPos, paragraphPos + $from.parent.nodeSize, nextTaskList);
+  tr.setSelection(TextSelection.near(tr.doc.resolve(paragraphPos + 3), 1));
+}
+
+function applyMarkdownLinkShortcut(
+  state: Editor['state'],
+  range: { from: number; to: number },
+  label: string,
+  href: string,
+  title: string | null
+): void {
+  const link = state.schema.marks.link;
+  const normalizedLabel = label.trim();
+
+  if (!link || !normalizedLabel) {
+    return;
+  }
+
+  const nextHref = normalizeLinkHref(href);
+  const transaction = state.tr.replaceWith(
+    range.from,
+    range.to,
+    state.schema.text(
+      normalizedLabel,
+      [link.create({ href: nextHref, title })]
+    )
+  );
+
+  transaction.setSelection(TextSelection.create(transaction.doc, range.from + normalizedLabel.length));
+}
+
+function applyInlineMathShortcut(
+  state: Editor['state'],
+  range: { from: number; to: number },
+  latex: string
+): void {
+  const inlineMath = state.schema.nodes.inlineMath;
+  const nextLatex = latex.trim();
+
+  if (!inlineMath || !nextLatex) {
+    return;
+  }
+
+  const transaction = state.tr.replaceWith(range.from, range.to, inlineMath.create({ latex: nextLatex }));
+  transaction.setSelection(TextSelection.near(transaction.doc.resolve(range.from + 1), 1));
+}
+
+function applyInlineBlockMathShortcut(
+  state: Editor['state'],
+  _range: { from: number; to: number },
+  latex: string
+): void {
+  const { selection, schema, tr } = state;
+  const { $from } = selection;
+  const blockMath = schema.nodes.blockMath;
+  const nextLatex = latex.trim();
+
+  if (!blockMath || !nextLatex || $from.parent.type.name !== 'paragraph' || !isRootParagraphContext($from)) {
+    return;
+  }
+
+  const paragraphPos = $from.before();
+  const paragraph = schema.nodes.paragraph.create();
+  const blockMathNode = blockMath.create({ latex: nextLatex });
+
+  tr.replaceWith(
+    paragraphPos,
+    paragraphPos + $from.parent.nodeSize,
+    Fragment.fromArray([blockMathNode, paragraph])
+  );
+  tr.setSelection(TextSelection.create(tr.doc, paragraphPos + blockMathNode.nodeSize + 1));
+}
+
+function convertDelimitedBlockMath(editor: Editor): boolean {
+  const { selection, doc, schema } = editor.state;
+  const { $from } = selection;
+  const blockMath = schema.nodes.blockMath;
+
+  if (
+    !selection.empty ||
+    !blockMath ||
+    $from.parent.type.name !== 'paragraph' ||
+    $from.parent.textContent.trim() !== '$$' ||
+    $from.parentOffset !== $from.parent.content.size ||
+    !isRootParagraphContext($from)
+  ) {
+    return false;
+  }
+
+  const currentIndex = $from.index(0);
+  const formulaNodes: ProseMirrorNode[] = [];
+  let openingIndex = -1;
+
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const node = doc.child(index);
+
+    if (node.type.name !== 'paragraph') {
+      return false;
+    }
+
+    if (node.textContent.trim() === '$$') {
+      openingIndex = index;
+      break;
+    }
+
+    formulaNodes.unshift(node);
+  }
+
+  if (openingIndex === -1 || !formulaNodes.length) {
+    return false;
+  }
+
+  const latex = formulaNodes.map((node) => node.textContent).join('\n').trim();
+
+  if (!latex) {
+    return false;
+  }
+
+  const startPos = getTopLevelNodePos(doc, openingIndex);
+  const endPos = getTopLevelNodePos(doc, currentIndex) + doc.child(currentIndex).nodeSize;
+  const blockMathNode = blockMath.create({ latex });
+  const paragraph = schema.nodes.paragraph.create();
+  const transaction = editor.state.tr.replaceWith(
+    startPos,
+    endPos,
+    Fragment.fromArray([blockMathNode, paragraph])
+  );
+
+  transaction.setSelection(TextSelection.create(transaction.doc, startPos + blockMathNode.nodeSize + 1));
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+  editor.view.focus();
+  return true;
+}
+
+function finalizeCalloutOnExit(editor: Editor): boolean {
+  const { selection, schema } = editor.state;
+  const { $from } = selection;
+
+  if (
+    !selection.empty ||
+    $from.parent.type.name !== 'paragraph' ||
+    $from.parent.content.size > 0 ||
+    $from.parentOffset !== 0 ||
+    !isInsideNodeType($from, 'blockquote')
+  ) {
+    return false;
+  }
+
+  const blockquoteDepth = findAncestorDepth($from, 'blockquote');
+
+  if (blockquoteDepth < 0 || !editor.markdown) {
+    return false;
+  }
+
+  const blockquoteNode = $from.node(blockquoteDepth);
+  const calloutNode = buildCalloutNodeFromBlockquote(editor, blockquoteNode);
+
+  if (!calloutNode) {
+    return false;
+  }
+
+  const blockquotePos = $from.before(blockquoteDepth);
+  const paragraph = schema.nodes.paragraph.create();
+  const transaction = editor.state.tr.replaceWith(
+    blockquotePos,
+    blockquotePos + blockquoteNode.nodeSize,
+    Fragment.fromArray([calloutNode, paragraph])
+  );
+
+  transaction.setSelection(TextSelection.create(transaction.doc, blockquotePos + calloutNode.nodeSize + 1));
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+  editor.view.focus();
+  return true;
+}
+
+function normalizeFootnotesOnBlankLine(editor: Editor): boolean {
+  const { selection } = editor.state;
+  const { $from } = selection;
+
+  if (
+    !selection.empty ||
+    $from.parent.type.name !== 'paragraph' ||
+    $from.parent.content.size > 0 ||
+    !isRootParagraphContext($from)
+  ) {
+    return false;
+  }
+
+  const markdown = editor.getMarkdown();
+
+  if (!/(^|\n)\[\^[^\]]+\]:\s?/m.test(markdown)) {
+    return false;
+  }
+
+  return normalizeEditorMarkdown(editor, transformFootnotesForEditor);
+}
+
+function normalizeEditorMarkdown(editor: Editor, transform: (content: string) => string): boolean {
+  if (!editor.markdown || !editor.state.selection.empty) {
+    return false;
+  }
+
+  const marker = `VELOCACURSORTOKEN${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const markerTransaction = editor.state.tr.insertText(
+    marker,
+    editor.state.selection.from,
+    editor.state.selection.to
+  );
+  const rawWithMarker = editor.markdown.serialize(markerTransaction.doc.toJSON() as JSONContent);
+  const transformedWithMarker = transform(rawWithMarker);
+
+  if (transformedWithMarker === rawWithMarker) {
+    return false;
+  }
+
+  editor.commands.setContent(transformedWithMarker, {
+    contentType: 'markdown',
+    emitUpdate: false
+  });
+
+  const markerRange = findTextRange(editor.state.doc, marker);
+
+  if (!markerRange) {
+    editor.commands.focus('end');
+    return true;
+  }
+
+  const cleanupTransaction = editor.state.tr.delete(markerRange.from, markerRange.to);
+  cleanupTransaction.setSelection(TextSelection.create(cleanupTransaction.doc, markerRange.from));
+  editor.view.dispatch(cleanupTransaction);
+  editor.view.focus();
+  return true;
+}
+
+function buildCalloutNodeFromBlockquote(editor: Editor, blockquoteNode: ProseMirrorNode): ProseMirrorNode | null {
+  if (!editor.markdown) {
+    return null;
+  }
+
+  const contentNodes: ProseMirrorNode[] = [];
+
+  for (let index = 0; index < blockquoteNode.childCount; index += 1) {
+    contentNodes.push(blockquoteNode.child(index));
+  }
+
+  while (contentNodes.length && isEmptyParagraphNode(contentNodes.at(-1))) {
+    contentNodes.pop();
+  }
+
+  if (!contentNodes.length) {
+    return null;
+  }
+
+  const markdown = editor.markdown.serialize({
+    type: 'doc',
+    content: [
+      {
+        ...blockquoteNode.toJSON(),
+        content: contentNodes.map((node) => node.toJSON())
+      }
+    ]
+  });
+
+  if (!/^>\s?\[!([A-Z0-9_-]+)\]/im.test(markdown.trimStart())) {
+    return null;
+  }
+
+  const transformed = transformCalloutsForEditor(markdown);
+
+  if (transformed === markdown) {
+    return null;
+  }
+
+  const parsed = editor.markdown.parse(transformed);
+  const nextNode = parsed.content?.[0];
+
+  if (!nextNode) {
+    return null;
+  }
+
+  try {
+    return editor.state.schema.nodeFromJSON(nextNode);
+  } catch {
+    return null;
+  }
+}
+
+function buildTaskItemFromListItem(
+  schema: Editor['schema'],
+  listItemNode: ProseMirrorNode,
+  checked: boolean
+): ProseMirrorNode {
+  const nextContent: ProseMirrorNode[] = [schema.nodes.paragraph.create()];
+
+  for (let index = 1; index < listItemNode.childCount; index += 1) {
+    nextContent.push(listItemNode.child(index));
+  }
+
+  return schema.nodes.taskItem.create({ checked }, nextContent);
+}
+
+function findTextRange(
+  doc: Editor['state']['doc'],
+  text: string
+): { from: number; to: number } | null {
+  let foundRange: { from: number; to: number } | null = null;
+
+  doc.descendants((node, pos) => {
+    if (foundRange || !node.isText || !node.text) {
+      return true;
+    }
+
+    const matchIndex = node.text.indexOf(text);
+
+    if (matchIndex === -1) {
+      return true;
+    }
+
+    foundRange = {
+      from: pos + matchIndex,
+      to: pos + matchIndex + text.length
+    };
+
+    return false;
+  });
+
+  return foundRange;
+}
+
+function findAncestorDepth(
+  $from: Editor['state']['selection']['$from'],
+  typeName: string
+): number {
+  for (let depth = $from.depth; depth >= 0; depth -= 1) {
+    if ($from.node(depth).type.name === typeName) {
+      return depth;
+    }
+  }
+
+  return -1;
+}
+
+function getTopLevelNodePos(doc: Editor['state']['doc'], index: number): number {
+  let pos = 0;
+
+  for (let currentIndex = 0; currentIndex < index; currentIndex += 1) {
+    pos += doc.child(currentIndex).nodeSize;
+  }
+
+  return pos;
+}
+
+function isEmptyParagraphNode(node?: ProseMirrorNode | null): boolean {
+  return !!node && node.type.name === 'paragraph' && node.textContent.trim() === '';
+}
+
+function normalizeLinkHref(href: string): string {
+  const normalized = href.trim();
+
+  if (
+    !normalized ||
+    /^[a-z][a-z0-9+.-]*:/i.test(normalized) ||
+    normalized.startsWith('/') ||
+    normalized.startsWith('#') ||
+    normalized.startsWith('?')
+  ) {
+    return normalized;
+  }
+
+  return `https://${normalized}`;
+}
+
 function getHtmlBlockVariantClass(html: string): string {
   if (/data-veloca-callout="true"/i.test(html)) {
     return 'veloca-html-block--callout';
@@ -1297,41 +1794,83 @@ function handleTableKeyboardInteraction(
     | 'row-above'
     | 'row-below'
 ): boolean {
-  const context = getActiveTableContext(editor);
-
-  if (!context) {
-    return false;
-  }
-
   if (action === 'enter') {
+    const context = getActiveTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return insertTableHardBreak(editor, context);
   }
 
   if (action === 'shift-enter') {
+    const context = getActiveTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return insertBodyRowBelowSelection(editor, context);
   }
 
   if (action === 'row-above') {
+    const context = getActionableTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return insertBodyRowAboveSelection(editor, context);
   }
 
   if (action === 'row-below') {
+    const context = getActionableTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return insertBodyRowBelowSelection(editor, context);
   }
 
   if (action === 'column-left') {
+    const context = getActionableTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return insertColumnBesideSelection(editor, context, 'left');
   }
 
   if (action === 'column-right') {
+    const context = getActionableTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return insertColumnBesideSelection(editor, context, 'right');
   }
 
   if (action === 'arrow-down') {
+    const context = getActiveTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return maybeExitTable(editor, context, 'down');
   }
 
   if (action === 'arrow-up') {
+    const context = getActiveTableContext(editor);
+
+    if (!context) {
+      return false;
+    }
+
     return maybeExitTable(editor, context, 'up');
   }
 
@@ -1362,9 +1901,41 @@ function getActiveTableContext(editor: Editor): TableSelectionContext | null {
 
   return {
     cellNode,
+    hasAnchor: true,
     rect,
-    table,
+    selectionKind: 'text',
+    table: toTableNodeContext(table),
     tableMap: TableMap.get(table.node)
+  };
+}
+
+function getActionableTableContext(editor: Editor): TableSelectionContext | null {
+  const selectionState = getCurrentTableSelectionState(editor);
+
+  if (!selectionState) {
+    return null;
+  }
+
+  const anchor =
+    selectionState.currentAnchor ??
+    getStoredTableAnchor(editor, selectionState.table, selectionState.tableMap) ??
+    getDefaultTableAnchor(selectionState.table, selectionState.tableMap);
+
+  if (!anchor) {
+    return null;
+  }
+
+  if (selectionState.currentAnchor) {
+    rememberTableAnchor(editor, selectionState.table, selectionState.currentAnchor);
+  }
+
+  return {
+    cellNode: anchor.cellNode,
+    hasAnchor: selectionState.currentAnchor !== null,
+    rect: createSingleCellRect(selectionState.table, selectionState.tableMap, anchor),
+    selectionKind: selectionState.selectionKind,
+    table: selectionState.table,
+    tableMap: selectionState.tableMap
   };
 }
 
@@ -1497,43 +2068,48 @@ function insertColumnBesideSelection(
 export type ActiveTableInfo = {
   columnCount: number;
   columnIndex: number;
+  hasAnchor: boolean;
   isHeaderRow: boolean;
   rowCount: number;
   rowIndex: number;
+  selectionKind: TableSelectionKind;
   tablePos: number;
 };
 
 export function getActiveTableInfo(editor: Editor): ActiveTableInfo | null {
-  const { selection } = editor.state;
-  const $tableAnchor = selection instanceof CellSelection ? selection.$anchorCell : selection.$from;
-  const table = findTable($tableAnchor);
+  const selectionState = getCurrentTableSelectionState(editor);
 
-  if (!table) {
+  if (!selectionState) {
     return null;
   }
 
-  let rect: ReturnType<typeof selectedRect>;
+  const anchor =
+    selectionState.currentAnchor ??
+    getStoredTableAnchor(editor, selectionState.table, selectionState.tableMap) ??
+    getDefaultTableAnchor(selectionState.table, selectionState.tableMap);
 
-  try {
-    rect = selectedRect(editor.state);
-  } catch {
+  if (!anchor) {
     return null;
   }
 
-  const tableMap = TableMap.get(table.node);
+  if (selectionState.currentAnchor) {
+    rememberTableAnchor(editor, selectionState.table, selectionState.currentAnchor);
+  }
 
   return {
-    columnCount: tableMap.width,
-    columnIndex: rect.left,
-    isHeaderRow: rect.top === 0,
-    rowCount: tableMap.height,
-    rowIndex: rect.top,
-    tablePos: table.pos
+    columnCount: selectionState.tableMap.width,
+    columnIndex: anchor.columnIndex,
+    hasAnchor: selectionState.currentAnchor !== null,
+    isHeaderRow: anchor.isHeaderRow,
+    rowCount: selectionState.tableMap.height,
+    rowIndex: anchor.rowIndex,
+    selectionKind: selectionState.selectionKind,
+    tablePos: selectionState.table.pos
   };
 }
 
 export function insertActiveTableColumn(editor: Editor, direction: TableColumnInsertDirection): boolean {
-  const context = getActiveTableContext(editor);
+  const context = getActionableTableContext(editor);
 
   if (!context) {
     return false;
@@ -1543,7 +2119,7 @@ export function insertActiveTableColumn(editor: Editor, direction: TableColumnIn
 }
 
 export function insertActiveTableRow(editor: Editor, direction: TableRowInsertDirection): boolean {
-  const context = getActiveTableContext(editor);
+  const context = getActionableTableContext(editor);
 
   if (!context) {
     return false;
@@ -1555,7 +2131,7 @@ export function insertActiveTableRow(editor: Editor, direction: TableRowInsertDi
 }
 
 export function resizeActiveTable(editor: Editor, rowCount: number, columnCount: number): boolean {
-  const context = getActiveTableContext(editor);
+  const context = getActionableTableContext(editor);
 
   if (!context) {
     return false;
@@ -1787,6 +2363,191 @@ function getTableCellTextSelection(
   return TextSelection.near(doc.resolve(tableStart + cellOffset + 1), 1);
 }
 
+function createSingleCellRect(
+  table: TableNodeContext,
+  tableMap: TableMap,
+  anchor: TableAnchor
+): ReturnType<typeof selectedRect> {
+  return {
+    bottom: anchor.rowIndex + 1,
+    left: anchor.columnIndex,
+    map: tableMap,
+    right: anchor.columnIndex + 1,
+    table: table.node,
+    tableStart: table.start,
+    top: anchor.rowIndex
+  };
+}
+
+function getCurrentTableSelectionState(editor: Editor): TableSelectionState | null {
+  const { selection } = editor.state;
+
+  if (selection instanceof CellSelection) {
+    const table = findTable(selection.$anchorCell);
+
+    if (!table) {
+      return null;
+    }
+
+    const tableContext = toTableNodeContext(table);
+    const tableMap = TableMap.get(table.node);
+
+    return {
+      currentAnchor: getTableAnchorFromAbsoluteCellPos(tableContext, tableMap, selection.$anchorCell.pos),
+      selectionKind: 'cell',
+      table: tableContext,
+      tableMap
+    };
+  }
+
+  if (selection instanceof NodeSelection) {
+    const tableRole = selection.node.type.spec.tableRole;
+
+    if (tableRole === 'table') {
+      return {
+        currentAnchor: null,
+        selectionKind: 'table',
+        table: {
+          node: selection.node,
+          pos: selection.from,
+          start: selection.from + 1
+        },
+        tableMap: TableMap.get(selection.node)
+      };
+    }
+
+    if (tableRole === 'cell' || tableRole === 'header_cell') {
+      const table = findTable(selection.$from);
+
+      if (!table) {
+        return null;
+      }
+
+      const tableContext = toTableNodeContext(table);
+      const tableMap = TableMap.get(table.node);
+
+      return {
+        currentAnchor: getTableAnchorFromAbsoluteCellPos(tableContext, tableMap, selection.from),
+        selectionKind: 'cell',
+        table: tableContext,
+        tableMap
+      };
+    }
+  }
+
+  const $cell = cellAround(selection.$from);
+  const table = findTable(selection.$from);
+
+  if (!$cell || !table) {
+    return null;
+  }
+
+  const tableContext = toTableNodeContext(table);
+  const tableMap = TableMap.get(table.node);
+
+  return {
+    currentAnchor: getTableAnchorFromAbsoluteCellPos(tableContext, tableMap, $cell.pos),
+    selectionKind: 'text',
+    table: tableContext,
+    tableMap
+  };
+}
+
+function getStoredTableAnchor(editor: Editor, table: TableNodeContext, tableMap: TableMap): TableAnchor | null {
+  const storedAnchor = lastFocusedTableCellByEditor.get(editor);
+
+  if (!storedAnchor || storedAnchor.tablePos !== table.pos) {
+    return null;
+  }
+
+  const rowIndex = Math.min(Math.max(storedAnchor.rowIndex, 0), Math.max(tableMap.height - 1, 0));
+  const columnIndex = Math.min(Math.max(storedAnchor.columnIndex, 0), Math.max(tableMap.width - 1, 0));
+
+  return getTableAnchorFromCoordinates(table, tableMap, rowIndex, columnIndex);
+}
+
+function getDefaultTableAnchor(table: TableNodeContext, tableMap: TableMap): TableAnchor | null {
+  if (tableMap.width < 1 || tableMap.height < 1) {
+    return null;
+  }
+
+  if (tableMap.height > 1) {
+    return getTableAnchorFromCoordinates(table, tableMap, 1, 0) ?? getTableAnchorFromCoordinates(table, tableMap, 0, 0);
+  }
+
+  return getTableAnchorFromCoordinates(table, tableMap, 0, 0);
+}
+
+function getTableAnchorFromCoordinates(
+  table: TableNodeContext,
+  tableMap: TableMap,
+  rowIndex: number,
+  columnIndex: number
+): TableAnchor | null {
+  if (rowIndex < 0 || columnIndex < 0 || rowIndex >= tableMap.height || columnIndex >= tableMap.width) {
+    return null;
+  }
+
+  const cellOffset = tableMap.positionAt(rowIndex, columnIndex, table.node);
+  const cellNode = table.node.nodeAt(cellOffset);
+
+  if (!cellNode) {
+    return null;
+  }
+
+  const cellRect = tableMap.findCell(cellOffset);
+
+  return {
+    cellNode,
+    columnIndex: cellRect.left,
+    isHeaderRow: cellNode.type.name === 'tableHeader',
+    rowIndex: cellRect.top
+  };
+}
+
+function getTableAnchorFromAbsoluteCellPos(
+  table: TableNodeContext,
+  tableMap: TableMap,
+  absoluteCellPos: number
+): TableAnchor | null {
+  const relativeCellPos = absoluteCellPos - table.start;
+
+  if (relativeCellPos < 0) {
+    return null;
+  }
+
+  const cellNode = table.node.nodeAt(relativeCellPos);
+
+  if (!cellNode) {
+    return null;
+  }
+
+  const cellRect = tableMap.findCell(relativeCellPos);
+
+  return {
+    cellNode,
+    columnIndex: cellRect.left,
+    isHeaderRow: cellNode.type.name === 'tableHeader',
+    rowIndex: cellRect.top
+  };
+}
+
+function rememberTableAnchor(editor: Editor, table: TableNodeContext, anchor: TableAnchor) {
+  lastFocusedTableCellByEditor.set(editor, {
+    columnIndex: anchor.columnIndex,
+    rowIndex: anchor.rowIndex,
+    tablePos: table.pos
+  });
+}
+
+function toTableNodeContext(table: NonNullable<ReturnType<typeof findTable>>): TableNodeContext {
+  return {
+    node: table.node,
+    pos: table.pos,
+    start: table.start
+  };
+}
+
 function renderVelocaTableToMarkdown(node: JSONContent, helpers: MarkdownRendererHelpers): string {
   if (!node.content?.length) {
     return '';
@@ -1942,13 +2703,45 @@ function isTextCursorInsideTableCell(selection: Editor['state']['selection']): b
 
 type TableSelectionContext = {
   cellNode: ProseMirrorNode;
+  hasAnchor: boolean;
   rect: ReturnType<typeof selectedRect>;
-  table: NonNullable<ReturnType<typeof findTable>>;
+  selectionKind: TableSelectionKind;
+  table: TableNodeContext;
+  tableMap: TableMap;
+};
+
+type TableNodeContext = {
+  node: ProseMirrorNode;
+  pos: number;
+  start: number;
+};
+
+type TableAnchor = {
+  cellNode: ProseMirrorNode;
+  columnIndex: number;
+  isHeaderRow: boolean;
+  rowIndex: number;
+};
+
+type TableSelectionKind = 'cell' | 'table' | 'text';
+
+type StoredTableAnchor = {
+  columnIndex: number;
+  rowIndex: number;
+  tablePos: number;
+};
+
+type TableSelectionState = {
+  currentAnchor: TableAnchor | null;
+  selectionKind: TableSelectionKind;
+  table: TableNodeContext;
   tableMap: TableMap;
 };
 
 type TableColumnInsertDirection = 'left' | 'right';
 type TableRowInsertDirection = 'above' | 'below';
+
+const lastFocusedTableCellByEditor = new WeakMap<Editor, StoredTableAnchor>();
 
 function sanitizeUrl(value: string | null): string | null {
   if (!value) {

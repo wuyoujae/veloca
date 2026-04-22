@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
+import { createPortal } from 'react-dom';
 import {
   ArrowDownToLine,
   ArrowLeftToLine,
@@ -1350,10 +1351,12 @@ interface MarkdownEditorProps {
 type TableControlsState = {
   columnCount: number;
   columnIndex: number;
+  hasAnchor: boolean;
   isHeaderRow: boolean;
   left: number;
   rowCount: number;
   rowIndex: number;
+  selectionKind: 'cell' | 'table' | 'text';
   tablePos: number;
   top: number;
 };
@@ -1365,8 +1368,8 @@ type TableGridHoverState = {
 
 const TABLE_GRID_MAX_COLUMNS = 10;
 const TABLE_GRID_MAX_ROWS = 5;
-const TABLE_CONTROL_GUTTER = 40;
-const TABLE_CONTROL_LEFT_OFFSET = 32;
+const TABLE_CONTROL_LEFT_OFFSET = 36;
+const TABLE_CONTROL_MIN_VIEWPORT_LEFT = 8;
 
 function MarkdownEditor({
   content,
@@ -1598,6 +1601,47 @@ function MarkdownEditor({
     editorInstanceRef.current = editor;
   }, [editor]);
 
+  const getActiveTableWrapperElement = (currentEditor: TiptapEditor) => {
+    const activeTableInfo = getActiveTableInfo(currentEditor);
+
+    if (!activeTableInfo) {
+      return null;
+    }
+
+    const directDom = currentEditor.view.nodeDOM(activeTableInfo.tablePos);
+
+    if (directDom instanceof HTMLElement) {
+      if (directDom.classList.contains('tableWrapper')) {
+        return {
+          info: activeTableInfo,
+          wrapper: directDom
+        };
+      }
+
+      const directWrapper = directDom.closest('.tableWrapper');
+
+      if (directWrapper instanceof HTMLElement) {
+        return {
+          info: activeTableInfo,
+          wrapper: directWrapper
+        };
+      }
+    }
+
+    const selectionDom = currentEditor.view.domAtPos(currentEditor.state.selection.from).node;
+    const selectionElement = selectionDom instanceof HTMLElement ? selectionDom : selectionDom.parentElement;
+    const wrapper = selectionElement?.closest('.tableWrapper');
+
+    if (!(wrapper instanceof HTMLElement)) {
+      return null;
+    }
+
+    return {
+      info: activeTableInfo,
+      wrapper
+    };
+  };
+
   useEffect(() => {
     if (!editor) {
       setTableControls(null);
@@ -1607,55 +1651,33 @@ function MarkdownEditor({
       return;
     }
 
-    const getActiveTableWrapperElement = () => {
-      const activeTableInfo = getActiveTableInfo(editor);
+    let frameId = 0;
+    let resizeObserver: ResizeObserver | null = null;
+    let observedWrapper: HTMLElement | null = null;
+    const scrollContainer = editorShellRef.current?.closest('.editor-scroll-area');
 
-      if (!activeTableInfo) {
-        return null;
-      }
-
-      const directDom = editor.view.nodeDOM(activeTableInfo.tablePos);
-
-      if (directDom instanceof HTMLElement) {
-        if (directDom.classList.contains('tableWrapper')) {
-          return {
-            info: activeTableInfo,
-            wrapper: directDom
-          };
-        }
-
-        const directWrapper = directDom.closest('.tableWrapper');
-
-        if (directWrapper instanceof HTMLElement) {
-          return {
-            info: activeTableInfo,
-            wrapper: directWrapper
-          };
-        }
-      }
-
-      const selectionDom = editor.view.domAtPos(editor.state.selection.from).node;
-      const selectionElement = selectionDom instanceof HTMLElement ? selectionDom : selectionDom.parentElement;
-      const wrapper = selectionElement?.closest('.tableWrapper');
-
-      if (!(wrapper instanceof HTMLElement)) {
-        return null;
-      }
-
-      return {
-        info: activeTableInfo,
-        wrapper
-      };
-    };
-
-    const syncTableControls = () => {
-      if (!editorShellRef.current) {
+    const updateObservedWrapper = (wrapper: HTMLElement | null) => {
+      if (observedWrapper === wrapper) {
         return;
       }
 
-      const tableWrapperContext = getActiveTableWrapperElement();
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      observedWrapper = wrapper;
+
+      if (wrapper && typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(() => {
+          queueTableControlsSync();
+        });
+        resizeObserver.observe(wrapper);
+      }
+    };
+
+    const syncTableControls = () => {
+      const tableWrapperContext = getActiveTableWrapperElement(editor);
 
       if (!tableWrapperContext) {
+        updateObservedWrapper(null);
         setTableControls(null);
         setTableGridOpen(false);
         setTableMenuOpen(false);
@@ -1663,31 +1685,36 @@ function MarkdownEditor({
         return;
       }
 
-      const shellRect = editorShellRef.current.getBoundingClientRect();
+      updateObservedWrapper(tableWrapperContext.wrapper);
       const wrapperRect = tableWrapperContext.wrapper.getBoundingClientRect();
 
       setTableControls({
         ...tableWrapperContext.info,
-        left: Math.max(0, wrapperRect.left - shellRect.left - TABLE_CONTROL_LEFT_OFFSET),
-        top: wrapperRect.top - shellRect.top + 12
+        left: Math.max(TABLE_CONTROL_MIN_VIEWPORT_LEFT, wrapperRect.left - TABLE_CONTROL_LEFT_OFFSET),
+        top: wrapperRect.top + 12
       });
     };
 
-    const rafSync = () => {
-      window.requestAnimationFrame(syncTableControls);
+    const queueTableControlsSync = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(syncTableControls);
     };
 
-    rafSync();
-    editor.on('focus', rafSync);
-    editor.on('selectionUpdate', rafSync);
-    editor.on('update', rafSync);
-    window.addEventListener('resize', rafSync);
+    queueTableControlsSync();
+    editor.on('focus', queueTableControlsSync);
+    editor.on('selectionUpdate', queueTableControlsSync);
+    editor.on('update', queueTableControlsSync);
+    scrollContainer?.addEventListener('scroll', queueTableControlsSync, { passive: true });
+    window.addEventListener('resize', queueTableControlsSync);
 
     return () => {
-      editor.off('focus', rafSync);
-      editor.off('selectionUpdate', rafSync);
-      editor.off('update', rafSync);
-      window.removeEventListener('resize', rafSync);
+      window.cancelAnimationFrame(frameId);
+      resizeObserver?.disconnect();
+      editor.off('focus', queueTableControlsSync);
+      editor.off('selectionUpdate', queueTableControlsSync);
+      editor.off('update', queueTableControlsSync);
+      scrollContainer?.removeEventListener('scroll', queueTableControlsSync);
+      window.removeEventListener('resize', queueTableControlsSync);
     };
   }, [editor]);
 
@@ -1712,43 +1739,19 @@ function MarkdownEditor({
     }
 
     window.requestAnimationFrame(() => {
-      if (!editorShellRef.current) {
-        return;
-      }
+      const tableWrapperContext = getActiveTableWrapperElement(editor);
 
-      const activeTableInfo = getActiveTableInfo(editor);
-
-      if (!activeTableInfo) {
+      if (!tableWrapperContext) {
         setTableControls(null);
         return;
       }
 
-      const directDom = editor.view.nodeDOM(activeTableInfo.tablePos);
-      const directWrapper =
-        directDom instanceof HTMLElement
-          ? directDom.classList.contains('tableWrapper')
-            ? directDom
-            : directDom.closest('.tableWrapper')
-          : null;
-      const selectionDom = editor.view.domAtPos(editor.state.selection.from).node;
-      const selectionElement = selectionDom instanceof HTMLElement ? selectionDom : selectionDom.parentElement;
-      const wrapperDom =
-        directWrapper instanceof HTMLElement
-          ? directWrapper
-          : selectionElement?.closest('.tableWrapper');
-
-      if (!(wrapperDom instanceof HTMLElement)) {
-        setTableControls(null);
-        return;
-      }
-
-      const shellRect = editorShellRef.current.getBoundingClientRect();
-      const wrapperRect = wrapperDom.getBoundingClientRect();
+      const wrapperRect = tableWrapperContext.wrapper.getBoundingClientRect();
 
       setTableControls({
-        ...activeTableInfo,
-        left: Math.max(0, wrapperRect.left - shellRect.left - TABLE_CONTROL_LEFT_OFFSET),
-        top: wrapperRect.top - shellRect.top + 12
+        ...tableWrapperContext.info,
+        left: Math.max(TABLE_CONTROL_MIN_VIEWPORT_LEFT, wrapperRect.left - TABLE_CONTROL_LEFT_OFFSET),
+        top: wrapperRect.top + 12
       });
     });
   };
@@ -1798,124 +1801,126 @@ function MarkdownEditor({
     return window.veloca.workspace.resolveAsset(documentPath, assetPath);
   };
 
-  return (
-    <div
-      className="veloca-editor"
-      ref={editorShellRef}
-      style={{ '--table-control-gutter': `${TABLE_CONTROL_GUTTER}px` } as CSSProperties}
-    >
-      {tableControls ? (
-        <div
-          className="table-block-controls"
-          ref={tableControlsRef}
-          style={{
-            left: `${tableControls.left}px`,
-            top: `${tableControls.top}px`
-          }}
-        >
-          <button
-            className={`table-control-btn${tableGridOpen ? ' active' : ''}`}
-            type="button"
-            title="Resize Table"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              setTableMenuOpen(false);
-              setTableGridOpen((current) => !current);
+  const tableControlsPortal =
+    tableControls && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            className="table-block-controls"
+            ref={tableControlsRef}
+            style={{
+              left: `${tableControls.left}px`,
+              top: `${tableControls.top}px`
             }}
           >
-            <Grid3X3 size={16} />
-          </button>
-          <button
-            className={`table-control-btn${tableMenuOpen ? ' active' : ''}`}
-            type="button"
-            title="Table Options"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => {
-              setTableGridOpen(false);
-              setTableMenuOpen((current) => !current);
-            }}
-          >
-            <MoreHorizontal size={16} />
-          </button>
-
-          <div
-            className={`table-popup-panel table-grid-popup${tableGridOpen ? ' show' : ''}`}
-            onMouseDown={(event) => event.preventDefault()}
-          >
-            <div className="table-grid-matrix">
-              {Array.from({ length: TABLE_GRID_MAX_ROWS * TABLE_GRID_MAX_COLUMNS }, (_, index) => {
-                const row = Math.floor(index / TABLE_GRID_MAX_COLUMNS) + 1;
-                const column = (index % TABLE_GRID_MAX_COLUMNS) + 1;
-                const highlighted =
-                  tableGridHover !== null &&
-                  row <= tableGridHover.rowCount &&
-                  column <= tableGridHover.columnCount;
-
-                return (
-                  <button
-                    className={`table-grid-cell${highlighted ? ' highlighted' : ''}`}
-                    key={`${row}-${column}`}
-                    type="button"
-                    onMouseEnter={() =>
-                      setTableGridHover({
-                        columnCount: column,
-                        rowCount: row
-                      })
-                    }
-                    onMouseLeave={() => setTableGridHover(null)}
-                    onClick={() => handleResizeTable(row, column)}
-                  />
-                );
-              })}
-            </div>
-            <div className="table-grid-status">
-              {tableGridHover
-                ? `${tableGridHover.columnCount} × ${tableGridHover.rowCount}`
-                : `${tableControls.columnCount} × ${tableControls.rowCount}`}
-            </div>
-          </div>
-
-          <div
-            className={`table-popup-panel table-menu-popup${tableMenuOpen ? ' show' : ''}`}
-            onMouseDown={(event) => event.preventDefault()}
-          >
-            <button className="table-menu-item" type="button" onClick={() => handleInsertTableColumn('left')}>
-              <span className="table-menu-item-left">
-                <ArrowLeftToLine size={14} />
-                <span>Insert column left</span>
-              </span>
-              <span className="table-menu-shortcut">⇧ + ←</span>
-            </button>
-            <button className="table-menu-item" type="button" onClick={() => handleInsertTableColumn('right')}>
-              <span className="table-menu-item-left">
-                <ArrowRightToLine size={14} />
-                <span>Insert column right</span>
-              </span>
-              <span className="table-menu-shortcut">⇧ + →</span>
-            </button>
-            <div className="table-menu-separator" />
             <button
-              className={`table-menu-item${tableControls.isHeaderRow ? ' disabled' : ''}`}
-              disabled={tableControls.isHeaderRow}
+              className={`table-control-btn${tableGridOpen ? ' active' : ''}`}
               type="button"
-              onClick={() => handleInsertTableRow('above')}
+              title="Resize Table"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setTableMenuOpen(false);
+                setTableGridOpen((current) => !current);
+              }}
             >
-              <span className="table-menu-item-left">
-                <ArrowUpToLine size={14} />
-                <span>Insert row above</span>
-              </span>
-              <span className="table-menu-shortcut">⇧ + ↑</span>
+              <Grid3X3 size={16} />
             </button>
-            <button className="table-menu-item" type="button" onClick={() => handleInsertTableRow('below')}>
-              <span className="table-menu-item-left">
-                <ArrowDownToLine size={14} />
-                <span>Insert row below</span>
-              </span>
-              <span className="table-menu-shortcut">⇧ + ↓</span>
+            <button
+              className={`table-control-btn${tableMenuOpen ? ' active' : ''}`}
+              type="button"
+              title="Table Options"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                setTableGridOpen(false);
+                setTableMenuOpen((current) => !current);
+              }}
+            >
+              <MoreHorizontal size={16} />
             </button>
-          </div>
-        </div>
-      ) : null}
+
+            <div
+              className={`table-popup-panel table-grid-popup${tableGridOpen ? ' show' : ''}`}
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <div className="table-grid-matrix">
+                {Array.from({ length: TABLE_GRID_MAX_ROWS * TABLE_GRID_MAX_COLUMNS }, (_, index) => {
+                  const row = Math.floor(index / TABLE_GRID_MAX_COLUMNS) + 1;
+                  const column = (index % TABLE_GRID_MAX_COLUMNS) + 1;
+                  const highlighted =
+                    tableGridHover !== null &&
+                    row <= tableGridHover.rowCount &&
+                    column <= tableGridHover.columnCount;
+
+                  return (
+                    <button
+                      className={`table-grid-cell${highlighted ? ' highlighted' : ''}`}
+                      key={`${row}-${column}`}
+                      type="button"
+                      onMouseEnter={() =>
+                        setTableGridHover({
+                          columnCount: column,
+                          rowCount: row
+                        })
+                      }
+                      onMouseLeave={() => setTableGridHover(null)}
+                      onClick={() => handleResizeTable(row, column)}
+                    />
+                  );
+                })}
+              </div>
+              <div className="table-grid-status">
+                {tableGridHover
+                  ? `${tableGridHover.columnCount} × ${tableGridHover.rowCount}`
+                  : `${tableControls.columnCount} × ${tableControls.rowCount}`}
+              </div>
+            </div>
+
+            <div
+              className={`table-popup-panel table-menu-popup${tableMenuOpen ? ' show' : ''}`}
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <button className="table-menu-item" type="button" onClick={() => handleInsertTableColumn('left')}>
+                <span className="table-menu-item-left">
+                  <ArrowLeftToLine size={14} />
+                  <span>Insert column left</span>
+                </span>
+                <span className="table-menu-shortcut">⇧ + ←</span>
+              </button>
+              <button className="table-menu-item" type="button" onClick={() => handleInsertTableColumn('right')}>
+                <span className="table-menu-item-left">
+                  <ArrowRightToLine size={14} />
+                  <span>Insert column right</span>
+                </span>
+                <span className="table-menu-shortcut">⇧ + →</span>
+              </button>
+              <div className="table-menu-separator" />
+              <button
+                className={`table-menu-item${tableControls.isHeaderRow ? ' disabled' : ''}`}
+                disabled={tableControls.isHeaderRow}
+                type="button"
+                onClick={() => handleInsertTableRow('above')}
+              >
+                <span className="table-menu-item-left">
+                  <ArrowUpToLine size={14} />
+                  <span>Insert row above</span>
+                </span>
+                <span className="table-menu-shortcut">⇧ + ↑</span>
+              </button>
+              <button className="table-menu-item" type="button" onClick={() => handleInsertTableRow('below')}>
+                <span className="table-menu-item-left">
+                  <ArrowDownToLine size={14} />
+                  <span>Insert row below</span>
+                </span>
+                <span className="table-menu-shortcut">⇧ + ↓</span>
+              </button>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <div className="veloca-editor" ref={editorShellRef}>
+      {tableControlsPortal}
       <EditorContent editor={editor} />
     </div>
   );
