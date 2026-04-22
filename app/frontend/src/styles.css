@@ -329,6 +329,7 @@ button {
   --statusbar-height: 42px;
   --statusbar-offset: 0px;
   --statusbar-safe-gap: 18px;
+  --statusbar-clearance: calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 40px);
   position: relative;
   display: flex;
   flex: 1;
@@ -421,7 +422,8 @@ button {
   justify-content: center;
   min-width: 0;
   min-height: 0;
-  padding: 40px 0 calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 48px);
+  padding: 40px 0 calc(var(--statusbar-clearance) + 8px);
+  scroll-padding-bottom: var(--statusbar-clearance);
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -430,7 +432,7 @@ button {
   width: 100%;
   max-width: 760px;
   min-width: 0;
-  padding: 80px 40px calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 88px);
+  padding: 80px 40px calc(var(--statusbar-clearance) + 48px);
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   color: var(--editor-copy);
   font-size: 16px;
@@ -635,7 +637,7 @@ button {
 .veloca-editor .ProseMirror {
   min-width: 0;
   min-height: 480px;
-  padding: 0 0 calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 24px);
+  padding: 0 0 var(--statusbar-clearance);
   color: var(--editor-copy);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -1932,7 +1934,7 @@ button {
   }
 
   .markdown-body {
-    padding: 0 28px;
+    padding: 0 28px calc(var(--statusbar-clearance) + 36px);
   }
 
   .settings-window {
