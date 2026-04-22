@@ -623,10 +623,152 @@ button {
 }
 
 .veloca-editor {
+  position: relative;
   width: 100%;
   min-width: 0;
   min-height: 480px;
   color: var(--editor-copy);
+  overflow: visible;
+}
+
+.table-block-controls {
+  position: absolute;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.table-control-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.table-control-btn:hover,
+.table-control-btn.active {
+  background: var(--muted);
+  color: var(--foreground);
+  border-color: var(--surface-hover);
+}
+
+.table-popup-panel {
+  position: absolute;
+  left: 36px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.95);
+  transform-origin: left top;
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 70;
+}
+
+.table-popup-panel.show {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.table-grid-popup {
+  top: 0;
+  width: 232px;
+}
+
+.table-grid-matrix {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  padding: 4px;
+}
+
+.table-grid-cell {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--muted);
+  cursor: pointer;
+  transition: background-color 0.05s ease, border-color 0.05s ease;
+}
+
+.table-grid-cell.highlighted {
+  background: color-mix(in srgb, var(--table-selected) 30%, var(--background));
+  border-color: #3b82f6;
+}
+
+.table-grid-status {
+  padding: 0 4px 4px;
+  margin-top: 8px;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.table-menu-popup {
+  top: 34px;
+  width: 260px;
+}
+
+.table-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  transition: background-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.table-menu-item:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+.table-menu-item.disabled,
+.table-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  color: var(--muted-foreground);
+}
+
+.table-menu-item-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-menu-shortcut {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.table-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
 }
 
 .veloca-editor .tiptap {

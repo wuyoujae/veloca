@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import type { Editor as TiptapEditor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import {
+  ArrowDownToLine,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  ArrowUpToLine,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -11,8 +16,10 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
+  Grid3X3,
   Info,
   LoaderCircle,
+  MoreHorizontal,
   Moon,
   Pencil,
   Save,
@@ -30,10 +37,14 @@ import {
   buildMediaNodeFromUrl,
   createRichEditorExtensions,
   extractFirstMediaUrl,
+  getActiveTableInfo,
   hydrateDocumentAssets,
+  insertActiveTableColumn,
+  insertActiveTableRow,
   isAudioUrl,
   isImageUrl,
   isVideoUrl,
+  resizeActiveTable,
   transformMarkdownForEditor,
   transformMarkdownFromEditor,
   type WorkspaceAssetPayload,
@@ -1336,6 +1347,25 @@ interface MarkdownEditorProps {
   onToast: (message: Omit<ToastMessage, 'id'>) => void;
 }
 
+type TableControlsState = {
+  columnCount: number;
+  columnIndex: number;
+  isHeaderRow: boolean;
+  left: number;
+  rowCount: number;
+  rowIndex: number;
+  tablePos: number;
+  top: number;
+};
+
+type TableGridHoverState = {
+  columnCount: number;
+  rowCount: number;
+};
+
+const TABLE_GRID_MAX_COLUMNS = 10;
+const TABLE_GRID_MAX_ROWS = 5;
+
 function MarkdownEditor({
   content,
   filePath,
@@ -1347,9 +1377,15 @@ function MarkdownEditor({
   const activeFilePathRef = useRef(filePath);
   const lastEditorContentRef = useRef(content);
   const editorInstanceRef = useRef<ReturnType<typeof useEditor> | null>(null);
+  const editorShellRef = useRef<HTMLDivElement | null>(null);
+  const tableControlsRef = useRef<HTMLDivElement | null>(null);
   const onChangeRef = useRef(onChange);
   const onToastRef = useRef(onToast);
   const syncingRef = useRef(false);
+  const [tableControls, setTableControls] = useState<TableControlsState | null>(null);
+  const [tableGridOpen, setTableGridOpen] = useState(false);
+  const [tableMenuOpen, setTableMenuOpen] = useState(false);
+  const [tableGridHover, setTableGridHover] = useState<TableGridHoverState | null>(null);
 
   useEffect(() => {
     contentRef.current = content;
@@ -1560,6 +1596,141 @@ function MarkdownEditor({
     editorInstanceRef.current = editor;
   }, [editor]);
 
+  useEffect(() => {
+    if (!editor) {
+      setTableControls(null);
+      setTableGridOpen(false);
+      setTableMenuOpen(false);
+      setTableGridHover(null);
+      return;
+    }
+
+    const syncTableControls = () => {
+      if (!editorShellRef.current) {
+        return;
+      }
+
+      const activeTableInfo = getActiveTableInfo(editor);
+
+      if (!activeTableInfo) {
+        setTableControls(null);
+        setTableGridOpen(false);
+        setTableMenuOpen(false);
+        setTableGridHover(null);
+        return;
+      }
+
+      const wrapperDom = editor.view.nodeDOM(activeTableInfo.tablePos);
+
+      if (!(wrapperDom instanceof HTMLElement) || !wrapperDom.classList.contains('tableWrapper')) {
+        setTableControls(null);
+        return;
+      }
+
+      const shellRect = editorShellRef.current.getBoundingClientRect();
+      const wrapperRect = wrapperDom.getBoundingClientRect();
+
+      setTableControls({
+        ...activeTableInfo,
+        left: wrapperRect.left - shellRect.left - 44,
+        top: wrapperRect.top - shellRect.top + 12
+      });
+    };
+
+    const rafSync = () => {
+      window.requestAnimationFrame(syncTableControls);
+    };
+
+    rafSync();
+    editor.on('focus', rafSync);
+    editor.on('selectionUpdate', rafSync);
+    editor.on('update', rafSync);
+    window.addEventListener('resize', rafSync);
+
+    return () => {
+      editor.off('focus', rafSync);
+      editor.off('selectionUpdate', rafSync);
+      editor.off('update', rafSync);
+      window.removeEventListener('resize', rafSync);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent | globalThis.MouseEvent) => {
+      if (!tableControlsRef.current?.contains(event.target as Node | null)) {
+        setTableGridOpen(false);
+        setTableMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, []);
+
+  const refreshTableControls = () => {
+    if (!editor) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (!editorShellRef.current) {
+        return;
+      }
+
+      const activeTableInfo = getActiveTableInfo(editor);
+
+      if (!activeTableInfo) {
+        setTableControls(null);
+        return;
+      }
+
+      const wrapperDom = editor.view.nodeDOM(activeTableInfo.tablePos);
+
+      if (!(wrapperDom instanceof HTMLElement) || !wrapperDom.classList.contains('tableWrapper')) {
+        setTableControls(null);
+        return;
+      }
+
+      const shellRect = editorShellRef.current.getBoundingClientRect();
+      const wrapperRect = wrapperDom.getBoundingClientRect();
+
+      setTableControls({
+        ...activeTableInfo,
+        left: wrapperRect.left - shellRect.left - 44,
+        top: wrapperRect.top - shellRect.top + 12
+      });
+    });
+  };
+
+  const runTableMutation = (mutation: (currentEditor: TiptapEditor) => boolean) => {
+    if (!editor) {
+      return;
+    }
+
+    if (mutation(editor)) {
+      refreshTableControls();
+    }
+  };
+
+  const handleInsertTableColumn = (direction: 'left' | 'right') => {
+    runTableMutation((currentEditor) => insertActiveTableColumn(currentEditor, direction));
+    setTableMenuOpen(false);
+  };
+
+  const handleInsertTableRow = (direction: 'above' | 'below') => {
+    runTableMutation((currentEditor) => insertActiveTableRow(currentEditor, direction));
+    setTableMenuOpen(false);
+  };
+
+  const handleResizeTable = (rowCount: number, columnCount: number) => {
+    runTableMutation((currentEditor) => resizeActiveTable(currentEditor, rowCount, columnCount));
+    setTableGridOpen(false);
+    setTableGridHover(null);
+  };
+
   const resolveAssetForEditor = async (
     documentPath: string,
     assetPath: string
@@ -1580,7 +1751,119 @@ function MarkdownEditor({
   };
 
   return (
-    <div className="veloca-editor">
+    <div className="veloca-editor" ref={editorShellRef}>
+      {tableControls ? (
+        <div
+          className="table-block-controls"
+          ref={tableControlsRef}
+          style={{
+            left: `${tableControls.left}px`,
+            top: `${tableControls.top}px`
+          }}
+        >
+          <button
+            className={`table-control-btn${tableGridOpen ? ' active' : ''}`}
+            type="button"
+            title="Resize Table"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              setTableMenuOpen(false);
+              setTableGridOpen((current) => !current);
+            }}
+          >
+            <Grid3X3 size={16} />
+          </button>
+          <button
+            className={`table-control-btn${tableMenuOpen ? ' active' : ''}`}
+            type="button"
+            title="Table Options"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => {
+              setTableGridOpen(false);
+              setTableMenuOpen((current) => !current);
+            }}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+
+          <div
+            className={`table-popup-panel table-grid-popup${tableGridOpen ? ' show' : ''}`}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <div className="table-grid-matrix">
+              {Array.from({ length: TABLE_GRID_MAX_ROWS * TABLE_GRID_MAX_COLUMNS }, (_, index) => {
+                const row = Math.floor(index / TABLE_GRID_MAX_COLUMNS) + 1;
+                const column = (index % TABLE_GRID_MAX_COLUMNS) + 1;
+                const highlighted =
+                  tableGridHover !== null &&
+                  row <= tableGridHover.rowCount &&
+                  column <= tableGridHover.columnCount;
+
+                return (
+                  <button
+                    className={`table-grid-cell${highlighted ? ' highlighted' : ''}`}
+                    key={`${row}-${column}`}
+                    type="button"
+                    onMouseEnter={() =>
+                      setTableGridHover({
+                        columnCount: column,
+                        rowCount: row
+                      })
+                    }
+                    onMouseLeave={() => setTableGridHover(null)}
+                    onClick={() => handleResizeTable(row, column)}
+                  />
+                );
+              })}
+            </div>
+            <div className="table-grid-status">
+              {tableGridHover
+                ? `${tableGridHover.columnCount} × ${tableGridHover.rowCount}`
+                : `${tableControls.columnCount} × ${tableControls.rowCount}`}
+            </div>
+          </div>
+
+          <div
+            className={`table-popup-panel table-menu-popup${tableMenuOpen ? ' show' : ''}`}
+            onMouseDown={(event) => event.preventDefault()}
+          >
+            <button className="table-menu-item" type="button" onClick={() => handleInsertTableColumn('left')}>
+              <span className="table-menu-item-left">
+                <ArrowLeftToLine size={14} />
+                <span>Insert column left</span>
+              </span>
+              <span className="table-menu-shortcut">⇧ + ←</span>
+            </button>
+            <button className="table-menu-item" type="button" onClick={() => handleInsertTableColumn('right')}>
+              <span className="table-menu-item-left">
+                <ArrowRightToLine size={14} />
+                <span>Insert column right</span>
+              </span>
+              <span className="table-menu-shortcut">⇧ + →</span>
+            </button>
+            <div className="table-menu-separator" />
+            <button
+              className={`table-menu-item${tableControls.isHeaderRow ? ' disabled' : ''}`}
+              disabled={tableControls.isHeaderRow}
+              type="button"
+              onClick={() => handleInsertTableRow('above')}
+            >
+              <span className="table-menu-item-left">
+                <ArrowUpToLine size={14} />
+                <span>Insert row above</span>
+              </span>
+              <span className="table-menu-shortcut">⇧ + ↑</span>
+            </button>
+            <button className="table-menu-item" type="button" onClick={() => handleInsertTableRow('below')}>
+              <span className="table-menu-item-left">
+                <ArrowDownToLine size={14} />
+                <span>Insert row below</span>
+              </span>
+              <span className="table-menu-shortcut">⇧ + ↓</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
       <EditorContent editor={editor} />
     </div>
   );

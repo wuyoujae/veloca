@@ -29,8 +29,16 @@ import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
-import { CellSelection, TableMap, addColumn, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
+import { TextSelection } from '@tiptap/pm/state';
+import {
+  CellSelection,
+  TableMap,
+  addColumn,
+  addRow,
+  cellAround,
+  findTable,
+  selectedRect
+} from '@tiptap/pm/tables';
 import StarterKit from '@tiptap/starter-kit';
 import { common, createLowlight } from 'lowlight';
 import { marked } from 'marked';
@@ -461,12 +469,6 @@ const TyporaTableInput = Extension.create({
   name: 'typoraTableInput',
   priority: 1000,
 
-  addStorage() {
-    return {
-      heldColumnInsertDirection: null as TableColumnInsertDirection | null
-    };
-  },
-
   addKeyboardShortcuts() {
     const editor = this.editor;
 
@@ -474,21 +476,6 @@ const TyporaTableInput = Extension.create({
       Enter: () => {
         if (editor.view.composing) {
           return false;
-        }
-
-        const heldColumnInsertDirection = getHeldTableColumnInsertDirection(this.storage);
-
-        if (heldColumnInsertDirection) {
-          this.storage.heldColumnInsertDirection = null;
-
-          if (
-            handleTableKeyboardInteraction(
-              editor,
-              heldColumnInsertDirection === 'left' ? 'column-left' : 'column-right'
-            )
-          ) {
-            return true;
-          }
         }
 
         if (handleTableKeyboardInteraction(editor, 'enter')) {
@@ -521,58 +508,36 @@ const TyporaTableInput = Extension.create({
         }
 
         return handleTableKeyboardInteraction(editor, 'arrow-up');
+      },
+      'Shift-ArrowLeft': () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'column-left');
+      },
+      'Shift-ArrowRight': () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'column-right');
+      },
+      'Shift-ArrowDown': () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'row-below');
+      },
+      'Shift-ArrowUp': () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return handleTableKeyboardInteraction(editor, 'row-above');
       }
     };
-  },
-
-  addProseMirrorPlugins() {
-    const editor = this.editor;
-    const storage = this.storage;
-
-    return [
-      new Plugin({
-        key: new PluginKey('velocaTableColumnInsertHotkeys'),
-        props: {
-          handleDOMEvents: {
-            blur: () => {
-              storage.heldColumnInsertDirection = null;
-              return false;
-            },
-            keydown: (_view, event) => {
-              if (!(event instanceof KeyboardEvent) || event.isComposing) {
-                return false;
-              }
-
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                storage.heldColumnInsertDirection = getActiveTableContext(editor)
-                  ? event.key === 'ArrowLeft'
-                    ? 'left'
-                    : 'right'
-                  : null;
-                return false;
-              }
-
-              if (event.key !== 'Enter') {
-                storage.heldColumnInsertDirection = null;
-              }
-
-              return false;
-            },
-            keyup: (_view, event) => {
-              if (!(event instanceof KeyboardEvent)) {
-                return false;
-              }
-
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                storage.heldColumnInsertDirection = null;
-              }
-
-              return false;
-            }
-          }
-        }
-      })
-    ];
   }
 });
 
@@ -1322,7 +1287,15 @@ function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
 
 function handleTableKeyboardInteraction(
   editor: Editor,
-  action: 'enter' | 'shift-enter' | 'arrow-down' | 'arrow-up' | 'column-left' | 'column-right'
+  action:
+    | 'enter'
+    | 'shift-enter'
+    | 'arrow-down'
+    | 'arrow-up'
+    | 'column-left'
+    | 'column-right'
+    | 'row-above'
+    | 'row-below'
 ): boolean {
   const context = getActiveTableContext(editor);
 
@@ -1335,6 +1308,14 @@ function handleTableKeyboardInteraction(
   }
 
   if (action === 'shift-enter') {
+    return insertBodyRowBelowSelection(editor, context);
+  }
+
+  if (action === 'row-above') {
+    return insertBodyRowAboveSelection(editor, context);
+  }
+
+  if (action === 'row-below') {
     return insertBodyRowBelowSelection(editor, context);
   }
 
@@ -1440,6 +1421,40 @@ function insertBodyRowBelowSelection(editor: Editor, context: TableSelectionCont
   return true;
 }
 
+function insertBodyRowAboveSelection(editor: Editor, context: TableSelectionContext): boolean {
+  if (context.cellNode.attrs.colspan > 1 || context.cellNode.attrs.rowspan > 1 || context.rect.top === 0) {
+    return false;
+  }
+
+  const insertRowIndex = context.rect.top;
+  const targetColumn = context.rect.left;
+  const transaction = editor.state.tr;
+  addRow(transaction, context.rect, insertRowIndex);
+
+  const tableNode = transaction.doc.nodeAt(context.rect.tableStart - 1);
+
+  if (!tableNode) {
+    return false;
+  }
+
+  const nextTableMap = TableMap.get(tableNode);
+  const selection = getTableCellTextSelection(
+    transaction.doc,
+    context.rect.tableStart,
+    tableNode,
+    insertRowIndex,
+    targetColumn,
+    nextTableMap
+  );
+
+  transaction.setSelection(selection);
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+  editor.view.focus();
+
+  return true;
+}
+
 function insertColumnBesideSelection(
   editor: Editor,
   context: TableSelectionContext,
@@ -1471,6 +1486,84 @@ function insertColumnBesideSelection(
   );
 
   transaction.setSelection(selection);
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+  editor.view.focus();
+
+  return true;
+}
+
+export type ActiveTableInfo = {
+  columnCount: number;
+  columnIndex: number;
+  isHeaderRow: boolean;
+  rowCount: number;
+  rowIndex: number;
+  tablePos: number;
+};
+
+export function getActiveTableInfo(editor: Editor): ActiveTableInfo | null {
+  const context = getActiveTableContext(editor);
+
+  if (!context) {
+    return null;
+  }
+
+  return {
+    columnCount: context.tableMap.width,
+    columnIndex: context.rect.left,
+    isHeaderRow: context.rect.top === 0,
+    rowCount: context.tableMap.height,
+    rowIndex: context.rect.top,
+    tablePos: context.table.pos
+  };
+}
+
+export function insertActiveTableColumn(editor: Editor, direction: TableColumnInsertDirection): boolean {
+  const context = getActiveTableContext(editor);
+
+  if (!context) {
+    return false;
+  }
+
+  return insertColumnBesideSelection(editor, context, direction);
+}
+
+export function insertActiveTableRow(editor: Editor, direction: TableRowInsertDirection): boolean {
+  const context = getActiveTableContext(editor);
+
+  if (!context) {
+    return false;
+  }
+
+  return direction === 'above'
+    ? insertBodyRowAboveSelection(editor, context)
+    : insertBodyRowBelowSelection(editor, context);
+}
+
+export function resizeActiveTable(editor: Editor, rowCount: number, columnCount: number): boolean {
+  const context = getActiveTableContext(editor);
+
+  if (!context) {
+    return false;
+  }
+
+  const nextRowCount = Math.max(1, rowCount);
+  const nextColumnCount = Math.max(1, columnCount);
+  const resizedTable = buildResizedTableNode(editor.schema, context.table.node, nextRowCount, nextColumnCount);
+  const transaction = editor.state.tr;
+  const tableStart = context.table.pos + 1;
+
+  transaction.replaceWith(context.table.pos, context.table.pos + context.table.node.nodeSize, resizedTable);
+  transaction.setSelection(
+    getTableCellTextSelection(
+      transaction.doc,
+      tableStart,
+      resizedTable,
+      Math.min(context.rect.top, nextRowCount - 1),
+      Math.min(context.rect.left, nextColumnCount - 1)
+    )
+  );
   transaction.scrollIntoView();
   editor.view.dispatch(transaction);
   editor.view.focus();
@@ -1620,6 +1713,53 @@ function buildMarkdownTableNode(schema: Editor['schema'], headerCells: string[])
   const bodyRow = schema.nodes.tableRow.create(null, headerCells.map(() => createBodyCell()));
 
   return schema.nodes.table.create(null, [headerRow, bodyRow]);
+}
+
+function buildResizedTableNode(
+  schema: Editor['schema'],
+  tableNode: ProseMirrorNode,
+  rowCount: number,
+  columnCount: number
+) {
+  const rows: ProseMirrorNode[] = [];
+
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+    const sourceRow = rowIndex < tableNode.childCount ? tableNode.child(rowIndex) : null;
+    const nextCells: ProseMirrorNode[] = [];
+
+    for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+      const sourceCell = sourceRow && columnIndex < sourceRow.childCount ? sourceRow.child(columnIndex) : null;
+      const shouldUseHeaderCell = rowIndex === 0;
+      nextCells.push(buildResizedTableCell(schema, sourceCell, shouldUseHeaderCell));
+    }
+
+    rows.push(schema.nodes.tableRow.create(null, nextCells));
+  }
+
+  return schema.nodes.table.create(null, rows);
+}
+
+function buildResizedTableCell(
+  schema: Editor['schema'],
+  sourceCell: ProseMirrorNode | null,
+  shouldUseHeaderCell: boolean
+) {
+  const cellType = shouldUseHeaderCell ? schema.nodes.tableHeader : schema.nodes.tableCell;
+  const attrs = {
+    align: sourceCell?.attrs.align ?? null,
+    colspan: 1,
+    colwidth: null,
+    rowspan: 1
+  };
+
+  if (!sourceCell) {
+    return cellType.create(
+      attrs,
+      schema.nodes.paragraph.create()
+    );
+  }
+
+  return cellType.create(attrs, sourceCell.content);
 }
 
 function getTableCellTextSelection(
@@ -1795,12 +1935,7 @@ type TableSelectionContext = {
 };
 
 type TableColumnInsertDirection = 'left' | 'right';
-
-function getHeldTableColumnInsertDirection(storage: Record<string, unknown>): TableColumnInsertDirection | null {
-  return storage.heldColumnInsertDirection === 'left' || storage.heldColumnInsertDirection === 'right'
-    ? storage.heldColumnInsertDirection
-    : null;
-}
+type TableRowInsertDirection = 'above' | 'below';
 
 function sanitizeUrl(value: string | null): string | null {
   if (!value) {
