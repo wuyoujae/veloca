@@ -1961,6 +1961,7 @@ function slugify(value: string, index: number): string {
 interface MarkdownToken {
   depth?: number;
   items?: MarkdownListItemToken[];
+  raw?: string;
   text?: string;
   tokens?: MarkdownToken[];
   type?: string;
@@ -1982,6 +1983,18 @@ function collectHeadingTokens(tokens: MarkdownToken[], sections: MarkdownSection
       });
     }
 
+    if (token.type === 'html') {
+      const htmlHeading = extractHtmlHeadingToken(token);
+
+      if (htmlHeading) {
+        sections.push({
+          id: slugify(htmlHeading.title, sections.length),
+          level: htmlHeading.level,
+          title: htmlHeading.title
+        });
+      }
+    }
+
     if (token.tokens?.length) {
       collectHeadingTokens(token.tokens, sections);
     }
@@ -1992,6 +2005,52 @@ function collectHeadingTokens(tokens: MarkdownToken[], sections: MarkdownSection
       }
     });
   });
+}
+
+function extractHtmlHeadingToken(token: MarkdownToken): { level: number; title: string } | null {
+  const html = (token.raw ?? token.text ?? '').trim();
+
+  if (!html) {
+    return null;
+  }
+
+  if (typeof DOMParser !== 'undefined') {
+    const document = new DOMParser().parseFromString(html, 'text/html');
+    const heading = document.body.querySelector('h1, h2, h3, h4, h5, h6');
+
+    if (!heading) {
+      return null;
+    }
+
+    heading.querySelectorAll('br').forEach((breakNode) => {
+      breakNode.replaceWith(document.createTextNode(' '));
+    });
+
+    const title = heading.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    const level = Number.parseInt(heading.tagName.slice(1), 10);
+
+    if (!title || !Number.isFinite(level)) {
+      return null;
+    }
+
+    return { level, title };
+  }
+
+  const matched = html.match(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/i);
+
+  if (!matched) {
+    return null;
+  }
+
+  const title = matched[2]
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const level = Number.parseInt(matched[1], 10);
+
+  return title && Number.isFinite(level) ? { level, title } : null;
 }
 
 function extractMarkdownText(tokens?: MarkdownToken[]): string {

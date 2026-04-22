@@ -628,7 +628,7 @@ button {
 
 .veloca-editor .ProseMirror {
   min-height: 480px;
-  padding: 0 0 calc(var(--statusbar-height) + 28px);
+  padding: 0 0 calc(var(--statusbar-height) + 36px);
   color: var(--editor-copy);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -668,19 +668,19 @@ button {
   color: var(--foreground);
   line-height: 1.25;
   margin-top: 2em;
-  margin-bottom: 1rem;
+  margin-bottom: 0.78rem;
   font-weight: 600;
 }
 
 .veloca-editor .ProseMirror h1 {
-  margin: 0 0 1.5rem;
+  margin: 0 0 1.08rem;
   font-size: 2.25rem;
   font-weight: 700;
   letter-spacing: -0.025em;
 }
 
 .veloca-editor .ProseMirror h2 {
-  margin: 2.5em 0 1rem;
+  margin: 2.35em 0 0.9rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
   font-size: 1.5rem;
@@ -716,7 +716,42 @@ button {
 }
 
 .veloca-editor .ProseMirror p {
-  margin: 0 0 1.25em;
+  min-height: 1.75em;
+  margin: 0 0 1em;
+}
+
+.veloca-editor .ProseMirror h1 + p,
+.veloca-editor .ProseMirror h2 + p,
+.veloca-editor .ProseMirror h3 + p,
+.veloca-editor .ProseMirror h4 + p,
+.veloca-editor .ProseMirror h5 + p,
+.veloca-editor .ProseMirror h6 + p,
+.veloca-editor .ProseMirror h1 + ul,
+.veloca-editor .ProseMirror h2 + ul,
+.veloca-editor .ProseMirror h3 + ul,
+.veloca-editor .ProseMirror h4 + ul,
+.veloca-editor .ProseMirror h5 + ul,
+.veloca-editor .ProseMirror h6 + ul,
+.veloca-editor .ProseMirror h1 + ol,
+.veloca-editor .ProseMirror h2 + ol,
+.veloca-editor .ProseMirror h3 + ol,
+.veloca-editor .ProseMirror h4 + ol,
+.veloca-editor .ProseMirror h5 + ol,
+.veloca-editor .ProseMirror h6 + ol {
+  margin-top: 0;
+}
+
+.veloca-editor .ProseMirror h1 + blockquote,
+.veloca-editor .ProseMirror h2 + blockquote,
+.veloca-editor .ProseMirror h3 + blockquote,
+.veloca-editor .ProseMirror h4 + blockquote,
+.veloca-editor .ProseMirror h5 + blockquote,
+.veloca-editor .ProseMirror h6 + blockquote {
+  margin-top: 0.95em;
+}
+
+.veloca-editor .ProseMirror p:has(> br.ProseMirror-trailingBreak:only-child) {
+  min-height: 1.75em;
 }
 
 .veloca-editor .ProseMirror strong {
@@ -776,7 +811,7 @@ button {
 }
 
 .veloca-editor .ProseMirror blockquote {
-  margin: 1.5em 0;
+  margin: 1.25em 0;
   padding: 0.5em 1.5em;
   border-left: 3px solid var(--surface-hover);
   color: var(--muted-foreground);

@@ -100,15 +100,16 @@ When the app is opened in a normal browser during frontend-only development, the
 1. Renderer opens a markdown file through `window.veloca.workspace.readMarkdown(path)`.
 2. Before content enters TipTap, Veloca applies a lightweight compatibility transform so prototype-specific markdown features such as Obsidian-style callouts and footnotes can render inside the WYSIWYG surface without changing the stored source format.
 3. The active markdown source is loaded into TipTap using `contentType: 'markdown'`.
-4. TipTap rich nodes are serialized back into Markdown through `editor.getMarkdown()`, then the compatibility layer restores callouts and footnotes back to their source markdown form before save.
-5. Renderer state updates outline data, word count, character count, and save status.
-6. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
-7. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
-8. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
-9. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
-10. Media files dropped or pasted into the editor are persisted through `workspace:save-asset` and inserted back into the document as Markdown or safe HTML-backed rich nodes.
-11. Relative media paths are resolved into renderable URLs through `workspace:resolve-asset`, then served through `veloca-asset://`.
-12. The editor header exposes a manual save button, and Auto Save reuses that same button for animated `Saving` and `Saved` feedback instead of showing a separate label.
+4. TipTap rich nodes are serialized back into Markdown through `editor.getMarkdown()`. Single-line headings stay as standard Markdown headings, while headings that contain soft line breaks are serialized as raw HTML headings such as `<h2>Line 1<br>Line 2</h2>` so the editor can reopen them without losing multiline title structure.
+5. After serialization, the compatibility layer restores callouts and footnotes back to their source markdown form before save.
+6. Renderer state updates outline data, word count, character count, and save status.
+7. When Auto Save is enabled, input is saved after an 800 ms debounce through `window.veloca.workspace.saveMarkdown(path, content)`.
+8. When Auto Save is disabled, `Cmd/Ctrl+S` saves the active file manually.
+9. Filesystem markdown is written back to disk only after workspace path and `.md` validation.
+10. Database-backed markdown updates `virtual_workspace_entries.content` and `updated_at`.
+11. Media files dropped or pasted into the editor are persisted through `workspace:save-asset` and inserted back into the document as Markdown or safe HTML-backed rich nodes.
+12. Relative media paths are resolved into renderable URLs through `workspace:resolve-asset`, then served through `veloca-asset://`.
+13. The editor header exposes a manual save button, and Auto Save reuses that same button for animated `Saving` and `Saved` feedback instead of showing a separate label.
 
 ## Current UI Behavior
 
@@ -129,6 +130,9 @@ When the app is opened in a normal browser during frontend-only development, the
 - The editor surface uses TipTap with `@tiptap/markdown`, rich Markdown extensions, and no visible third-party toolbar.
 - The editor visuals are fully styled through Veloca's existing theme tokens and layout rules instead of a third-party skin.
 - The live editor typography now follows the `propertypes/word.html` specification across headings, links, lists, task lists, quotes, callouts, code blocks, tables, media, formulas, horizontal rules, details blocks, and footnotes so the shipped renderer stays aligned with the approved markdown prototype.
+- The base writing flow is Typora-first: pressing `Enter` on a heading exits into a normal paragraph, empty blockquotes exit back to the parent flow, and default list behaviors remain active for continuing or exiting list items.
+- `Shift+Enter` inserts soft line breaks in normal text blocks, including headings. Multiline headings are preserved by storing only those specific titles as raw HTML headings with `<br>` separators.
+- Pressing `Backspace` at the start of a heading converts it back into a paragraph while keeping the text content, matching mainstream document-editor expectations.
 - List items and blockquotes use tighter paragraph spacing so Typora-style writing does not open oversized gaps after line breaks.
 - Typora-style table authoring is supported: typing a single header row such as `| Head 1 | Head 2 |` in a normal paragraph and pressing `Enter` immediately converts it into a rendered table, auto-inserting the standard Markdown separator row and an empty body row.
 - Tables now use a dedicated interaction layer: `Enter` inserts an in-cell line break, `Shift+Enter` inserts a new body row below the current row and keeps the same column focused, and arrowing above or below the table boundary exits into a real paragraph block.
@@ -140,7 +144,7 @@ When the app is opened in a normal browser during frontend-only development, the
 - The editor header shows both the current file path and a single save button that reflects auto-save activity through its own animated state changes.
 - The status bar shows save state, word count, character count, and encoding.
 - The status bar now spans the full editor width as a borderless frosted-glass strip aligned to the bottom edge, and the editor reserves extra bottom writing space so the last line never sits underneath it.
-- The outline panel reflects the active editor content using a Typora-style indented list without connector lines, and heading labels are derived from parsed Markdown tokens so escaped punctuation renders correctly.
+- The outline panel reflects the active editor content using a Typora-style indented list without connector lines, and heading labels are derived from parsed Markdown tokens plus raw HTML heading blocks so multiline HTML-backed titles still appear correctly in the sidebar.
 - The Settings entry is placed at the bottom of the sidebar.
 - The Settings panel opens as a modal with a blurred overlay.
 - The Theme segmented control switches between dark and light modes.

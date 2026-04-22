@@ -11,6 +11,7 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import Emoji from '@tiptap/extension-emoji';
 import FileHandler from '@tiptap/extension-file-handler';
 import HardBreak from '@tiptap/extension-hard-break';
+import Heading from '@tiptap/extension-heading';
 import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
@@ -26,6 +27,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
+import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
@@ -438,6 +440,23 @@ const VelocaTable = Table.extend({
   }
 });
 
+const VelocaHeading = Heading.extend({
+  renderMarkdown(node, helpers): string {
+    const level = typeof node.attrs?.level === 'number' ? node.attrs.level : 1;
+    const content = node.content ?? [];
+
+    if (!content.length) {
+      return '';
+    }
+
+    if (!content.some((childNode) => childNode.type === 'hardBreak')) {
+      return `${'#'.repeat(level)} ${helpers.renderChildren(content)}`;
+    }
+
+    return sanitizeHtml(`<h${level}>${renderMultilineHeadingHtml(content, helpers)}</h${level}>`);
+  }
+});
+
 const TyporaTableInput = Extension.create({
   name: 'typoraTableInput',
   priority: 1000,
@@ -486,6 +505,40 @@ const TyporaTableInput = Extension.create({
   }
 });
 
+const VelocaWritingBehavior = Extension.create({
+  name: 'velocaWritingBehavior',
+  priority: 900,
+
+  addKeyboardShortcuts() {
+    const editor = this.editor;
+
+    return {
+      Enter: () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        if (exitHeadingToParagraph(editor)) {
+          return true;
+        }
+
+        return exitEmptyBlockquote(editor);
+      },
+      Backspace: () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        if (convertHeadingToParagraph(editor)) {
+          return true;
+        }
+
+        return exitEmptyBlockquote(editor, true);
+      }
+    };
+  }
+});
+
 const VelocaHardBreak = HardBreak.extend({
   addKeyboardShortcuts() {
     return {
@@ -507,9 +560,10 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       codeBlock: false,
       gapcursor: false,
       hardBreak: false,
-      heading: {
-        levels: [1, 2, 3, 4, 5, 6]
-      }
+      heading: false
+    }),
+    VelocaHeading.configure({
+      levels: [1, 2, 3, 4, 5, 6]
     }),
     Markdown.configure({
       markedOptions: {
@@ -543,6 +597,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       nested: true
     }),
     TyporaTableInput,
+    VelocaWritingBehavior,
     VelocaHardBreak,
     VelocaTable.configure({
       resizable: false
@@ -1077,6 +1132,82 @@ function getHtmlBlockVariantClass(html: string): string {
   }
 
   return '';
+}
+
+function renderMultilineHeadingHtml(content: JSONContent[], helpers: MarkdownRendererHelpers): string {
+  const lines: JSONContent[][] = [[]];
+
+  content.forEach((node) => {
+    if (node.type === 'hardBreak') {
+      lines.push([]);
+      return;
+    }
+
+    lines.at(-1)?.push(node);
+  });
+
+  return lines.map((line) => renderMultilineHeadingLine(line, helpers)).join('<br>');
+}
+
+function renderMultilineHeadingLine(content: JSONContent[], helpers: MarkdownRendererHelpers): string {
+  if (!content.length) {
+    return '';
+  }
+
+  const markdown = helpers.renderChildren(content);
+  const html = renderMarkdownHtml(markdown, true).trim();
+
+  return stripSingleParagraphWrapper(html);
+}
+
+function exitHeadingToParagraph(editor: Editor): boolean {
+  const { selection, schema } = editor.state;
+  const { $from, $to } = selection;
+  const paragraph = schema.nodes.paragraph;
+
+  if (!paragraph || !$from.sameParent($to) || $from.parent.type.name !== 'heading') {
+    return false;
+  }
+
+  return splitBlockAs(() => ({ type: paragraph }))(editor.state, editor.view.dispatch);
+}
+
+function convertHeadingToParagraph(editor: Editor): boolean {
+  const { selection } = editor.state;
+  const { $from, $to } = selection;
+
+  if (!selection.empty || !$from.sameParent($to) || $from.parent.type.name !== 'heading' || $from.parentOffset !== 0) {
+    return false;
+  }
+
+  return editor.commands.setNode('paragraph');
+}
+
+function exitEmptyBlockquote(editor: Editor, requireStart = false): boolean {
+  const { selection } = editor.state;
+  const { $from } = selection;
+
+  if (
+    !selection.empty ||
+    !$from.parent.isTextblock ||
+    $from.parent.content.size > 0 ||
+    !isInsideNodeType($from, 'blockquote') ||
+    (requireStart && $from.parentOffset !== 0)
+  ) {
+    return false;
+  }
+
+  return liftEmptyBlock(editor.state, editor.view.dispatch);
+}
+
+function isInsideNodeType($from: Editor['state']['selection']['$from'], typeName: string): boolean {
+  for (let depth = $from.depth; depth > 0; depth -= 1) {
+    if ($from.node(depth).type.name === typeName) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
