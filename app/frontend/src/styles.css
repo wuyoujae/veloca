@@ -1227,19 +1227,17 @@ button {
 
 .statusbar {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 16px;
-  padding: 10px 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--background) 38%, transparent);
+  padding: 12px 24px;
+  background: color-mix(in srgb, var(--background) 18%, transparent);
   backdrop-filter: blur(18px) saturate(150%);
   -webkit-backdrop-filter: blur(18px) saturate(150%);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: 11px;
