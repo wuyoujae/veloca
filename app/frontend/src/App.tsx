@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import {
@@ -1365,6 +1365,8 @@ type TableGridHoverState = {
 
 const TABLE_GRID_MAX_COLUMNS = 10;
 const TABLE_GRID_MAX_ROWS = 5;
+const TABLE_CONTROL_GUTTER = 40;
+const TABLE_CONTROL_LEFT_OFFSET = 32;
 
 function MarkdownEditor({
   content,
@@ -1666,7 +1668,7 @@ function MarkdownEditor({
 
       setTableControls({
         ...tableWrapperContext.info,
-        left: wrapperRect.left - shellRect.left - 44,
+        left: Math.max(0, wrapperRect.left - shellRect.left - TABLE_CONTROL_LEFT_OFFSET),
         top: wrapperRect.top - shellRect.top + 12
       });
     };
@@ -1745,7 +1747,7 @@ function MarkdownEditor({
 
       setTableControls({
         ...activeTableInfo,
-        left: wrapperRect.left - shellRect.left - 44,
+        left: Math.max(0, wrapperRect.left - shellRect.left - TABLE_CONTROL_LEFT_OFFSET),
         top: wrapperRect.top - shellRect.top + 12
       });
     });
@@ -1797,7 +1799,11 @@ function MarkdownEditor({
   };
 
   return (
-    <div className="veloca-editor" ref={editorShellRef}>
+    <div
+      className="veloca-editor"
+      ref={editorShellRef}
+      style={{ '--table-control-gutter': `${TABLE_CONTROL_GUTTER}px` } as CSSProperties}
+    >
       {tableControls ? (
         <div
           className="table-block-controls"

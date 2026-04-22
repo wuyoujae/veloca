@@ -623,10 +623,13 @@ button {
 }
 
 .veloca-editor {
+  --table-control-gutter: 40px;
   position: relative;
-  width: 100%;
+  width: calc(100% + var(--table-control-gutter));
   min-width: 0;
   min-height: 480px;
+  margin-left: calc(var(--table-control-gutter) * -1);
+  padding-left: var(--table-control-gutter);
   color: var(--editor-copy);
   overflow: visible;
 }
@@ -1097,11 +1100,13 @@ button {
   max-width: none;
   border-collapse: collapse;
   font-size: 0.9em;
+  table-layout: fixed;
 }
 
 .veloca-editor .ProseMirror th,
 .veloca-editor .ProseMirror td {
   min-width: 7.5rem;
+  max-width: 13.5rem;
   padding: 0.75rem 1rem;
   border: 1px solid var(--border);
   text-align: left;
@@ -1110,6 +1115,9 @@ button {
   transition: background-color 0.16s ease;
   position: relative;
   cursor: text;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
 }
 
 .veloca-editor .ProseMirror th {
@@ -1122,6 +1130,10 @@ button {
 .veloca-editor .ProseMirror td p {
   margin: 0;
   min-height: 1.75em;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .veloca-editor .ProseMirror th p br + br.ProseMirror-trailingBreak,

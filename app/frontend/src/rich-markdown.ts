@@ -1504,19 +1504,31 @@ export type ActiveTableInfo = {
 };
 
 export function getActiveTableInfo(editor: Editor): ActiveTableInfo | null {
-  const context = getActiveTableContext(editor);
+  const { selection } = editor.state;
+  const $tableAnchor = selection instanceof CellSelection ? selection.$anchorCell : selection.$from;
+  const table = findTable($tableAnchor);
 
-  if (!context) {
+  if (!table) {
     return null;
   }
 
+  let rect: ReturnType<typeof selectedRect>;
+
+  try {
+    rect = selectedRect(editor.state);
+  } catch {
+    return null;
+  }
+
+  const tableMap = TableMap.get(table.node);
+
   return {
-    columnCount: context.tableMap.width,
-    columnIndex: context.rect.left,
-    isHeaderRow: context.rect.top === 0,
-    rowCount: context.tableMap.height,
-    rowIndex: context.rect.top,
-    tablePos: context.table.pos
+    columnCount: tableMap.width,
+    columnIndex: rect.left,
+    isHeaderRow: rect.top === 0,
+    rowCount: tableMap.height,
+    rowIndex: rect.top,
+    tablePos: table.pos
   };
 }
 
