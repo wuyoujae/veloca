@@ -916,14 +916,15 @@ button {
 }
 
 .veloca-editor .ProseMirror .tableWrapper {
+  display: block;
   width: 100%;
   max-width: 100%;
   margin: 2em 0;
   min-width: 0;
   padding-bottom: 6px;
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: hidden;
-  scrollbar-gutter: stable;
+  overscroll-behavior-x: contain;
 }
 
 .veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar {
@@ -946,8 +947,10 @@ button {
 }
 
 .veloca-editor .ProseMirror table {
-  width: max-content;
-  min-width: 100%;
+  display: inline-table;
+  width: auto;
+  min-width: max(100%, 460px);
+  max-width: none;
   border-collapse: collapse;
   font-size: 0.9em;
 }
