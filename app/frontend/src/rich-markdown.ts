@@ -1476,12 +1476,13 @@ function insertColumnBesideSelection(
   }
 
   const nextTableMap = TableMap.get(tableNode);
+  const targetColumn = direction === 'left' ? context.rect.left + 1 : context.rect.left;
   const selection = getTableCellTextSelection(
     transaction.doc,
     context.rect.tableStart,
     tableNode,
     targetRow,
-    insertColumnIndex,
+    targetColumn,
     nextTableMap
   );
 

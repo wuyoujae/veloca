@@ -1605,14 +1605,55 @@ function MarkdownEditor({
       return;
     }
 
+    const getActiveTableWrapperElement = () => {
+      const activeTableInfo = getActiveTableInfo(editor);
+
+      if (!activeTableInfo) {
+        return null;
+      }
+
+      const directDom = editor.view.nodeDOM(activeTableInfo.tablePos);
+
+      if (directDom instanceof HTMLElement) {
+        if (directDom.classList.contains('tableWrapper')) {
+          return {
+            info: activeTableInfo,
+            wrapper: directDom
+          };
+        }
+
+        const directWrapper = directDom.closest('.tableWrapper');
+
+        if (directWrapper instanceof HTMLElement) {
+          return {
+            info: activeTableInfo,
+            wrapper: directWrapper
+          };
+        }
+      }
+
+      const selectionDom = editor.view.domAtPos(editor.state.selection.from).node;
+      const selectionElement = selectionDom instanceof HTMLElement ? selectionDom : selectionDom.parentElement;
+      const wrapper = selectionElement?.closest('.tableWrapper');
+
+      if (!(wrapper instanceof HTMLElement)) {
+        return null;
+      }
+
+      return {
+        info: activeTableInfo,
+        wrapper
+      };
+    };
+
     const syncTableControls = () => {
       if (!editorShellRef.current) {
         return;
       }
 
-      const activeTableInfo = getActiveTableInfo(editor);
+      const tableWrapperContext = getActiveTableWrapperElement();
 
-      if (!activeTableInfo) {
+      if (!tableWrapperContext) {
         setTableControls(null);
         setTableGridOpen(false);
         setTableMenuOpen(false);
@@ -1620,18 +1661,11 @@ function MarkdownEditor({
         return;
       }
 
-      const wrapperDom = editor.view.nodeDOM(activeTableInfo.tablePos);
-
-      if (!(wrapperDom instanceof HTMLElement) || !wrapperDom.classList.contains('tableWrapper')) {
-        setTableControls(null);
-        return;
-      }
-
       const shellRect = editorShellRef.current.getBoundingClientRect();
-      const wrapperRect = wrapperDom.getBoundingClientRect();
+      const wrapperRect = tableWrapperContext.wrapper.getBoundingClientRect();
 
       setTableControls({
-        ...activeTableInfo,
+        ...tableWrapperContext.info,
         left: wrapperRect.left - shellRect.left - 44,
         top: wrapperRect.top - shellRect.top + 12
       });
@@ -1687,9 +1721,21 @@ function MarkdownEditor({
         return;
       }
 
-      const wrapperDom = editor.view.nodeDOM(activeTableInfo.tablePos);
+      const directDom = editor.view.nodeDOM(activeTableInfo.tablePos);
+      const directWrapper =
+        directDom instanceof HTMLElement
+          ? directDom.classList.contains('tableWrapper')
+            ? directDom
+            : directDom.closest('.tableWrapper')
+          : null;
+      const selectionDom = editor.view.domAtPos(editor.state.selection.from).node;
+      const selectionElement = selectionDom instanceof HTMLElement ? selectionDom : selectionDom.parentElement;
+      const wrapperDom =
+        directWrapper instanceof HTMLElement
+          ? directWrapper
+          : selectionElement?.closest('.tableWrapper');
 
-      if (!(wrapperDom instanceof HTMLElement) || !wrapperDom.classList.contains('tableWrapper')) {
+      if (!(wrapperDom instanceof HTMLElement)) {
         setTableControls(null);
         return;
       }
