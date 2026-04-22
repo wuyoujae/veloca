@@ -426,16 +426,9 @@ button {
   overflow-y: auto;
 }
 
-.editor-safe-area {
-  width: 100%;
-  max-width: 760px;
-  min-width: 0;
-  overflow-x: hidden;
-}
-
 .markdown-body {
   width: 100%;
-  max-width: none;
+  max-width: 760px;
   min-width: 0;
   padding: 80px 40px calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 88px);
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
@@ -932,7 +925,6 @@ button {
   overflow-x: scroll;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
-  contain: inline-size;
 }
 
 .veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar {
@@ -1937,10 +1929,6 @@ button {
   .sidebar {
     width: 220px;
     min-width: 220px;
-  }
-
-  .editor-safe-area {
-    max-width: 100%;
   }
 
   .markdown-body {
