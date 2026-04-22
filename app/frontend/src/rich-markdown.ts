@@ -26,7 +26,6 @@ import TaskItem from '@tiptap/extension-task-item';
 import TaskList from '@tiptap/extension-task-list';
 import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
-import { chainCommands, createParagraphNear, liftEmptyBlock, newlineInCode, splitBlock } from '@tiptap/pm/commands';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 import { CellSelection, TableMap, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
@@ -460,7 +459,7 @@ const TyporaTableInput = Extension.create({
           return true;
         }
 
-        return runSingleEnterCommand(editor);
+        return false;
       },
       'Shift-Enter': () => {
         if (editor.view.composing) {
@@ -1373,14 +1372,6 @@ function buildMarkdownTableNode(schema: Editor['schema'], headerCells: string[])
   const bodyRow = schema.nodes.tableRow.create(null, headerCells.map(() => createBodyCell()));
 
   return schema.nodes.table.create(null, [headerRow, bodyRow]);
-}
-
-function runSingleEnterCommand(editor: Editor): boolean {
-  return chainCommands(newlineInCode, createParagraphNear, liftEmptyBlock, splitBlock)(
-    editor.state,
-    editor.view.dispatch,
-    editor.view
-  );
 }
 
 function getTableCellTextSelection(
