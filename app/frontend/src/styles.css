@@ -909,6 +909,11 @@ button {
   min-height: 1.75em;
 }
 
+.veloca-editor .ProseMirror th p br + br.ProseMirror-trailingBreak,
+.veloca-editor .ProseMirror td p br + br.ProseMirror-trailingBreak {
+  display: none;
+}
+
 .veloca-editor .ProseMirror th > * + *,
 .veloca-editor .ProseMirror td > * + * {
   margin-top: 0;
