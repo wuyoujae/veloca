@@ -13,6 +13,7 @@ import FileHandler from '@tiptap/extension-file-handler';
 import HardBreak from '@tiptap/extension-hard-break';
 import Highlight from '@tiptap/extension-highlight';
 import Image from '@tiptap/extension-image';
+import Link from '@tiptap/extension-link';
 import { Mathematics } from '@tiptap/extension-mathematics';
 import Placeholder from '@tiptap/extension-placeholder';
 import Subscript from '@tiptap/extension-subscript';
@@ -527,6 +528,14 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       lowlight
     }),
     Highlight,
+    Link.configure({
+      autolink: true,
+      HTMLAttributes: {
+        rel: 'noreferrer noopener',
+        target: '_blank'
+      },
+      openOnClick: true
+    }),
     Subscript,
     Superscript,
     Typography,
@@ -839,7 +848,7 @@ function transformCalloutsForEditor(content: string): string {
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const matched = line.match(/^>\s*\[!([A-Z0-9_-]+)\]\s*(.*)$/i);
+    const matched = line.match(/^>\[!([A-Z0-9_-]+)\]\s*(.*)$/i);
 
     if (!matched) {
       output.push(line);
