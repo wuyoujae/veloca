@@ -327,7 +327,8 @@ button {
 
 .editor-container {
   --statusbar-height: 42px;
-  --statusbar-offset: 16px;
+  --statusbar-offset: 22px;
+  --statusbar-safe-gap: 18px;
   position: relative;
   display: flex;
   flex: 1;
@@ -420,7 +421,7 @@ button {
   justify-content: center;
   min-width: 0;
   min-height: 0;
-  padding: 40px 0 calc(var(--statusbar-height) + var(--statusbar-offset) + 40px);
+  padding: 40px 0 calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 48px);
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -429,7 +430,7 @@ button {
   width: 100%;
   max-width: 760px;
   min-width: 0;
-  padding: 80px 40px 120px;
+  padding: 80px 40px calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 88px);
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   color: var(--editor-copy);
   font-size: 16px;
@@ -634,7 +635,7 @@ button {
 .veloca-editor .ProseMirror {
   min-width: 0;
   min-height: 480px;
-  padding: 0 0 calc(var(--statusbar-height) + 36px);
+  padding: 0 0 calc(var(--statusbar-height) + var(--statusbar-offset) + var(--statusbar-safe-gap) + 24px);
   color: var(--editor-copy);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -1293,7 +1294,7 @@ button {
 .statusbar {
   position: absolute;
   right: 0;
-  bottom: 0;
+  bottom: var(--statusbar-offset);
   left: 0;
   display: flex;
   justify-content: flex-end;
