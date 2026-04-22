@@ -327,7 +327,7 @@ button {
 
 .editor-container {
   --statusbar-height: 42px;
-  --statusbar-offset: 22px;
+  --statusbar-offset: 0px;
   --statusbar-safe-gap: 18px;
   position: relative;
   display: flex;
@@ -1305,7 +1305,7 @@ button {
 .statusbar {
   position: absolute;
   right: 0;
-  bottom: var(--statusbar-offset);
+  bottom: 0;
   left: 0;
   display: flex;
   justify-content: flex-end;
