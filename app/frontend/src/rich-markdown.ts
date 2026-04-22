@@ -29,8 +29,8 @@ import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { TextSelection } from '@tiptap/pm/state';
-import { CellSelection, TableMap, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { CellSelection, TableMap, addColumn, addRow, cellAround, findTable, selectedRect } from '@tiptap/pm/tables';
 import StarterKit from '@tiptap/starter-kit';
 import { common, createLowlight } from 'lowlight';
 import { marked } from 'marked';
@@ -461,6 +461,12 @@ const TyporaTableInput = Extension.create({
   name: 'typoraTableInput',
   priority: 1000,
 
+  addStorage() {
+    return {
+      heldColumnInsertDirection: null as TableColumnInsertDirection | null
+    };
+  },
+
   addKeyboardShortcuts() {
     const editor = this.editor;
 
@@ -468,6 +474,21 @@ const TyporaTableInput = Extension.create({
       Enter: () => {
         if (editor.view.composing) {
           return false;
+        }
+
+        const heldColumnInsertDirection = getHeldTableColumnInsertDirection(this.storage);
+
+        if (heldColumnInsertDirection) {
+          this.storage.heldColumnInsertDirection = null;
+
+          if (
+            handleTableKeyboardInteraction(
+              editor,
+              heldColumnInsertDirection === 'left' ? 'column-left' : 'column-right'
+            )
+          ) {
+            return true;
+          }
         }
 
         if (handleTableKeyboardInteraction(editor, 'enter')) {
@@ -502,6 +523,56 @@ const TyporaTableInput = Extension.create({
         return handleTableKeyboardInteraction(editor, 'arrow-up');
       }
     };
+  },
+
+  addProseMirrorPlugins() {
+    const editor = this.editor;
+    const storage = this.storage;
+
+    return [
+      new Plugin({
+        key: new PluginKey('velocaTableColumnInsertHotkeys'),
+        props: {
+          handleDOMEvents: {
+            blur: () => {
+              storage.heldColumnInsertDirection = null;
+              return false;
+            },
+            keydown: (_view, event) => {
+              if (!(event instanceof KeyboardEvent) || event.isComposing) {
+                return false;
+              }
+
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                storage.heldColumnInsertDirection = getActiveTableContext(editor)
+                  ? event.key === 'ArrowLeft'
+                    ? 'left'
+                    : 'right'
+                  : null;
+                return false;
+              }
+
+              if (event.key !== 'Enter') {
+                storage.heldColumnInsertDirection = null;
+              }
+
+              return false;
+            },
+            keyup: (_view, event) => {
+              if (!(event instanceof KeyboardEvent)) {
+                return false;
+              }
+
+              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                storage.heldColumnInsertDirection = null;
+              }
+
+              return false;
+            }
+          }
+        }
+      })
+    ];
   }
 });
 
@@ -1251,7 +1322,7 @@ function convertMarkdownTableHeaderToTable(editor: Editor): boolean {
 
 function handleTableKeyboardInteraction(
   editor: Editor,
-  action: 'enter' | 'shift-enter' | 'arrow-down' | 'arrow-up'
+  action: 'enter' | 'shift-enter' | 'arrow-down' | 'arrow-up' | 'column-left' | 'column-right'
 ): boolean {
   const context = getActiveTableContext(editor);
 
@@ -1264,7 +1335,15 @@ function handleTableKeyboardInteraction(
   }
 
   if (action === 'shift-enter') {
-      return insertBodyRowBelowSelection(editor, context);
+    return insertBodyRowBelowSelection(editor, context);
+  }
+
+  if (action === 'column-left') {
+    return insertColumnBesideSelection(editor, context, 'left');
+  }
+
+  if (action === 'column-right') {
+    return insertColumnBesideSelection(editor, context, 'right');
   }
 
   if (action === 'arrow-down') {
@@ -1350,6 +1429,44 @@ function insertBodyRowBelowSelection(editor: Editor, context: TableSelectionCont
     tableNode,
     insertRowIndex,
     targetColumn,
+    nextTableMap
+  );
+
+  transaction.setSelection(selection);
+  transaction.scrollIntoView();
+  editor.view.dispatch(transaction);
+  editor.view.focus();
+
+  return true;
+}
+
+function insertColumnBesideSelection(
+  editor: Editor,
+  context: TableSelectionContext,
+  direction: TableColumnInsertDirection
+): boolean {
+  if (context.cellNode.attrs.colspan > 1 || context.cellNode.attrs.rowspan > 1) {
+    return false;
+  }
+
+  const insertColumnIndex = direction === 'left' ? context.rect.left : context.rect.right;
+  const targetRow = context.rect.top;
+  const transaction = editor.state.tr;
+  addColumn(transaction, context.rect, insertColumnIndex);
+
+  const tableNode = transaction.doc.nodeAt(context.rect.tableStart - 1);
+
+  if (!tableNode) {
+    return false;
+  }
+
+  const nextTableMap = TableMap.get(tableNode);
+  const selection = getTableCellTextSelection(
+    transaction.doc,
+    context.rect.tableStart,
+    tableNode,
+    targetRow,
+    insertColumnIndex,
     nextTableMap
   );
 
@@ -1676,6 +1793,14 @@ type TableSelectionContext = {
   table: NonNullable<ReturnType<typeof findTable>>;
   tableMap: TableMap;
 };
+
+type TableColumnInsertDirection = 'left' | 'right';
+
+function getHeldTableColumnInsertDirection(storage: Record<string, unknown>): TableColumnInsertDirection | null {
+  return storage.heldColumnInsertDirection === 'left' || storage.heldColumnInsertDirection === 'right'
+    ? storage.heldColumnInsertDirection
+    : null;
+}
 
 function sanitizeUrl(value: string | null): string | null {
   if (!value) {
