@@ -1235,9 +1235,9 @@ button {
   align-items: center;
   gap: 16px;
   padding: 12px 24px;
-  background: color-mix(in srgb, var(--background) 18%, transparent);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  background: color-mix(in srgb, var(--background) 10%, transparent);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
   color: var(--muted-foreground);
   font-family: var(--font-mono);
   font-size: 11px;
