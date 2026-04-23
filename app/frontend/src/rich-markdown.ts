@@ -4,6 +4,7 @@ import {
   InputRule,
   mergeAttributes,
   Node,
+  textblockTypeInputRule,
   type Editor,
   type JSONContent,
   type MarkdownRendererHelpers
@@ -30,7 +31,7 @@ import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state';
 import {
   CellSelection,
   TableMap,
@@ -46,6 +47,8 @@ import { marked } from 'marked';
 
 const purifier = typeof window === 'undefined' ? null : DOMPurify(window);
 const lowlight = createLowlight(common);
+const spacedBacktickCodeBlockInputRegex = /^``` ([a-z]+)[\s\n]$/;
+const tildeCodeBlockInputRegex = /^~~~([a-z]+)?[\s\n]$/;
 
 export const MEDIA_LIMITS = {
   audio: 50 * 1024 * 1024,
@@ -129,6 +132,175 @@ export const VelocaImage = Image.extend({
     ];
   }
 });
+
+const VelocaCodeBlockLowlight = CodeBlockLowlight.extend({
+  addProseMirrorPlugins() {
+    return [
+      ...(this.parent?.() || []),
+      new Plugin({
+        props: {
+          handleDOMEvents: {
+            click: (_view, event) => {
+              const copyButton = findCodeCopyButton(event.target);
+
+              if (!copyButton) {
+                return false;
+              }
+
+              event.preventDefault();
+              void copyCodeBlockToClipboard(copyButton);
+              return true;
+            },
+            mousedown: (_view, event) => {
+              const copyButton = findCodeCopyButton(event.target);
+
+              if (!copyButton) {
+                return false;
+              }
+
+              event.preventDefault();
+              return true;
+            }
+          }
+        }
+      })
+    ];
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const language = typeof node.attrs.language === 'string' ? node.attrs.language : null;
+    const languageClassPrefix =
+      typeof this.options.languageClassPrefix === 'string' ? this.options.languageClassPrefix : null;
+
+    return [
+      'pre',
+      mergeAttributes(
+        this.options.HTMLAttributes,
+        HTMLAttributes,
+        language
+          ? {
+              'data-language': language
+            }
+          : {}
+      ),
+      [
+        'span',
+        {
+          class: 'veloca-code-toolbar',
+          contenteditable: 'false',
+        },
+        ...(language
+          ? [
+              [
+                'span',
+                {
+                  class: 'veloca-code-language'
+                },
+                language
+              ] as const
+            ]
+          : []),
+        [
+          'button',
+          {
+            'aria-label': 'Copy code',
+            class: 'veloca-code-copy-button',
+            contenteditable: 'false',
+            'data-veloca-copy-code': 'true',
+            tabindex: '-1',
+            title: 'Copy code',
+            type: 'button'
+          }
+        ]
+      ],
+      [
+        'code',
+        mergeAttributes(
+          language && languageClassPrefix
+            ? {
+                class: `${languageClassPrefix}${language}`
+              }
+            : {}
+        ),
+        0
+      ]
+    ];
+  },
+
+  addInputRules() {
+    return [
+      textblockTypeInputRule({
+        find: spacedBacktickCodeBlockInputRegex,
+        type: this.type,
+        getAttributes: (match) => ({
+          language: match[1]
+        })
+      }),
+      textblockTypeInputRule({
+        find: tildeCodeBlockInputRegex,
+        type: this.type,
+        getAttributes: (match) => ({
+          language: match[1]
+        })
+      })
+    ];
+  }
+});
+
+function findCodeCopyButton(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) {
+    return null;
+  }
+
+  const button = target.closest('[data-veloca-copy-code="true"]');
+  return button instanceof HTMLElement ? button : null;
+}
+
+async function copyCodeBlockToClipboard(button: HTMLElement): Promise<void> {
+  const pre = button.closest('pre');
+  const codeElement = pre?.querySelector('code');
+  const text = codeElement?.textContent ?? '';
+
+  if (!text) {
+    return;
+  }
+
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopyText(text);
+    }
+
+    button.dataset.copied = 'true';
+    window.setTimeout(() => {
+      delete button.dataset.copied;
+    }, 1600);
+  } catch {
+    fallbackCopyText(text);
+    button.dataset.copied = 'true';
+    window.setTimeout(() => {
+      delete button.dataset.copied;
+    }, 1600);
+  }
+}
+
+function fallbackCopyText(text: string): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+}
 
 export const AudioNode = Node.create({
   name: 'velocaAudio',
@@ -667,10 +839,10 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     Placeholder.configure({
       placeholder: 'Start writing in Markdown...'
     }),
-    CodeBlockLowlight.configure({
-      HTMLAttributes: {
-        class: 'veloca-code-block'
-      },
+      VelocaCodeBlockLowlight.configure({
+        HTMLAttributes: {
+          class: 'veloca-code-block'
+        },
       lowlight
     }),
     Highlight,

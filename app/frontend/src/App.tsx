@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { createPortal } from 'react-dom';
@@ -23,7 +23,9 @@ import {
   MoreHorizontal,
   Moon,
   Pencil,
+  Sparkles,
   Save,
+  MoreVertical,
   Settings,
   Scissors,
   Sun,
@@ -126,6 +128,26 @@ interface EditingNodeState {
   value: string;
 }
 
+interface OpenEditorTab {
+  file: MarkdownFileContent;
+  draftContent: string;
+  savedContent: string;
+  status: SaveStatus;
+}
+
+type EditorMode = 'standard' | 'agent' | 'prompt';
+
+interface EditorModeOption {
+  id: EditorMode;
+  name: string;
+}
+
+const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
+  { id: 'standard', name: 'Standard Markdown' },
+  { id: 'agent', name: 'Agent Mode' },
+  { id: 'prompt', name: 'Prompt Engineering' }
+];
+
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
   tree: [],
@@ -143,7 +165,16 @@ export function App(): JSX.Element {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
-  const [activeFile, setActiveFile] = useState<MarkdownFileContent | null>(null);
+  const [openTabs, setOpenTabs] = useState<OpenEditorTab[]>([]);
+  const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
+  const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
+  const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [saveActionState, setSaveActionState] = useState<'idle' | 'saving' | 'success'>('idle');
+  const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
+  const [tabDropTargetIndex, setTabDropTargetIndex] = useState<number | null>(null);
+  const [isSplitViewEnabled, setIsSplitViewEnabled] = useState(false);
+  const [splitAfterIndex, setSplitAfterIndex] = useState<number | null>(null);
   const [documentContent, setDocumentContent] = useState('');
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -159,11 +190,27 @@ export function App(): JSX.Element {
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const activeFileRef = useRef<MarkdownFileContent | null>(null);
-  const autoSaveRef = useRef(autoSave);
+  const activeTabRef = useRef<OpenEditorTab | null>(null);
   const documentContentRef = useRef(documentContent);
   const outlineFilePathRef = useRef<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorTabsRef = useRef<HTMLDivElement>(null);
+  const editorTabElementByPathRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const modeMenuRef = useRef<HTMLDivElement>(null);
+  const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const headerMenuRef = useRef<HTMLDivElement>(null);
+
+  const activeTab = useMemo(
+    () => openTabs.find((tab) => tab.file.path === activeTabPath) ?? null,
+    [activeTabPath, openTabs]
+  );
+  const activeFile = activeTab?.file ?? null;
+  const activeEditorModeLabel = useMemo(
+    () => EDITOR_MODE_OPTIONS.find((option) => option.id === activeEditorMode)?.name ?? 'Agent Mode',
+    [activeEditorMode]
+  );
 
   const sections = useMemo(() => {
     return parseMarkdownSections(documentContent, activeFile?.name ?? 'Untitled');
@@ -172,6 +219,15 @@ export function App(): JSX.Element {
   const wordCount = useMemo(() => {
     return documentContent.trim().split(/\s+/).filter(Boolean).length;
   }, [documentContent]);
+
+  const splitAfterPosition = useMemo(() => {
+    if (!isSplitViewEnabled || openTabs.length <= 1) {
+      return null;
+    }
+
+    const preferred = splitAfterIndex ?? Math.floor(openTabs.length / 2);
+    return Math.min(Math.max(preferred, 1), openTabs.length - 1);
+  }, [isSplitViewEnabled, openTabs.length, splitAfterIndex]);
 
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
@@ -190,12 +246,8 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    activeFileRef.current = activeFile;
-  }, [activeFile]);
-
-  useEffect(() => {
-    autoSaveRef.current = autoSave;
-  }, [autoSave]);
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
 
   useEffect(() => {
     documentContentRef.current = documentContent;
@@ -205,6 +257,8 @@ export function App(): JSX.Element {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setSettingsOpen(false);
+        setIsModeMenuOpen(false);
+        setIsHeaderMenuOpen(false);
       }
     };
 
@@ -218,13 +272,59 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const closeContextMenu = () => setContextMenu(null);
-    window.addEventListener('click', closeContextMenu);
+    const closeHeaderMenu = (event: Event) => {
+      const target = (event.target as Node | null) ?? null;
+
+      if (!target) {
+        setIsModeMenuOpen(false);
+        setIsHeaderMenuOpen(false);
+        setContextMenu(null);
+        return;
+      }
+
+      if (
+        modeMenuButtonRef.current &&
+        (modeMenuButtonRef.current.contains(target) || modeMenuRef.current?.contains(target))
+      ) {
+        return;
+      }
+
+      if (
+        headerMenuButtonRef.current &&
+        (headerMenuButtonRef.current.contains(target) || headerMenuRef.current?.contains(target))
+      ) {
+        return;
+      }
+
+      setIsModeMenuOpen(false);
+      setIsHeaderMenuOpen(false);
+      setContextMenu(null);
+    };
+
+    window.addEventListener('mousedown', closeContextMenu);
+    window.addEventListener('mousedown', closeHeaderMenu);
     window.addEventListener('resize', closeContextMenu);
+    window.addEventListener('resize', closeHeaderMenu);
 
     return () => {
-      window.removeEventListener('click', closeContextMenu);
+      window.removeEventListener('mousedown', closeContextMenu);
+      window.removeEventListener('mousedown', closeHeaderMenu);
       window.removeEventListener('resize', closeContextMenu);
+      window.removeEventListener('resize', closeHeaderMenu);
     };
+  }, []);
+
+  useEffect(() => {
+    const clearTimers = () => {
+      if (saveActionTimerRef.current) {
+        clearTimeout(saveActionTimerRef.current);
+        saveActionTimerRef.current = null;
+      }
+    };
+
+    clearTimers();
+
+    return clearTimers;
   }, []);
 
   useEffect(() => {
@@ -283,28 +383,53 @@ export function App(): JSX.Element {
   };
 
   const saveCurrentDocument = async () => {
-    const file = activeFileRef.current;
+    const tab = activeTabRef.current;
     const content = documentContentRef.current;
 
-    if (!file || !window.veloca) {
+    if (!tab || !window.veloca) {
       setSaveStatus('saved');
       return true;
     }
 
     clearSaveTimer();
     setSaveStatus('saving');
+    setOpenTabs((current) =>
+      current.map((currentTab) =>
+        currentTab.file.path === tab.file.path ? { ...currentTab, status: 'saving' } : currentTab
+      )
+    );
 
     try {
-      const savedFile = await window.veloca.workspace.saveMarkdown(file.path, content);
+      const savedFile = await window.veloca.workspace.saveMarkdown(tab.file.path, content);
+      const latestContent = documentContentRef.current;
 
-      if (activeFileRef.current?.path === savedFile.path) {
-        setActiveFile(savedFile);
-        setSaveStatus(documentContentRef.current === content ? 'saved' : 'unsaved');
+      if (activeTabRef.current?.file.path === savedFile.path) {
+        setOpenTabs((current) =>
+          current.map((currentTab) =>
+            currentTab.file.path === savedFile.path
+              ? {
+                  ...currentTab,
+                  file: { ...currentTab.file, ...savedFile },
+                  savedContent: content,
+                  status: latestContent === content ? 'saved' : 'unsaved'
+                }
+              : currentTab
+          )
+        );
+
+        setSaveStatus(latestContent === content ? 'saved' : 'unsaved');
       }
 
       return true;
     } catch {
-      setSaveStatus('failed');
+      if (activeTabPath === tab.file.path) {
+        setSaveStatus('failed');
+      }
+      setOpenTabs((current) =>
+        current.map((currentTab) =>
+          currentTab.file.path === tab.file.path ? { ...currentTab, status: 'failed' } : currentTab
+        )
+      );
       showToast({
         type: 'info',
         title: 'Save Failed',
@@ -314,32 +439,22 @@ export function App(): JSX.Element {
     }
   };
 
-  const canLeaveActiveFile = async (targetPath?: string) => {
-    const currentFile = activeFileRef.current;
-    const hasUnsavedChanges = Boolean(currentFile && documentContentRef.current !== currentFile.content);
-
-    if (!currentFile || currentFile.path === targetPath || !hasUnsavedChanges) {
-      return true;
-    }
-
-    if (!autoSaveRef.current) {
-      const shouldDiscard = window.confirm('Discard unsaved changes before switching files?');
-
-      if (shouldDiscard) {
-        clearSaveTimer();
-      }
-
-      return shouldDiscard;
-    }
-
-    return saveCurrentDocument();
-  };
-
   const updateDocumentContent = (content: string) => {
     setDocumentContent(content);
 
-    const savedContent = activeFileRef.current?.content ?? '';
-    setSaveStatus(content === savedContent ? 'saved' : 'unsaved');
+    setSaveStatus((currentStatus) => (currentStatus === 'failed' ? currentStatus : 'unsaved'));
+
+    setOpenTabs((current) =>
+      current.map((tab) =>
+        tab.file.path === activeTabPath
+          ? {
+              ...tab,
+              draftContent: content,
+              status: content === tab.savedContent ? 'saved' : 'unsaved'
+            }
+          : tab
+      )
+    );
   };
 
   const loadWorkspace = async () => {
@@ -355,14 +470,14 @@ export function App(): JSX.Element {
       setWorkspace(snapshot);
       openWorkspaceRoots(snapshot.tree);
 
-      const nextFile = activeFile
-        ? findFileNodeByPath(snapshot.tree, activeFile.path) ?? findFirstFile(snapshot.tree)
+      const nextFile = activeTab
+        ? findFileNodeByPath(snapshot.tree, activeTab.file.path) ?? findFirstFile(snapshot.tree)
         : findFirstFile(snapshot.tree);
 
       if (nextFile) {
         await readMarkdownFile(nextFile.path);
       } else {
-        setActiveFile(null);
+        setActiveTabPath(null);
         setDocumentContent('');
         setSaveStatus('saved');
       }
@@ -389,14 +504,7 @@ export function App(): JSX.Element {
 
     try {
       const snapshot = await window.veloca.workspace.addFolder();
-      setWorkspace(snapshot);
-      openWorkspaceRoots(snapshot.tree);
-
-      const nextFile = findFirstFile(snapshot.tree);
-
-      if (nextFile) {
-        await readMarkdownFile(nextFile.path);
-      }
+      await refreshWorkspaceAfterOperation(snapshot);
 
       showToast({
         type: 'success',
@@ -454,33 +562,136 @@ export function App(): JSX.Element {
     }
   };
 
-  const refreshWorkspaceAfterOperation = async (snapshot: WorkspaceSnapshot, selectedPath?: string) => {
+  const refreshWorkspaceAfterOperation = async (
+    snapshot: WorkspaceSnapshot,
+    selectedPath?: string,
+    renamedPath?: string
+  ) => {
     setWorkspace(snapshot);
     openWorkspaceRoots(snapshot.tree);
+    const nextTabs = syncOpenTabsWithSnapshot(snapshot, renamedPath, selectedPath);
+
+    if (nextTabs.length === 0) {
+      setOpenTabs([]);
+      setActiveTabPath(null);
+      setDocumentContent('');
+      setSaveStatus('saved');
+      return;
+    }
+
+    setOpenTabs(nextTabs);
 
     if (selectedPath) {
       const selectedNode = findNodeByPath(snapshot.tree, selectedPath);
 
       if (selectedNode?.type === 'file') {
-        await readMarkdownFile(selectedNode.path);
+        const selectedTab = nextTabs.find((tab) => tab.file.path === selectedPath);
+
+        if (selectedTab) {
+          setActiveTabPath(selectedPath);
+          setDocumentContent(selectedTab.draftContent);
+          setSaveStatus(selectedTab.status);
+          return;
+        }
+
+        await readMarkdownFile(selectedPath);
         return;
       }
     }
 
-    if (activeFile && findFileNodeByPath(snapshot.tree, activeFile.path)) {
-      await readMarkdownFile(activeFile.path);
-      return;
+    if (activeTabPath && findFileNodeByPath(snapshot.tree, activeTabPath)) {
+      const activeTabItem = nextTabs.find((tab) => tab.file.path === activeTabPath);
+
+      if (!activeTabItem) {
+        setActiveTabPath(null);
+      } else {
+        setActiveTabPath(activeTabPath);
+        setDocumentContent(activeTabItem.draftContent);
+        setSaveStatus(activeTabItem.status);
+      }
+
+      if (activeTabItem) {
+        return;
+      }
     }
 
-    const nextFile = findFirstFile(snapshot.tree);
+    const nextFile = nextTabs[0];
 
     if (nextFile) {
-      await readMarkdownFile(nextFile.path);
+      setActiveTabPath(nextFile.file.path);
+      setDocumentContent(nextFile.draftContent);
+      setSaveStatus(nextFile.status);
     } else {
-      setActiveFile(null);
+      setActiveTabPath(null);
       setDocumentContent('');
       setSaveStatus('saved');
     }
+  };
+
+  const syncOpenTabsWithSnapshot = (
+    snapshot: WorkspaceSnapshot,
+    renamedFromPath?: string,
+    renamedToPath?: string
+  ): OpenEditorTab[] => {
+    const files: WorkspaceTreeNode[] = [];
+
+    const collectFiles = (nodes: WorkspaceTreeNode[]) => {
+      for (const node of nodes) {
+        if (node.type === 'file') {
+          files.push(node);
+        }
+
+        if (node.children?.length) {
+          collectFiles(node.children);
+        }
+      }
+    };
+
+    collectFiles(snapshot.tree);
+
+    const nodesByPath = new Map(files.map((file) => [file.path, file]));
+    const renamedTarget = renamedFromPath && renamedToPath ? nodesByPath.get(renamedToPath) : undefined;
+
+    return openTabs
+      .map((tab) => {
+        if (tab.file.path === renamedFromPath && renamedTarget) {
+          return {
+            ...tab,
+            file: {
+              ...tab.file,
+              path: renamedToPath,
+              name: renamedTarget.name,
+              relativePath: renamedTarget.relativePath,
+              workspaceFolderId: renamedTarget.workspaceFolderId
+            }
+          };
+        }
+
+        const liveNode = nodesByPath.get(tab.file.path);
+
+        if (!liveNode) {
+          return null;
+        }
+
+        if (
+          liveNode.name === tab.file.name &&
+          liveNode.relativePath === tab.file.relativePath &&
+          liveNode.workspaceFolderId === tab.file.workspaceFolderId
+        ) {
+          return tab;
+        }
+
+        return {
+          ...tab,
+          file: {
+            ...tab.file,
+            name: liveNode.name,
+            relativePath: liveNode.relativePath,
+            workspaceFolderId: liveNode.workspaceFolderId
+          }
+        };
+      })
+      .filter(Boolean) as OpenEditorTab[];
   };
 
   const setFolderOpen = (folderId: string) => {
@@ -490,30 +701,48 @@ export function App(): JSX.Element {
     }));
   };
 
+  const scrollTabIntoView = (filePath: string) => {
+    requestAnimationFrame(() => {
+      const tabElement = editorTabElementByPathRef.current.get(filePath);
+
+      if (!tabElement) {
+        return;
+      }
+
+      tabElement.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest',
+        behavior: 'smooth'
+      });
+    });
+  };
+
   const readMarkdownFile = async (filePath: string) => {
     if (!window.veloca) {
       return false;
     }
 
-    if (activeFileRef.current?.path === filePath) {
+    const existingTab = openTabs.find((tab) => tab.file.path === filePath);
+
+    if (existingTab) {
+      setActiveTabPath(filePath);
+      setDocumentContent(existingTab.draftContent);
+      setSaveStatus(existingTab.status);
       setSidebarTab('files');
+      scrollTabIntoView(filePath);
       return true;
-    }
-
-    const canLeave = await canLeaveActiveFile(filePath);
-
-    if (!canLeave) {
-      return false;
     }
 
     setLoadingFile(true);
 
     try {
       const file = await window.veloca.workspace.readMarkdown(filePath);
-      setActiveFile(file);
+      setOpenTabs((current) => [...current, { file, draftContent: file.content, savedContent: file.content, status: 'saved' }]);
+      setActiveTabPath(filePath);
       setDocumentContent(file.content);
       setSaveStatus('saved');
       setSidebarTab('files');
+      scrollTabIntoView(filePath);
       return true;
     } catch {
       showToast({
@@ -525,6 +754,294 @@ export function App(): JSX.Element {
     } finally {
       setLoadingFile(false);
     }
+  };
+
+  const closeTab = async (filePath: string) => {
+    const targetTab = openTabs.find((tab) => tab.file.path === filePath);
+
+    if (!targetTab) {
+      return;
+    }
+
+    if (targetTab.status === 'unsaved') {
+      const shouldDiscard = window.confirm(
+        `Discard unsaved changes to "${targetTab.file.name}" before closing?`
+      );
+
+      if (!shouldDiscard) {
+        return;
+      }
+    }
+
+    const currentTabs = openTabs;
+    const remainingTabs = currentTabs.filter((tab) => tab.file.path !== filePath);
+
+    setOpenTabs(remainingTabs);
+
+    if (activeTabPath !== filePath) {
+      return;
+    }
+
+    if (!remainingTabs.length) {
+      setActiveTabPath(null);
+      setDocumentContent('');
+      setSaveStatus('saved');
+      return;
+    }
+
+    const targetIndex = currentTabs.findIndex((tab) => tab.file.path === filePath);
+    const fallbackTab = remainingTabs[targetIndex] ?? remainingTabs[targetIndex - 1] ?? remainingTabs[0];
+
+    setActiveTabPath(fallbackTab.file.path);
+    setDocumentContent(fallbackTab.draftContent);
+    setSaveStatus(fallbackTab.status);
+  };
+
+  const closeActiveTab = async () => {
+    if (!activeTabPath) {
+      return;
+    }
+
+    await closeTab(activeTabPath);
+  };
+
+  const closeAllTabs = async () => {
+    if (!openTabs.length) {
+      return;
+    }
+
+    const hasUnsavedChanges = openTabs.some((tab) => tab.status === 'unsaved');
+
+    if (hasUnsavedChanges && !window.confirm('Close all tabs and discard all unsaved changes?')) {
+      return;
+    }
+
+    setOpenTabs([]);
+    setActiveTabPath(null);
+    setDocumentContent('');
+    setSaveStatus('saved');
+    setSaveActionState('idle');
+    setIsSplitViewEnabled(false);
+    setSplitAfterIndex(null);
+    setDraggingTabIndex(null);
+    setTabDropTargetIndex(null);
+  };
+
+  const createNewMarkdownFile = async () => {
+    if (!window.veloca) {
+      return;
+    }
+
+    if (!workspace.folders.length) {
+      showToast({
+        type: 'info',
+        title: 'No workspace',
+        description: 'Open a workspace folder before creating new files.'
+      });
+      return;
+    }
+
+    try {
+      const result = await window.veloca.workspace.createEntry(workspace.folders[0].path, 'file', 'Untitled.md');
+
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+
+      if (result.path) {
+        await readMarkdownFile(result.path);
+      }
+    } catch {
+      showToast({
+        type: 'info',
+        title: 'Create Failed',
+        description: 'Unable to create a new markdown file.'
+      });
+    }
+  };
+
+  const saveAllOpenTabs = async () => {
+    if (!window.veloca || !openTabs.length) {
+      return;
+    }
+
+    const unsavedTabs = openTabs.filter((tab) => tab.status === 'unsaved');
+
+    if (!unsavedTabs.length) {
+      return;
+    }
+
+    setOpenTabs((current) =>
+      current.map((tab) => (tab.status === 'unsaved' ? { ...tab, status: 'saving' } : tab))
+    );
+
+    const nextTabs = [...openTabs];
+
+    for (const tab of unsavedTabs) {
+      try {
+        const savedFile = await window.veloca.workspace.saveMarkdown(tab.file.path, tab.draftContent);
+        const targetIndex = nextTabs.findIndex((item) => item.file.path === tab.file.path);
+
+        if (targetIndex >= 0) {
+          nextTabs[targetIndex] = {
+            ...nextTabs[targetIndex],
+            file: { ...nextTabs[targetIndex].file, ...savedFile },
+            savedContent: tab.draftContent,
+            status: 'saved'
+          };
+        }
+      } catch {
+        const targetIndex = nextTabs.findIndex((item) => item.file.path === tab.file.path);
+
+        if (targetIndex >= 0) {
+          nextTabs[targetIndex] = { ...nextTabs[targetIndex], status: 'failed' };
+        }
+      }
+    }
+
+    setOpenTabs(nextTabs);
+
+    if (activeTabPath) {
+      const activeTabAfter = nextTabs.find((tab) => tab.file.path === activeTabPath);
+
+      if (activeTabAfter) {
+        setSaveStatus(activeTabAfter.status);
+      } else {
+        setSaveStatus('saved');
+      }
+    } else {
+      setSaveStatus('saved');
+    }
+  };
+
+  const setEditorMode = (nextMode: EditorMode) => {
+    setActiveEditorMode(nextMode);
+    setIsModeMenuOpen(false);
+  };
+
+  const setSplitEditorMode = () => {
+    setIsSplitViewEnabled((current) => {
+      if (!current && openTabs.length > 1) {
+        setSplitAfterIndex(Math.floor(openTabs.length / 2));
+      } else if (current) {
+        setSplitAfterIndex(null);
+      }
+
+      return !current;
+    });
+
+    setIsHeaderMenuOpen(false);
+  };
+
+  const handleSaveCurrentDocument = async () => {
+    if (!activeFile || saveActionState === 'saving') {
+      return;
+    }
+
+    if (saveActionTimerRef.current) {
+      clearTimeout(saveActionTimerRef.current);
+      saveActionTimerRef.current = null;
+    }
+
+    setSaveActionState('saving');
+    const hasSaved = await saveCurrentDocument();
+
+    if (!hasSaved) {
+      setSaveActionState('idle');
+      return;
+    }
+
+    setSaveActionState('success');
+    saveActionTimerRef.current = setTimeout(() => {
+      setSaveActionState((current) => (current === 'success' ? 'idle' : current));
+    }, 1200);
+  };
+
+  const reorderOpenTabs = (sourceIndex: number, targetIndex: number) => {
+    if (sourceIndex === targetIndex) {
+      return;
+    }
+
+    const boundedTarget = Math.max(0, Math.min(targetIndex, openTabs.length));
+    const nextTabs = [...openTabs];
+    const movedTab = nextTabs.splice(sourceIndex, 1)[0];
+    const insertionIndex = sourceIndex < boundedTarget ? boundedTarget - 1 : boundedTarget;
+    nextTabs.splice(insertionIndex, 0, movedTab);
+
+    setOpenTabs(nextTabs);
+
+    if (isSplitViewEnabled && splitAfterIndex !== null && openTabs.length > 1) {
+      setSplitAfterIndex((current) => {
+        if (current === null) {
+          return null;
+        }
+
+        let adjusted = current;
+
+        if (sourceIndex < current && targetIndex >= current) {
+          adjusted -= 1;
+        } else if (sourceIndex > current && targetIndex <= current) {
+          adjusted += 1;
+        }
+
+        return Math.min(Math.max(adjusted, 1), nextTabs.length - 1);
+      });
+    }
+  };
+
+  const onTabDragStart = (event: DragEvent<HTMLDivElement>, index: number) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    setDraggingTabIndex(index);
+    setTabDropTargetIndex(index);
+  };
+
+  const onTabDragOver = (event: DragEvent<HTMLDivElement>, index: number) => {
+    if (draggingTabIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (draggingTabIndex !== index) {
+      setTabDropTargetIndex(index);
+    }
+  };
+
+  const onTabDrop = (event: DragEvent<HTMLDivElement>, index: number) => {
+    event.preventDefault();
+
+    if (draggingTabIndex === null) {
+      return;
+    }
+
+    reorderOpenTabs(draggingTabIndex, index);
+    setDraggingTabIndex(null);
+    setTabDropTargetIndex(null);
+  };
+
+  const onTabDragEnd = () => {
+    setDraggingTabIndex(null);
+    setTabDropTargetIndex(null);
+  };
+
+  const onTabsDropToEnd = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    if (draggingTabIndex === null) {
+      return;
+    }
+
+    reorderOpenTabs(draggingTabIndex, openTabs.length);
+    setDraggingTabIndex(null);
+    setTabDropTargetIndex(null);
+  };
+
+  const onTabsDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (draggingTabIndex === null) {
+      return;
+    }
+
+    event.preventDefault();
+    setTabDropTargetIndex(openTabs.length);
   };
 
   const openWorkspaceRoots = (tree: WorkspaceTreeNode[]) => {
@@ -654,7 +1171,7 @@ export function App(): JSX.Element {
 
     try {
       const result = await window.veloca.workspace.renameEntry(currentEditingNode.path, nextName);
-      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
+      await refreshWorkspaceAfterOperation(result.snapshot, result.path, currentEditingNode.path);
     } catch {
       showToast({
         type: 'info',
@@ -768,7 +1285,7 @@ export function App(): JSX.Element {
   };
 
   useEffect(() => {
-    if (!autoSave || saveStatus !== 'unsaved' || !activeFile) {
+    if (!autoSave || saveStatus !== 'unsaved' || !activeTabPath) {
       return undefined;
     }
 
@@ -778,7 +1295,7 @@ export function App(): JSX.Element {
     }, 800);
 
     return clearSaveTimer;
-  }, [activeFile, autoSave, documentContent, saveStatus]);
+  }, [activeTabPath, autoSave, documentContent, saveStatus]);
 
   useEffect(() => {
     const saveOnShortcut = (event: KeyboardEvent) => {
@@ -854,33 +1371,252 @@ export function App(): JSX.Element {
 
         <main className="editor-container">
           <header className="editor-header">
-            <div className="breadcrumb">
-              {activeFile ? (
-                activeFile.relativePath.split('/').map((segment, index) => (
-                  <span className="breadcrumb-segment" key={`${segment}-${index}`}>
-                    {index > 0 && <ChevronRight size={12} />}
-                    {segment}
-                  </span>
-                ))
+            <div
+              className="editor-tabs"
+              onDragOver={onTabsDragOver}
+              onDrop={onTabsDropToEnd}
+              onWheel={(event) => {
+                if (event.deltaY === 0) {
+                  return;
+                }
+
+                const scrollTarget = editorTabsRef.current;
+
+                if (!scrollTarget) {
+                  return;
+                }
+
+                scrollTarget.scrollLeft += event.deltaY;
+                event.preventDefault();
+              }}
+              ref={editorTabsRef}
+            >
+              {openTabs.length === 0 ? (
+                <span className="editor-tab-empty">No markdown file opened</span>
               ) : (
-                <span>No markdown file selected</span>
+                openTabs.map((tab, index) => {
+                  const isActive = tab.file.path === activeTabPath;
+
+                  return (
+                    <div className="editor-tab-wrapper" key={tab.file.path}>
+                      {splitAfterPosition !== null && splitAfterPosition === index && (
+                        <span className="editor-tab-split-divider" />
+                      )}
+
+                      {tabDropTargetIndex === index && draggingTabIndex !== index ? (
+                        <span className="editor-tab-drop-indicator" />
+                      ) : null}
+
+                      <div
+                        aria-label={tab.file.name}
+                        aria-selected={isActive}
+                        className={isActive ? 'editor-tab active' : 'editor-tab'}
+                        data-tab-path={tab.file.path}
+                        draggable
+                        ref={(element) => {
+                          if (!element) {
+                            editorTabElementByPathRef.current.delete(tab.file.path);
+                            return;
+                          }
+
+                          editorTabElementByPathRef.current.set(tab.file.path, element);
+                        }}
+                        onClick={() => {
+                          if (!isActive) {
+                            void readMarkdownFile(tab.file.path);
+                          }
+                        }}
+                        onDragEnd={onTabDragEnd}
+                        onDragOver={(event) => onTabDragOver(event, index)}
+                        onDragStart={(event) => onTabDragStart(event, index)}
+                        onDrop={(event) => onTabDrop(event, index)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+
+                            if (!isActive) {
+                              void readMarkdownFile(tab.file.path);
+                            }
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        title={tab.file.relativePath}
+                      >
+                        <FileText className="editor-tab-icon" size={13} />
+                        <span className="editor-tab-name">{tab.file.name}</span>
+                        <span
+                          className={
+                            tab.status === 'unsaved' ? 'editor-tab-dirty is-dirty' : 'editor-tab-dirty'
+                          }
+                        />
+                        <button
+                          aria-label={`Close ${tab.file.name}`}
+                          className="editor-tab-close"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void closeTab(tab.file.path);
+                          }}
+                          onMouseDown={(event) => event.preventDefault()}
+                          type="button"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
               )}
+
+              {draggingTabIndex !== null && tabDropTargetIndex === openTabs.length ? (
+                <span className="editor-tab-drop-indicator editor-tab-drop-indicator-end" />
+              ) : null}
             </div>
 
             <div className="editor-actions">
               <button
-                className={`save-button ${saveStatus}`}
+                className={`editor-action-btn editor-action-btn-save ${
+                  saveActionState === 'saving' ? 'is-saving' : saveActionState === 'success' ? 'is-success' : ''
+                }`}
+                disabled={!activeFile || saveActionState === 'saving'}
+                title="Save"
                 type="button"
-                onClick={() => void saveCurrentDocument()}
-                disabled={!activeFile || saveStatus === 'saving'}
+                onClick={() => void handleSaveCurrentDocument()}
+                aria-label={`Save (${getSaveButtonLabel(saveStatus, autoSave)})`}
               >
-                {saveStatus === 'saving' ? (
-                  <LoaderCircle className="save-button-icon spinning" size={14} />
+                {saveActionState === 'saving' ? (
+                  <LoaderCircle className="editor-action-icon spinning" size={14} />
+                ) : saveActionState === 'success' ? (
+                  <CheckCircle2 className="editor-action-icon is-success" size={14} />
                 ) : (
-                  <Save className="save-button-icon" size={14} />
+                  <Save className="editor-action-icon" size={14} />
                 )}
-                <span>{getSaveButtonLabel(saveStatus, autoSave)}</span>
               </button>
+
+              <button
+                ref={modeMenuButtonRef}
+                className={`editor-action-btn editor-action-btn-mode ${isModeMenuOpen ? 'is-open' : ''}`}
+                title="Switch editor mode"
+                type="button"
+                onClick={() => {
+                  setIsHeaderMenuOpen(false);
+                  setIsModeMenuOpen((current) => !current);
+                }}
+              >
+                <Sparkles className="editor-action-icon" size={13} />
+                <span>{activeEditorModeLabel}</span>
+                <ChevronDown className="editor-action-caret" size={12} />
+              </button>
+
+              <button
+                className="editor-action-btn"
+                title="New File"
+                type="button"
+                onClick={() => void createNewMarkdownFile()}
+              >
+                <FilePlus className="editor-action-icon" size={14} />
+              </button>
+
+              <button
+                ref={headerMenuButtonRef}
+                className="editor-action-btn"
+                title="More Actions"
+                type="button"
+                onClick={() => {
+                  setIsModeMenuOpen(false);
+                  setIsHeaderMenuOpen((current) => !current);
+                }}
+              >
+                <MoreVertical className="editor-action-icon" size={14} />
+              </button>
+
+              {isModeMenuOpen && (
+                <div className="editor-header-menu editor-mode-menu" ref={modeMenuRef}>
+                  {EDITOR_MODE_OPTIONS.map((mode) => {
+                    const selected = mode.id === activeEditorMode;
+
+                    return (
+                      <button
+                        key={mode.id}
+                        className={`editor-header-menu-item${selected ? ' is-selected' : ''}`}
+                        type="button"
+                        onClick={() => setEditorMode(mode.id)}
+                      >
+                        <span className="editor-header-menu-label">
+                          <span className="editor-header-menu-text">{mode.name}</span>
+                        </span>
+                        {selected ? (
+                          <span className="editor-header-menu-mark" />
+                        ) : (
+                          <span className="editor-header-menu-empty" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {isHeaderMenuOpen && (
+                <div className="editor-header-menu editor-action-menu" ref={headerMenuRef}>
+                  <button
+                    className="editor-header-menu-item"
+                    type="button"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      setSplitEditorMode();
+                    }}
+                  >
+                    <span className="editor-header-menu-label">
+                      <Grid3X3 className="editor-header-menu-icon" size={14} />
+                      <span className="editor-header-menu-text">Split Editor Right</span>
+                    </span>
+                    <span className="editor-header-menu-shortcut">Cmd+\</span>
+                  </button>
+                  <div className="editor-header-menu-separator" />
+                  <button
+                    className="editor-header-menu-item"
+                    type="button"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      void saveAllOpenTabs();
+                    }}
+                  >
+                    <span className="editor-header-menu-label">
+                      <Save className="editor-header-menu-icon" size={14} />
+                      <span className="editor-header-menu-text">Save All</span>
+                    </span>
+                    <span className="editor-header-menu-shortcut">⌥ Cmd+S</span>
+                  </button>
+                  <button
+                    className="editor-header-menu-item"
+                    type="button"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      void closeActiveTab();
+                    }}
+                  >
+                    <span className="editor-header-menu-label">
+                      <X className="editor-header-menu-icon" size={14} />
+                      <span className="editor-header-menu-text">Close Active Editor</span>
+                    </span>
+                    <span className="editor-header-menu-shortcut">Cmd+W</span>
+                  </button>
+                  <button
+                    className="editor-header-menu-item text-danger"
+                    type="button"
+                    onClick={() => {
+                      setIsHeaderMenuOpen(false);
+                      void closeAllTabs();
+                    }}
+                  >
+                    <span className="editor-header-menu-label">
+                      <Trash2 className="editor-header-menu-icon" size={14} />
+                      <span className="editor-header-menu-text">Close All Editors</span>
+                    </span>
+                    <span className="editor-header-menu-shortcut">⇧ Cmd+W</span>
+                  </button>
+                </div>
+              )}
             </div>
           </header>
 
@@ -1849,6 +2585,13 @@ function MarkdownEditor({
     setTableGridHover(null);
   };
 
+  const handleDeleteTable = () => {
+    runTableMutation((currentEditor) => currentEditor.chain().focus().deleteTable().run());
+    setTableMenuOpen(false);
+    setTableGridOpen(false);
+    setTableGridHover(null);
+  };
+
   const resolveAssetForEditor = async (
     documentPath: string,
     assetPath: string
@@ -1978,6 +2721,13 @@ function MarkdownEditor({
                   <span>Insert row below</span>
                 </span>
                 <span className="table-menu-shortcut">⇧ + ↓</span>
+              </button>
+              <div className="table-menu-separator" />
+              <button className="table-menu-item" type="button" onClick={handleDeleteTable}>
+                <span className="table-menu-item-left">
+                  <Trash2 size={14} />
+                  <span>Delete table</span>
+                </span>
               </button>
             </div>
           </div>,
