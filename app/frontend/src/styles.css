@@ -106,6 +106,37 @@ button {
   color: var(--foreground);
 }
 
+.app-bootstrap {
+  display: grid;
+  place-items: center;
+  height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  transition: opacity 0.2s ease;
+}
+
+.app-bootstrap__content {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--muted-foreground);
+}
+
+.app-bootstrap__spinner {
+  width: 26px;
+  height: 26px;
+  border: 3px solid rgba(250, 250, 250, 0.2);
+  border-top-color: var(--foreground);
+  border-radius: 9999px;
+  animation: velocaSpin 0.8s linear infinite;
+}
+
+.app-bootstrap__content p {
+  margin: 0;
+}
+
 .titlebar {
   height: 38px;
   border-bottom: 1px solid var(--border);
@@ -572,7 +603,7 @@ button {
   padding: 0.2em 0.4em;
   border: 1px solid var(--border);
   border-radius: 0.3rem;
-  background: var(--muted);
+  background: var(--surface);
   color: var(--foreground);
   font-family: var(--font-mono);
   font-size: 0.85em;
@@ -585,23 +616,11 @@ button {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--code-background);
+  background: var(--surface);
 }
 
 .markdown-body pre[data-language]::before {
-  content: attr(data-language);
-  position: absolute;
-  top: 0;
-  right: 0;
-  padding: 0.25rem 0.75rem;
-  border-top-right-radius: calc(var(--radius) - 1px);
-  border-bottom-left-radius: var(--radius);
-  background: var(--border);
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  content: none;
 }
 
 .markdown-body pre code {
@@ -614,6 +633,77 @@ button {
   color: var(--editor-copy);
   font-size: 0.85rem;
   line-height: 1.6;
+}
+
+.markdown-body pre > .veloca-code-toolbar,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 1.9rem;
+  padding: 0;
+  border-top-right-radius: calc(var(--radius) - 1px);
+  border-bottom-left-radius: var(--radius);
+  background: var(--border);
+  color: var(--muted-foreground);
+  overflow: hidden;
+}
+
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-language,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-language {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.7rem;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.3rem;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--surface-hover);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button:hover,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button:active,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button:active {
+  transform: scale(0.96);
+}
+
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true'],
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true'] {
+  color: #16a34a;
+}
+
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button > .veloca-code-copy-glyph,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button > .veloca-code-copy-glyph {
+  display: block;
+  pointer-events: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .markdown-body hr {
@@ -987,7 +1077,7 @@ button {
   padding: 0.2em 0.4em;
   border: 1px solid var(--border);
   border-radius: 0.3rem;
-  background: var(--muted);
+  background: var(--surface);
   color: var(--foreground);
   font-family: var(--font-mono);
   font-size: 0.85em;
@@ -1000,23 +1090,11 @@ button {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--code-background);
+  background: var(--surface);
 }
 
 .veloca-editor .ProseMirror pre[data-language]::before {
-  content: attr(data-language);
-  position: absolute;
-  top: 0;
-  right: 0;
-  padding: 0.25rem 0.75rem;
-  border-top-right-radius: calc(var(--radius) - 1px);
-  border-bottom-left-radius: var(--radius);
-  background: var(--border);
-  color: var(--muted-foreground);
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  content: none;
 }
 
 .veloca-editor .ProseMirror pre code {
@@ -1046,7 +1124,8 @@ button {
 .veloca-editor .ProseMirror .hljs-selector-tag,
 .veloca-editor .ProseMirror .hljs-title.function_,
 .veloca-editor .ProseMirror .hljs-title.class_ {
-  color: #c084fc;
+  color: #d946ef;
+  font-weight: 500;
 }
 
 .markdown-body .hljs-string,
@@ -1059,14 +1138,15 @@ button {
 .veloca-editor .ProseMirror .hljs-built_in,
 .veloca-editor .ProseMirror .hljs-type,
 .veloca-editor .ProseMirror .hljs-selector-attr {
-  color: #86efac;
+  color: #16a34a;
 }
 
 .markdown-body .hljs-comment,
 .markdown-body .hljs-quote,
 .veloca-editor .ProseMirror .hljs-comment,
 .veloca-editor .ProseMirror .hljs-quote {
-  color: var(--muted-foreground);
+  color: #a1a1aa;
+  font-style: italic;
 }
 
 .markdown-body .hljs-number,
@@ -1084,7 +1164,7 @@ button {
 .veloca-editor .ProseMirror .hljs-variable,
 .veloca-editor .ProseMirror .hljs-template-variable,
 .veloca-editor .ProseMirror .hljs-title {
-  color: #60a5fa;
+  color: #2563eb;
 }
 
 .markdown-body .hljs-tag,
@@ -2119,6 +2199,15 @@ button {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes velocaSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 
