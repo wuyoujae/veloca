@@ -1497,6 +1497,64 @@ function MarkdownEditor({
         attributes: {
           class: theme === 'dark' ? 'veloca-prosemirror theme-dark' : 'veloca-prosemirror theme-light'
         },
+        handleDOMEvents: {
+          mousedown: (_, event) => {
+            const targetNode = event.target;
+            const target =
+              targetNode instanceof HTMLElement
+                ? targetNode
+                : targetNode instanceof Node
+                  ? targetNode.parentElement
+                  : null;
+
+            if (!(target instanceof HTMLElement)) {
+              return false;
+            }
+
+            const wrapper = target.closest('.tableWrapper');
+
+            if (!wrapper) {
+              return false;
+            }
+
+            const isInCell = target.closest('td, th');
+
+            if (!isInCell) {
+              return true;
+            }
+
+            return false;
+          },
+          wheel: (_, event) => {
+            const targetNode = event.target;
+            const target =
+              targetNode instanceof HTMLElement
+                ? targetNode
+                : targetNode instanceof Node
+                  ? targetNode.parentElement
+                  : null;
+
+            if (!(target instanceof HTMLElement)) {
+              return false;
+            }
+
+            const wrapper = target.closest('.tableWrapper');
+            if (!(wrapper instanceof HTMLElement)) {
+              return false;
+            }
+
+            const wheelEvent = event as WheelEvent;
+            const horizontalDelta = wheelEvent.deltaX === 0 && wheelEvent.shiftKey ? wheelEvent.deltaY : wheelEvent.deltaX;
+
+            if (horizontalDelta === 0) {
+              return false;
+            }
+
+            event.preventDefault();
+            wrapper.scrollLeft += horizontalDelta;
+            return true;
+          }
+        },
         handlePaste: (view, event) => {
           const clipboard = event.clipboardData;
 
@@ -1633,6 +1691,15 @@ function MarkdownEditor({
     const wrapper = selectionElement?.closest('.tableWrapper');
 
     if (!(wrapper instanceof HTMLElement)) {
+      const tableElement = selectionElement?.closest('table');
+
+      if (tableElement instanceof HTMLElement) {
+        return {
+          info: activeTableInfo,
+          wrapper: tableElement
+        };
+      }
+
       return null;
     }
 

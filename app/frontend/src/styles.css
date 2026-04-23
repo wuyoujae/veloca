@@ -424,8 +424,9 @@ button {
   min-height: 0;
   padding: 40px 0 calc(var(--statusbar-clearance) + 8px);
   scroll-padding-bottom: var(--statusbar-clearance);
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .markdown-body {
@@ -625,6 +626,7 @@ button {
 .veloca-editor {
   position: relative;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: 480px;
   color: var(--editor-copy);
@@ -773,11 +775,13 @@ button {
 
 .veloca-editor .tiptap {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 
 .veloca-editor .ProseMirror {
   min-width: 0;
+  max-width: 100%;
   min-height: 480px;
   padding: 0 0 var(--statusbar-clearance);
   color: var(--editor-copy);
@@ -864,6 +868,8 @@ button {
   color: var(--editor-copy);
   font-size: 1rem;
   line-height: 1.75;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .veloca-editor .ProseMirror p {
@@ -1032,31 +1038,75 @@ button {
   background: var(--border);
 }
 
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-title.function_,
+.markdown-body .hljs-title.class_,
 .veloca-editor .ProseMirror .hljs-keyword,
 .veloca-editor .ProseMirror .hljs-selector-tag,
-.veloca-editor .ProseMirror .hljs-title.function_ {
+.veloca-editor .ProseMirror .hljs-title.function_,
+.veloca-editor .ProseMirror .hljs-title.class_ {
   color: #c084fc;
 }
 
+.markdown-body .hljs-string,
+.markdown-body .hljs-attr,
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-type,
+.markdown-body .hljs-selector-attr,
 .veloca-editor .ProseMirror .hljs-string,
 .veloca-editor .ProseMirror .hljs-attr,
-.veloca-editor .ProseMirror .hljs-title.class_ {
+.veloca-editor .ProseMirror .hljs-built_in,
+.veloca-editor .ProseMirror .hljs-type,
+.veloca-editor .ProseMirror .hljs-selector-attr {
   color: #86efac;
 }
 
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote,
 .veloca-editor .ProseMirror .hljs-comment,
 .veloca-editor .ProseMirror .hljs-quote {
   color: var(--muted-foreground);
 }
 
+.markdown-body .hljs-number,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-meta,
 .veloca-editor .ProseMirror .hljs-number,
-.veloca-editor .ProseMirror .hljs-literal {
+.veloca-editor .ProseMirror .hljs-literal,
+.veloca-editor .ProseMirror .hljs-meta {
   color: #fbbf24;
 }
 
+.markdown-body .hljs-variable,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-title,
 .veloca-editor .ProseMirror .hljs-variable,
-.veloca-editor .ProseMirror .hljs-template-variable {
+.veloca-editor .ProseMirror .hljs-template-variable,
+.veloca-editor .ProseMirror .hljs-title {
   color: #60a5fa;
+}
+
+.markdown-body .hljs-tag,
+.markdown-body .hljs-name,
+.markdown-body .hljs-attr-name,
+.markdown-body .hljs-params,
+.markdown-body .hljs-property,
+.markdown-body .hljs-punctuation,
+.veloca-editor .ProseMirror .hljs-tag,
+.veloca-editor .ProseMirror .hljs-name,
+.veloca-editor .ProseMirror .hljs-attr-name,
+.veloca-editor .ProseMirror .hljs-params,
+.veloca-editor .ProseMirror .hljs-property,
+.veloca-editor .ProseMirror .hljs-punctuation {
+  color: #f9a8d4;
+}
+
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-attr-equals,
+.veloca-editor .ProseMirror .hljs-attribute,
+.veloca-editor .ProseMirror .hljs-attr-equals {
+  color: #f87171;
 }
 
 .veloca-editor .ProseMirror .tableWrapper {
@@ -1065,10 +1115,13 @@ button {
   max-width: 100%;
   margin: 2em 0;
   min-width: 0;
+  box-sizing: border-box;
   padding-bottom: 6px;
-  overflow-x: scroll;
+  overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
 .veloca-editor .ProseMirror .tableWrapper::-webkit-scrollbar {
@@ -1091,13 +1144,28 @@ button {
 }
 
 .veloca-editor .ProseMirror table {
-  display: inline-table;
-  width: auto;
-  min-width: max(100%, 460px);
+  display: table;
+  width: max-content;
+  min-width: 100%;
   max-width: none;
   border-collapse: collapse;
   font-size: 0.9em;
-  table-layout: fixed;
+  table-layout: auto;
+}
+
+.veloca-editor .ProseMirror .tableWrapper table {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  table-layout: auto;
+}
+
+.veloca-editor .ProseMirror .tableWrapper th,
+.veloca-editor .ProseMirror .tableWrapper td {
+  width: 10rem;
+  min-width: 10rem;
+  max-width: none;
 }
 
 .veloca-editor .ProseMirror th,

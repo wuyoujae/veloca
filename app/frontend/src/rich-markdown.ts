@@ -695,7 +695,9 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     VelocaWritingBehavior,
     VelocaHardBreak,
     VelocaTable.configure({
-      resizable: false
+      cellMinWidth: 160,
+      resizable: false,
+      renderWrapper: true
     }),
     TableRow,
     TableHeader,
@@ -991,13 +993,36 @@ export function transformMarkdownFromEditor(content: string): string {
   return restoreFootnotesFromEditor(restoreCalloutsFromEditor(content));
 }
 
+const CALLOUT_OPENING_LINE_REGEXP = /^\s*>+\s*\[!([A-Z0-9_-]+)\]\s*(.*)$/i;
+const CALLOUT_CONTINUATION_PREFIX_REGEXP = /^\s*>+\s?/;
+
+function parseCalloutOpeningLine(line: string): {
+  rawTitle: string;
+  type: string;
+} | null {
+  const match = line.match(CALLOUT_OPENING_LINE_REGEXP);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    rawTitle: match[2] ?? '',
+    type: match[1]
+  };
+}
+
+function stripCalloutLinePrefix(line: string): string {
+  return line.replace(CALLOUT_CONTINUATION_PREFIX_REGEXP, '');
+}
+
 function transformCalloutsForEditor(content: string): string {
   const lines = content.split('\n');
   const output: string[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    const matched = line.match(/^>\s?\[!([A-Z0-9_-]+)\]\s*(.*)$/i);
+    const matched = parseCalloutOpeningLine(line);
 
     if (!matched) {
       output.push(line);
@@ -1007,7 +1032,7 @@ function transformCalloutsForEditor(content: string): string {
     const blockLines = [line];
     let nextIndex = index + 1;
 
-    while (nextIndex < lines.length && /^>\s?/.test(lines[nextIndex])) {
+    while (nextIndex < lines.length && CALLOUT_CONTINUATION_PREFIX_REGEXP.test(lines[nextIndex])) {
       blockLines.push(lines[nextIndex]);
       nextIndex += 1;
     }
@@ -1022,7 +1047,7 @@ function transformCalloutsForEditor(content: string): string {
 function renderCalloutHtml(lines: string[], type: string, rawTitle: string): string {
   const originalMarkdown = lines.join('\n');
   const normalizedType = type.trim().toLowerCase();
-  const bodyLines = lines.slice(1).map((line) => line.replace(/^>\s?/, ''));
+  const bodyLines = lines.slice(1).map((line) => stripCalloutLinePrefix(line));
   const bodyMarkdown = bodyLines.join('\n').trim();
   const title = rawTitle.trim() || formatCalloutTitle(normalizedType);
   const titleHtml = renderMarkdownHtml(title, true).trim();
@@ -1541,8 +1566,9 @@ function buildCalloutNodeFromBlockquote(editor: Editor, blockquoteNode: ProseMir
       }
     ]
   });
+  const openingLine = parseCalloutOpeningLine(markdown.trimStart());
 
-  if (!/^>\s?\[!([A-Z0-9_-]+)\]/im.test(markdown.trimStart())) {
+  if (!openingLine) {
     return null;
   }
 

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - Premium Table Interaction Prototype</title>
+    <!-- 引入字体与图标 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SHADCN LIGHT THEME SYSTEM 
+         */
+        :root {
+            --bg: #ffffff;
+            --fg: #09090b;
+            --text-body: #3f3f46;
+            --text-muted: #71717a;
+            --border: #e4e4e7;
+            --border-hover: #d4d4d8;
+            --surface: #f4f4f5;
+            --surface-hover: #e4e4e7;
+            --primary: #18181b;
+            --primary-fg: #ffffff;
+            --blue-selection: #eff6ff; /* 极浅的焦点蓝 */
+            --blue-border: #bfdbfe;
+            --blue-solid: #3b82f6;
+            --radius: 0.5rem;
+            --font-sans: 'Inter', -apple-system, sans-serif;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg);
+            color: var(--text-body);
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+        }
+
+        /* 编辑器主容器 */
+        .editor-container {
+            width: 100%;
+            max-width: 840px; /* 稍微加宽以容纳左侧控件 */
+            /* 左侧留出足够的空白(Gutter)放置悬浮按钮 */
+            padding: 80px 40px 120px 80px; 
+            line-height: 1.75;
+            font-size: 16px;
+        }
+
+        .editor-container h1 {
+            color: var(--fg); font-size: 2.25rem; font-weight: 700;
+            letter-spacing: -0.025em; margin-bottom: 2rem;
+        }
+
+        .editor-container p { margin-bottom: 1.5rem; color: var(--text-body); }
+
+        /* ==========================================
+           1. 块级包裹器 & 左侧悬浮控件 (Notion Style)
+           ========================================== */
+        .block-wrapper {
+            position: relative; /* 关键：让控件绝对定位于这个块 */
+            margin: 2em 0;
+            border-radius: var(--radius);
+            transition: all 0.2s;
+        }
+
+        /* 悬浮在左侧的控件组 */
+        .block-controls {
+            position: absolute;
+            /* 放在内容区外侧 */
+            left: -48px; 
+            top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            opacity: 0; /* 默认隐藏 */
+            pointer-events: none;
+            transition: opacity 0.2s, transform 0.2s;
+            transform: translateX(5px);
+            z-index: 50;
+        }
+
+        /* 当包裹器聚焦或悬浮时显示控件 */
+        .block-wrapper.focused .block-controls,
+        .block-wrapper:hover .block-controls {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(0);
+        }
+
+        /* 控件按钮样式 */
+        .control-btn {
+            width: 28px; height: 28px;
+            display: flex; align-items: center; justify-content: center;
+            background-color: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-muted);
+            cursor: pointer;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            transition: all 0.15s;
+        }
+
+        .control-btn:hover, .control-btn.active {
+            background-color: var(--surface);
+            color: var(--fg);
+            border-color: var(--border-hover);
+        }
+
+        /* ==========================================
+           2. 极简高级表格样式
+           ========================================== */
+        .veloca-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9em;
+            table-layout: fixed;
+            background: var(--bg);
+        }
+
+        .veloca-table th, .veloca-table td {
+            border: 1px solid var(--border);
+            padding: 0.75rem 1rem;
+            text-align: left;
+            position: relative;
+            outline: none; /* 移除默认 focus 边框 */
+            transition: background-color 0.2s, border-color 0.2s;
+            cursor: text;
+        }
+
+        .veloca-table th {
+            background-color: #fafafa;
+            font-weight: 600;
+            color: var(--fg);
+        }
+
+        /* 选中单元格时的极致高亮 (焦点状态) */
+        .veloca-table th.cell-focused, 
+        .veloca-table td.cell-focused {
+            background-color: var(--blue-selection);
+            /* 使用内阴影模拟完美的焦点环 */
+            box-shadow: inset 0 0 0 1px var(--blue-solid);
+            z-index: 10;
+        }
+
+        /* ==========================================
+           3. 高级弹出层通用样式 (Shadcn Popover)
+           ========================================== */
+        .popup-panel {
+            position: absolute;
+            left: 36px; /* 位于按钮右侧 */
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.95);
+            transform-origin: left top;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 100;
+            padding: 6px;
+        }
+
+        .popup-panel.show {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+        }
+
+        /* 尺寸选择器面板专属 (Typora Style) */
+        .grid-popup { top: 0; width: 232px; }
+        
+        .grid-matrix {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr); /* 10列 */
+            gap: 2px;
+            padding: 4px;
+        }
+
+        .grid-cell {
+            width: 18px; height: 18px;
+            background-color: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 2px;
+            transition: background 0.05s, border 0.05s;
+        }
+
+        /* 矩阵高亮状态 */
+        .grid-cell.highlighted {
+            background-color: var(--blue-selection);
+            border-color: var(--blue-solid);
+        }
+
+        .grid-status {
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-top: 8px;
+            padding-bottom: 4px;
+            font-family: var(--font-mono);
+        }
+
+        /* 下拉菜单面板专属 */
+        .menu-popup { top: 34px; width: 260px; }
+
+        .menu-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            color: var(--fg);
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.15s;
+        }
+
+        .menu-item-left { display: flex; align-items: center; gap: 8px; }
+        .menu-item-shortcut { color: var(--text-muted); font-size: 12px; font-family: var(--font-mono); }
+        
+        .menu-item:hover:not(.disabled) { background-color: var(--surface); }
+        
+        /* 禁用状态（针对表头向上插入） */
+        .menu-item.disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            color: var(--text-muted);
+        }
+
+        .menu-separator {
+            height: 1px; background-color: var(--border);
+            margin: 4px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="editor-container">
+        <h1>Table Interaction Spec</h1>
+        <p>Click inside the table below to reveal the block controls on the left. Notice how the controls sit outside the content boundary, ensuring your typography is never compromised.</p>
+
+        <!-- 块级包裹器 -->
+        <div class="block-wrapper" id="tableWrapper">
+            
+            <!-- 悬浮在外侧的控件组 -->
+            <div class="block-controls" id="blockControls">
+                <!-- 按钮1：尺寸选择器 -->
+                <button class="control-btn" id="btnGrid" title="Resize Table">
+                    <i data-lucide="grid-3x3" style="width: 16px; height: 16px;"></i>
+                </button>
+                <!-- 按钮2：菜单 -->
+                <button class="control-btn" id="btnMenu" title="Table Options">
+                    <i data-lucide="more-horizontal" style="width: 16px; height: 16px;"></i>
+                </button>
+
+                <!-- 弹出层1：Grid尺寸选择器 (10列 x 5行) -->
+                <div class="popup-panel grid-popup" id="gridPopup">
+                    <div class="grid-matrix" id="gridMatrix">
+                        <!-- JS 动态生成 50 个格子 -->
+                    </div>
+                    <div class="grid-status" id="gridStatus">0 × 0</div>
+                </div>
+
+                <!-- 弹出层2：下拉操作菜单 -->
+                <div class="popup-panel menu-popup" id="menuPopup">
+                    <!-- 左侧插入 -->
+                    <div class="menu-item">
+                        <div class="menu-item-left">
+                            <i data-lucide="arrow-left-to-line" style="width: 14px; height: 14px;"></i>
+                            <span>Insert column left</span>
+                        </div>
+                        <span class="menu-item-shortcut">⇧ + ←</span>
+                    </div>
+                    <!-- 右侧插入 -->
+                    <div class="menu-item">
+                        <div class="menu-item-left">
+                            <i data-lucide="arrow-right-to-line" style="width: 14px; height: 14px;"></i>
+                            <span>Insert column right</span>
+                        </div>
+                        <span class="menu-item-shortcut">⇧ + →</span>
+                    </div>
+                    
+                    <div class="menu-separator"></div>
+
+                    <!-- 向上插入 (表头时需禁用) -->
+                    <div class="menu-item" id="menuInsertRowAbove">
+                        <div class="menu-item-left">
+                            <i data-lucide="arrow-up-to-line" style="width: 14px; height: 14px;"></i>
+                            <span>Insert row above</span>
+                        </div>
+                        <span class="menu-item-shortcut">⇧ + ↑</span>
+                    </div>
+                    <!-- 向下插入 -->
+                    <div class="menu-item">
+                        <div class="menu-item-left">
+                            <i data-lucide="arrow-down-to-line" style="width: 14px; height: 14px;"></i>
+                            <span>Insert row below</span>
+                        </div>
+                        <span class="menu-item-shortcut">⇧ + ↓</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 真正的 Markdown 表格 -->
+            <table class="veloca-table" id="velocaTable">
+                <thead>
+                    <tr>
+                        <th>Syntax</th>
+                        <th>Description</th>
+                        <th>Shortcut</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Header</td>
+                        <td>Title level 1 to 6</td>
+                        <td># + Space</td>
+                    </tr>
+                    <tr>
+                        <td>Bold</td>
+                        <td>Bold text style</td>
+                        <td>**text**</td>
+                    </tr>
+                    <tr>
+                        <td>Table</td>
+                        <td>Organize data</td>
+                        <td>| col | col |</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <p>This prototype demonstrates state management. If you focus on a <strong>Header (th)</strong> cell and click the options menu, the "Insert row above" action becomes visually disabled.</p>
+    </div>
+
+    <script>
+        // 初始化 Lucide 图标
+        lucide.createIcons();
+
+        // DOM 元素引用
+        const tableWrapper = document.getElementById('tableWrapper');
+        const velocatable = document.getElementById('velocaTable');
+        const cells = velocatable.querySelectorAll('th, td');
+        
+        const btnGrid = document.getElementById('btnGrid');
+        const btnMenu = document.getElementById('btnMenu');
+        const gridPopup = document.getElementById('gridPopup');
+        const menuPopup = document.getElementById('menuPopup');
+        
+        const menuInsertRowAbove = document.getElementById('menuInsertRowAbove');
+        
+        let isHeaderFocused = false;
+
+        // --- 1. 表格焦点管理 (Focus Management) ---
+        cells.forEach(cell => {
+            cell.addEventListener('click', (e) => {
+                // 移除所有其他单元格的焦点
+                cells.forEach(c => c.classList.remove('cell-focused'));
+                // 赋予当前单元格焦点样式
+                cell.classList.add('cell-focused');
+                // 让外部 Wrapper 知道表格已激活
+                tableWrapper.classList.add('focused');
+
+                // 判断是否是表头 TH
+                isHeaderFocused = cell.tagName.toLowerCase() === 'th';
+            });
+        });
+
+        // 点击空白处取消焦点和关闭弹窗
+        document.addEventListener('click', (e) => {
+            if (!tableWrapper.contains(e.target)) {
+                tableWrapper.classList.remove('focused');
+                cells.forEach(c => c.classList.remove('cell-focused'));
+                closeAllPopups();
+            }
+        });
+
+        // --- 2. 弹窗控制逻辑 ---
+        function closeAllPopups() {
+            gridPopup.classList.remove('show');
+            menuPopup.classList.remove('show');
+            btnGrid.classList.remove('active');
+            btnMenu.classList.remove('active');
+        }
+
+        btnGrid.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isShowing = gridPopup.classList.contains('show');
+            closeAllPopups();
+            if (!isShowing) {
+                gridPopup.classList.add('show');
+                btnGrid.classList.add('active');
+            }
+        });
+
+        btnMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isShowing = menuPopup.classList.contains('show');
+            closeAllPopups();
+            
+            // 动态判断是否禁用“向上插入一行”
+            if (isHeaderFocused) {
+                menuInsertRowAbove.classList.add('disabled');
+            } else {
+                menuInsertRowAbove.classList.remove('disabled');
+            }
+
+            if (!isShowing) {
+                menuPopup.classList.add('show');
+                btnMenu.classList.add('active');
+            }
+        });
+
+        // 阻止弹窗内部的点击事件冒泡，防止关闭弹窗
+        gridPopup.addEventListener('click', e => e.stopPropagation());
+        menuPopup.addEventListener('click', e => e.stopPropagation());
+
+
+        // --- 3. 动态生成 Typora 风格的 10x5 网格 ---
+        const gridMatrix = document.getElementById('gridMatrix');
+        const gridStatus = document.getElementById('gridStatus');
+        const MAX_COLS = 10;
+        const MAX_ROWS = 5;
+
+        // 生成格子 DOM
+        for (let r = 1; r <= MAX_ROWS; r++) {
+            for (let c = 1; c <= MAX_COLS; c++) {
+                const cell = document.createElement('div');
+                cell.className = 'grid-cell';
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+                gridMatrix.appendChild(cell);
+            }
+        }
+
+        const gridCells = document.querySelectorAll('.grid-cell');
+
+        // 绑定悬停高亮逻辑
+        gridCells.forEach(cell => {
+            cell.addEventListener('mouseenter', () => {
+                const targetRow = parseInt(cell.dataset.row);
+                const targetCol = parseInt(cell.dataset.col);
+
+                gridStatus.textContent = `${targetCol} × ${targetRow}`;
+
+                gridCells.forEach(c => {
+                    const r = parseInt(c.dataset.row);
+                    const col = parseInt(c.dataset.col);
+                    // 核心算法：行列均小于等于当前鼠标位置的，即为高亮
+                    if (r <= targetRow && col <= targetCol) {
+                        c.classList.add('highlighted');
+                    } else {
+                        c.classList.remove('highlighted');
+                    }
+                });
+            });
+        });
+
+        // 鼠标离开网格区域，重置显示
+        gridMatrix.addEventListener('mouseleave', () => {
+            gridCells.forEach(c => c.classList.remove('highlighted'));
+            gridStatus.textContent = `0 × 0`;
+        });
+
+    </script>
+</body>
+</html>

@@ -158,6 +158,8 @@ Each document should contain explanatory text, code, and relevant domain knowled
 
 Do not put the contents of multiple unrelated modules into a single document. Documentation must be split in a modular way, while also avoiding the creation of an excessive number of documents.
 
+**！！！！After completing each development task, you should review and determine whether the documentation needs to be updated.**If you determine that something should be documented but no existing documentation is available, do not hesitate to create a new document and record it clearly.
+
 ## Documentation Reading
 
 We should adopt a **progressive disclosure** approach when loading documentation. During each development task, only read the documents that are relevant to the current feature, and always start with the most relevant ones. You may search by related keywords or directly read the document with the most relevant name.
