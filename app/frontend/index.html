@@ -4,69 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Veloca</title>
-    <style>
-      :root {
-        --veloca-background: #09090b;
-        --veloca-foreground: #fafafa;
-        --veloca-muted-foreground: #a1a1aa;
-      }
-
-      body {
-        margin: 0;
-        background: var(--veloca-background);
-        color: var(--veloca-foreground);
-        width: 100%;
-        height: 100%;
-      }
-
-      #root {
-        width: 100%;
-        height: 100%;
-      }
-
-      #bootstrap {
-        height: 100vh;
-        display: grid;
-        place-items: center;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      }
-
-      #bootstrap .spinner {
-        width: 26px;
-        height: 26px;
-        margin: 0 auto 12px;
-        border: 3px solid rgba(250, 250, 250, 0.2);
-        border-top-color: var(--veloca-foreground);
-        border-radius: 50%;
-        animation: veloca-bootstrap-spin 0.8s linear infinite;
-      }
-
-      #bootstrap p {
-        margin: 0;
-        color: var(--veloca-muted-foreground);
-        font-size: 14px;
-      }
-
-      @keyframes veloca-bootstrap-spin {
-        from {
-          transform: rotate(0deg);
-        }
-
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    </style>
   </head>
   <body>
-    <div id="root">
-      <div id="bootstrap">
-        <div>
-          <div class="spinner" aria-hidden="true"></div>
-          <p>Loading Veloca...</p>
-        </div>
-      </div>
-    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

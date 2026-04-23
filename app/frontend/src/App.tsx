@@ -154,7 +154,6 @@ export function App(): JSX.Element {
   const [focusMode, setFocusMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
-  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
@@ -175,53 +174,19 @@ export function App(): JSX.Element {
   }, [documentContent]);
 
   useEffect(() => {
-    let mounted = true;
-    const bootstrap = async () => {
-      try {
-        if (window.veloca) {
-          const [storedTheme, storedAutoSave] = await Promise.all([
-            window.veloca.settings.getTheme(),
-            window.veloca.settings.getAutoSave()
-          ]);
+    window.veloca?.settings.getTheme().then((storedTheme) => {
+      applyTheme(storedTheme);
+      setTheme(storedTheme);
+    });
+    window.veloca?.settings.getAutoSave().then(setAutoSave);
 
-          applyTheme(storedTheme);
-          setTheme(storedTheme);
-          setAutoSave(storedAutoSave);
-        } else {
-          const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
-          const fallbackAutoSave = localStorage.getItem('veloca-auto-save') !== 'false';
-          applyTheme(fallbackTheme);
-          setTheme(fallbackTheme);
-          setAutoSave(fallbackAutoSave);
-        }
-      } catch {
-        const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
-        const fallbackAutoSave = localStorage.getItem('veloca-auto-save') !== 'false';
-        applyTheme(fallbackTheme);
-        setTheme(fallbackTheme);
-        setAutoSave(fallbackAutoSave);
-      } finally {
-        try {
-          await loadWorkspace();
-        } catch {
-          setWorkspace(emptyWorkspace);
-          setActiveFile(null);
-          setDocumentContent('');
-          setLoadingWorkspace(false);
-          setSaveStatus('saved');
-        }
-      }
-
-      if (mounted) {
-        setIsBootstrapping(false);
-      }
-    };
-
-    void bootstrap();
-
-    return () => {
-      mounted = false;
-    };
+    if (!window.veloca) {
+      const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
+      const fallbackAutoSave = localStorage.getItem('veloca-auto-save') !== 'false';
+      applyTheme(fallbackTheme);
+      setTheme(fallbackTheme);
+      setAutoSave(fallbackAutoSave);
+    }
   }, []);
 
   useEffect(() => {
@@ -245,6 +210,10 @@ export function App(): JSX.Element {
 
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
+  }, []);
+
+  useEffect(() => {
+    loadWorkspace();
   }, []);
 
   useEffect(() => {
@@ -281,17 +250,6 @@ export function App(): JSX.Element {
   const applyTheme = (nextTheme: ThemeMode) => {
     document.documentElement.dataset.theme = nextTheme;
   };
-
-  if (isBootstrapping) {
-    return (
-      <div className="app-bootstrap">
-        <div className="app-bootstrap__content">
-          <span className="app-bootstrap__spinner" />
-          <p>Loading Veloca...</p>
-        </div>
-      </div>
-    );
-  }
 
   const updateTheme = async (nextTheme: ThemeMode) => {
     applyTheme(nextTheme);
