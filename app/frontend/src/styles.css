@@ -1521,6 +1521,14 @@ button {
   color: var(--agent-fg);
 }
 
+.agent-icon-btn:disabled,
+.agent-main-action-btn:disabled,
+.agent-msg-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
 .agent-dictate-btn.listening {
   background: transparent;
   color: #60a5fa;
@@ -1948,6 +1956,14 @@ button {
 
 .agent-ai-msg p {
   margin: 0 0 10px;
+}
+
+.agent-ai-msg.pending {
+  color: var(--agent-text-muted);
+}
+
+.agent-ai-msg.error {
+  color: #dc2626;
 }
 
 .agent-ai-msg code {

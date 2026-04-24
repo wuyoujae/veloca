@@ -185,15 +185,26 @@ The package requires provider credentials at call time:
 
 Do not expose API keys to renderer state, localStorage, or frontend logs.
 
+Veloca currently reads Agent configuration from backend environment variables. Local development can use `.env`, which is intentionally ignored by Git:
+
+```env
+VELOCA_AGENT_BASE_URL=https://openrouter.ai/api/v1
+VELOCA_AGENT_MODEL=google/gemini-3.1-flash-lite-preview
+VELOCA_AGENT_API_KEY=your-openrouter-api-key
+VELOCA_AGENT_CONTEXT_WINDOW=128000
+```
+
+The first integrated backend path uses OpenRouter through the package's OpenAI-compatible provider. The renderer calls `window.veloca.agent.sendMessage(...)`; the Electron main process validates the request and calls `veloca.InvokeAgent` with a simple Veloca editor system prompt. Lite / Pro / Ultra are currently UI selections only and all resolve to `VELOCA_AGENT_MODEL` until separate model routing is added.
+
 ## Integration Direction For Veloca
 
-The next implementation step should be a backend Agent service boundary:
+The current implementation starts with a backend Agent service boundary:
 
 1. Keep the current Agent UI as the renderer surface.
 2. Add an Electron IPC channel such as `agent:send-message`.
 3. Resolve model selection to backend config.
-4. Call `veloca.InvokeAgent` in streaming mode.
-5. Normalize raw chunks into UI events: user message stored, assistant delta, tool status, completion, and error.
+4. Call `veloca.InvokeAgent` from the main process.
+5. Normalize the response into UI events: user message stored, assistant response, completion, and error.
 6. Persist the mapping between Veloca UI sessions and `otherone-agent` session ids.
 
-This keeps the UI responsive while preserving security and leaves room to replace the package local-file storage with SQLite later.
+This keeps the UI responsive while preserving security and leaves room to replace the package local-file storage with SQLite later. Streaming deltas and real tool execution are the next likely extension points.

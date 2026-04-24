@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { ThemeMode } from '../services/settings-store';
+import type { AgentSendMessageRequest, AgentSendMessageResponse } from '../services/agent-service';
 import type {
   FileOperationResult,
   MarkdownFileContent,
@@ -51,6 +52,8 @@ contextBridge.exposeInMainWorld('veloca', {
     platform: process.platform
   },
   agent: {
+    sendMessage: (payload: AgentSendMessageRequest) =>
+      ipcRenderer.invoke('agent:send-message', payload) as Promise<AgentSendMessageResponse>,
     onOpenPalette: (callback: () => void) => {
       const listener = () => callback();
 

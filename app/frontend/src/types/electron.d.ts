@@ -53,6 +53,28 @@ interface FileOperationResult {
   path?: string;
 }
 
+type AgentUiModel = 'lite' | 'pro' | 'ultra';
+
+interface AgentAttachmentSummary {
+  mimeType: string;
+  name: string;
+  status: string;
+}
+
+interface AgentSendMessageRequest {
+  attachments?: AgentAttachmentSummary[];
+  message: string;
+  model: AgentUiModel;
+  sessionId: string;
+  webSearch?: boolean;
+}
+
+interface AgentSendMessageResponse {
+  answer: string;
+  model: string;
+  sessionId: string;
+}
+
 declare global {
   interface Window {
     veloca?: {
@@ -93,6 +115,7 @@ declare global {
         platform: NodeJS.Platform;
       };
       agent: {
+        sendMessage: (payload: AgentSendMessageRequest) => Promise<AgentSendMessageResponse>;
         onOpenPalette: (callback: () => void) => () => void;
       };
     };

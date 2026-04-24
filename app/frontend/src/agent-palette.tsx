@@ -43,6 +43,7 @@ export interface AgentPaletteAnchor {
 
 type AgentModelId = 'lite' | 'pro' | 'ultra';
 type AgentAttachmentStatus = 'uploading' | 'parsing' | 'recording' | 'ready';
+type AgentMessageStatus = 'pending' | 'complete' | 'error';
 type AgentPopover = 'model' | 'plus' | 'session' | null;
 
 interface AgentAttachment {
@@ -58,6 +59,7 @@ interface AgentConversation {
   id: string;
   model: AgentModelId;
   prompt: string;
+  status: AgentMessageStatus;
   webSearch: boolean;
 }
 
@@ -128,6 +130,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   const [showScrollLatest, setShowScrollLatest] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [editing, setEditing] = useState<AgentEditingState | null>(null);
+  const [sendingMessageId, setSendingMessageId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<AgentSession[]>([
     {
       id: 'session-1',
@@ -212,8 +215,12 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     timersRef.current.push(timer);
   };
 
+  const updateSession = (sessionId: string, updater: (session: AgentSession) => AgentSession) => {
+    setSessions((current) => current.map((session) => (session.id === sessionId ? updater(session) : session)));
+  };
+
   const updateActiveSession = (updater: (session: AgentSession) => AgentSession) => {
-    setSessions((current) => current.map((session) => (session.id === activeSessionId ? updater(session) : session)));
+    updateSession(activeSessionId, updater);
   };
 
   const checkCanvasScroll = () => {
@@ -393,18 +400,69 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     setInlineDictating(true);
   };
 
-  const buildAgentAnswer = (prompt: string, nextModel: AgentModelId, nextAttachments: AgentAttachment[]) => {
-    const modelLabel = agentModels[nextModel].label;
-    const attachmentSummary = nextAttachments.length
-      ? ` I also registered ${nextAttachments.length} attachment${nextAttachments.length > 1 ? 's' : ''} into this turn.`
-      : '';
+  const requestAgentAnswer = async (
+    sessionId: string,
+    messageId: string,
+    prompt: string,
+    nextModel: AgentModelId,
+    messageAttachments: AgentAttachment[],
+    nextWebSearchEnabled: boolean
+  ) => {
+    setSendingMessageId(messageId);
 
-    return `I have received your request with the ${modelLabel} model.${attachmentSummary}
+    try {
+      const response = await window.veloca?.agent.sendMessage({
+        attachments: messageAttachments.map((attachment) => ({
+          mimeType: attachment.mimeType,
+          name: attachment.name,
+          status: attachment.status
+        })),
+        message: prompt,
+        model: nextModel,
+        sessionId,
+        webSearch: nextWebSearchEnabled
+      });
 
-Here is a concise direction:
-- Keep the Markdown structure readable and stable.
-- Preserve the author's original intent before polishing the language.
-- Use the selected context as the main reference for the next edit.`;
+      if (!response) {
+        throw new Error('Veloca Agent is not available in this runtime.');
+      }
+
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                answer: response.answer || 'Veloca returned an empty response.',
+                status: 'complete'
+              }
+            : message
+        )
+      }));
+    } catch (error) {
+      const description = error instanceof Error ? error.message : 'Agent request failed.';
+
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                answer: description,
+                status: 'error'
+              }
+            : message
+        )
+      }));
+      onToast?.({
+        type: 'info',
+        title: 'Agent request failed',
+        description
+      });
+    } finally {
+      setSendingMessageId((current) => (current === messageId ? null : current));
+      scheduleScrollToLatest();
+    }
   };
 
   const sendMessage = () => {
@@ -415,20 +473,27 @@ Here is a concise direction:
       return;
     }
 
+    if (sendingMessageId) {
+      return;
+    }
+
     const messageAttachments = attachments.map((attachment) => ({
       ...attachment,
       status: attachment.status === 'ready' ? attachment.status : ('recording' as const)
     }));
+    const messageId = createAgentId('message');
+    const sessionId = activeSessionId;
     const nextMessage: AgentConversation = {
-      answer: buildAgentAnswer(prompt, model, messageAttachments),
+      answer: 'Veloca is thinking...',
       attachments: messageAttachments,
-      id: createAgentId('message'),
+      id: messageId,
       model,
       prompt,
+      status: 'pending',
       webSearch: webSearchEnabled
     };
 
-    updateActiveSession((session) => ({
+    updateSession(sessionId, (session) => ({
       ...session,
       messages: [...session.messages, nextMessage]
     }));
@@ -437,6 +502,7 @@ Here is a concise direction:
     openCanvas();
     setEditing(null);
     scheduleScrollToLatest();
+    void requestAgentAnswer(sessionId, messageId, prompt, model, messageAttachments, webSearchEnabled);
   };
 
   const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -488,25 +554,34 @@ Here is a concise direction:
 
     const prompt = editing.prompt.trim();
 
-    if (!prompt) {
+    if (!prompt || sendingMessageId) {
       return;
     }
 
-    updateActiveSession((session) => ({
+    const sessionId = activeSessionId;
+    const messageId = editing.messageId;
+    const editingAttachments = editing.attachments;
+    const message = activeMessages.find((item) => item.id === messageId);
+    const nextModel = message?.model ?? model;
+    const nextWebSearchEnabled = message?.webSearch ?? webSearchEnabled;
+
+    updateSession(sessionId, (session) => ({
       ...session,
-      messages: session.messages.map((message) =>
-        message.id === editing.messageId
+      messages: session.messages.map((currentMessage) =>
+        currentMessage.id === messageId
           ? {
-              ...message,
-              answer: buildAgentAnswer(prompt, message.model, editing.attachments),
-              attachments: editing.attachments,
-              prompt
+              ...currentMessage,
+              answer: 'Veloca is thinking...',
+              attachments: editingAttachments,
+              prompt,
+              status: 'pending'
             }
-          : message
+          : currentMessage
       )
     }));
     setEditing(null);
     scheduleScrollToLatest();
+    void requestAgentAnswer(sessionId, messageId, prompt, nextModel, editingAttachments, nextWebSearchEnabled);
   };
 
   const removeEditingAttachment = (attachmentId: string) => {
@@ -698,6 +773,7 @@ Here is a concise direction:
               className={`agent-main-action-btn${input.trim() ? ' send' : ' voice'}${voiceMode !== 'idle' ? ' listening' : ''}`}
               type="button"
               aria-label={input.trim() ? 'Send message' : 'Start voice input'}
+              disabled={Boolean(input.trim() && sendingMessageId)}
               onClick={sendMessage}
             >
               {input.trim() ? <ArrowUp size={18} /> : voiceMode === 'idle' ? <AudioLines size={18} /> : <Square size={16} />}
@@ -804,7 +880,13 @@ Here is a concise direction:
                         <button type="button" title="Cancel" onClick={cancelEditMessage}>
                           <X size={14} />
                         </button>
-                        <button className="confirm" type="button" title="Confirm" onClick={confirmEditMessage}>
+                        <button
+                          className="confirm"
+                          type="button"
+                          title="Confirm"
+                          disabled={Boolean(sendingMessageId)}
+                          onClick={confirmEditMessage}
+                        >
                           <Check size={14} />
                         </button>
                       </>
@@ -831,7 +913,7 @@ Here is a concise direction:
                 </div>
               </div>
 
-              <div className="agent-ai-msg">
+              <div className={`agent-ai-msg ${message.status}`}>
                 {message.webSearch && (
                   <p className="agent-ai-kicker">
                     <Globe size={13} />

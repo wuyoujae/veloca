@@ -18,6 +18,7 @@ import {
   setTheme,
   type ThemeMode
 } from '../services/settings-store';
+import { sendAgentMessage, type AgentSendMessageRequest } from '../services/agent-service';
 import {
   addWorkspaceFolders,
   createDatabaseWorkspace,
@@ -91,6 +92,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:get-auto-save', () => getAutoSave());
   ipcMain.handle('settings:set-auto-save', (_event, enabled: boolean) => {
     return setAutoSave(Boolean(enabled));
+  });
+  ipcMain.handle('agent:send-message', (_event, request: AgentSendMessageRequest) => {
+    return sendAgentMessage(request);
   });
   ipcMain.handle('workspace:get', () => getWorkspaceSnapshot());
   ipcMain.handle('workspace:add-folder', async (event) => {
