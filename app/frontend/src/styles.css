@@ -362,9 +362,10 @@ button {
   align-items: flex-end;
   flex: 1;
   min-width: 0;
-  height: 44px;
+  height: 47px;
   gap: 3px;
-  padding: 6px 0 2px;
+  padding: 6px 0 7px;
+  scrollbar-gutter: stable;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -373,7 +374,7 @@ button {
 }
 
 .editor-tabs::-webkit-scrollbar {
-  height: 6px;
+  height: 4px;
 }
 
 .editor-tabs::-webkit-scrollbar-thumb {
@@ -397,7 +398,7 @@ button {
   position: relative;
   display: inline-flex;
   align-items: flex-end;
-  height: 32px;
+  height: 35px;
 }
 
 .editor-tab {
@@ -407,7 +408,7 @@ button {
   flex: 0 0 auto;
   max-width: 270px;
   min-width: 0;
-  height: 30px;
+  height: 33px;
   padding: 0 8px 0 10px;
   font-size: 12px;
   position: relative;
@@ -416,7 +417,7 @@ button {
   border-bottom-color: transparent;
   background: transparent;
   color: var(--muted-foreground);
-  cursor: pointer;
+  cursor: grab;
   transition:
     color 0.18s ease,
     background-color 0.18s ease,
@@ -450,8 +451,108 @@ button {
   background: var(--background);
 }
 
-.editor-tab.dragging {
+.editor-tab.split-target {
+  color: var(--foreground);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--info) 14%, transparent) 0 49%,
+      color-mix(in srgb, var(--foreground) 35%, transparent) 49% 51%,
+      color-mix(in srgb, var(--info) 14%, transparent) 51% 100%
+    ),
+    var(--accent);
+  border-color: color-mix(in srgb, var(--info) 62%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 18%, transparent);
+}
+
+.editor-tab.dragging,
+.editor-split-tab-item.dragging {
   opacity: 0.55;
+  cursor: grabbing;
+  transform: translateY(-1px) scale(0.98);
+}
+
+.editor-split-tab-wrapper {
+  height: 35px;
+}
+
+.editor-split-tab-group {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-width: 260px;
+  max-width: 420px;
+  height: 33px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-bottom-color: var(--background);
+  border-radius: 7px 7px 0 0;
+  background: var(--background);
+  box-shadow: 0 -1px 0 var(--border);
+  animation: editorTabEnter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.editor-split-tab-group::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--background);
+}
+
+.editor-split-tab-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 118px;
+  max-width: 210px;
+  padding: 0 8px 0 10px;
+  color: var(--muted-foreground);
+  cursor: grab;
+  font-size: 12px;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.editor-split-tab-item + .editor-split-tab-item {
+  border-left: 1px solid var(--border);
+}
+
+.editor-split-tab-item:hover,
+.editor-split-tab-item:focus-visible,
+.editor-split-tab-item.active {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  color: var(--foreground);
+}
+
+.editor-split-tab-item.active::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--foreground);
+}
+
+.editor-split-tab-item.split-target {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--info) 14%, transparent) 0 49%,
+      color-mix(in srgb, var(--foreground) 35%, transparent) 49% 51%,
+      color-mix(in srgb, var(--info) 14%, transparent) 51% 100%
+    ),
+    var(--accent);
+  color: var(--foreground);
 }
 
 .editor-tab-icon {
@@ -487,6 +588,8 @@ button {
 }
 
 .editor-tab-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -512,6 +615,9 @@ button {
 .editor-tab:hover .editor-tab-close,
 .editor-tab:focus-within .editor-tab-close,
 .editor-tab.active .editor-tab-close,
+.editor-split-tab-item:hover .editor-tab-close,
+.editor-split-tab-item:focus-within .editor-tab-close,
+.editor-split-tab-item.active .editor-tab-close,
 .editor-tab-close:focus-visible {
   opacity: 0.88;
 }
@@ -619,7 +725,12 @@ button {
   top: 100%;
   margin-top: 7px;
   z-index: 20;
-  min-width: 220px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  width: max-content;
+  max-width: 230px;
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -630,15 +741,22 @@ button {
 }
 
 .editor-mode-menu {
-  right: 82px;
+  right: 72px;
+  min-width: 172px;
+  width: 172px;
+  max-width: 172px;
 }
 
 .editor-action-menu {
   right: 8px;
+  min-width: 214px;
+  width: 214px;
+  max-width: 214px;
 }
 
 .editor-header-menu-item {
-  width: 100%;
+  width: auto;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
@@ -670,6 +788,18 @@ button {
 .editor-header-menu-icon {
   flex-shrink: 0;
   color: var(--muted-foreground);
+}
+
+.editor-mode-menu-icon.standard {
+  color: inherit;
+}
+
+.editor-mode-menu-icon.agent {
+  color: #a855f7;
+}
+
+.editor-mode-menu-icon.prompt {
+  color: #3b82f6;
 }
 
 .editor-header-menu-item:hover {
@@ -784,6 +914,18 @@ button {
   }
 }
 
+@keyframes splitEditorEnter {
+  from {
+    opacity: 0.78;
+    transform: scale(0.992);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .editor-scroll-area {
   display: flex;
   flex: 1;
@@ -795,6 +937,152 @@ button {
   overflow-x: auto;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+.editor-scroll-area.is-split-view {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+}
+
+.split-editor-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  background: var(--background);
+  animation: splitEditorEnter 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.split-editor-pane {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--background) 96%, var(--muted) 4%);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.split-editor-pane.active {
+  background: var(--background);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--info) 45%, transparent);
+}
+
+.split-editor-pane.left {
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.split-editor-resize-handle {
+  position: relative;
+  z-index: 3;
+  width: 10px;
+  min-width: 10px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--background) 88%, var(--muted) 12%);
+  cursor: col-resize;
+  transition: background-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.split-editor-resize-handle span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 34px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 42%, transparent);
+  transform: translate(-50%, -50%);
+  transition: background-color 0.16s ease, height 0.16s ease;
+}
+
+.split-editor-resize-handle:hover,
+.split-editor-resize-handle:focus-visible,
+.is-resizing-split-pane .split-editor-resize-handle {
+  background: color-mix(in srgb, var(--info) 10%, var(--background));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--info) 18%, transparent);
+}
+
+.split-editor-resize-handle:hover span,
+.split-editor-resize-handle:focus-visible span,
+.is-resizing-split-pane .split-editor-resize-handle span {
+  height: 52px;
+  background: color-mix(in srgb, var(--info) 72%, var(--foreground));
+}
+
+.is-resizing-split-pane {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.split-editor-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 88%, var(--muted) 12%);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.split-editor-pane.active .split-editor-pane-header {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--background) 94%, var(--muted) 6%);
+}
+
+.split-editor-pane-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.split-editor-pane-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.split-editor-pane-dirty {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.split-editor-pane-dirty.is-dirty {
+  background: #f59e0b;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f59e0b 22%, transparent);
+}
+
+.editor-pane-scroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: clamp(12px, 2.2vw, 30px) 0 calc(var(--statusbar-clearance) + 8px);
+  overflow: auto;
+  scroll-padding-bottom: var(--statusbar-clearance);
+  -webkit-overflow-scrolling: touch;
+}
+
+.split-pane-body {
+  max-width: none;
+  --editor-content-padding: clamp(8px, 2.4vw, 24px);
+  padding: clamp(20px, 3vw, 38px) clamp(10px, 2.8vw, 34px) calc(var(--statusbar-clearance) + 30px);
+  font-size: 15px;
+}
+
+.split-pane-body .veloca-editor,
+.split-pane-body .veloca-editor .ProseMirror {
+  min-height: 420px;
 }
 
 .markdown-body {

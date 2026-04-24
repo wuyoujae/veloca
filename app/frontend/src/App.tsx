@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent
+} from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { createPortal } from 'react-dom';
@@ -135,6 +143,7 @@ interface OpenEditorTab {
   status: SaveStatus;
 }
 
+type SplitPanePaths = [string, string];
 type EditorMode = 'standard' | 'agent' | 'prompt';
 
 interface EditorModeOption {
@@ -173,8 +182,11 @@ export function App(): JSX.Element {
   const [saveActionState, setSaveActionState] = useState<'idle' | 'saving' | 'success'>('idle');
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
   const [tabDropTargetIndex, setTabDropTargetIndex] = useState<number | null>(null);
+  const [tabSplitTargetIndex, setTabSplitTargetIndex] = useState<number | null>(null);
   const [isSplitViewEnabled, setIsSplitViewEnabled] = useState(false);
   const [splitAfterIndex, setSplitAfterIndex] = useState<number | null>(null);
+  const [splitPanePaths, setSplitPanePaths] = useState<SplitPanePaths | null>(null);
+  const [splitPaneRatio, setSplitPaneRatio] = useState(50);
   const [documentContent, setDocumentContent] = useState('');
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -197,6 +209,7 @@ export function App(): JSX.Element {
   const saveActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorTabsRef = useRef<HTMLDivElement>(null);
   const editorTabElementByPathRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const splitEditorGridRef = useRef<HTMLDivElement>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
@@ -211,6 +224,18 @@ export function App(): JSX.Element {
     () => EDITOR_MODE_OPTIONS.find((option) => option.id === activeEditorMode)?.name ?? 'Agent Mode',
     [activeEditorMode]
   );
+
+  const renderModeIcon = (modeId: EditorMode) => {
+    if (modeId === 'agent') {
+      return <Sparkles className="editor-mode-menu-icon agent" size={14} />;
+    }
+
+    if (modeId === 'prompt') {
+      return <Pencil className="editor-mode-menu-icon prompt" size={14} />;
+    }
+
+    return <FileText className="editor-mode-menu-icon standard" size={14} />;
+  };
 
   const sections = useMemo(() => {
     return parseMarkdownSections(documentContent, activeFile?.name ?? 'Untitled');
@@ -228,6 +253,36 @@ export function App(): JSX.Element {
     const preferred = splitAfterIndex ?? Math.floor(openTabs.length / 2);
     return Math.min(Math.max(preferred, 1), openTabs.length - 1);
   }, [isSplitViewEnabled, openTabs.length, splitAfterIndex]);
+
+  const splitPaneTabs = useMemo(() => {
+    if (!isSplitViewEnabled || !splitPanePaths) {
+      return null;
+    }
+
+    const leftTab = openTabs.find((tab) => tab.file.path === splitPanePaths[0]);
+    const rightTab = openTabs.find((tab) => tab.file.path === splitPanePaths[1]);
+
+    if (!leftTab || !rightTab || leftTab.file.path === rightTab.file.path) {
+      return null;
+    }
+
+    return [leftTab, rightTab] as const;
+  }, [isSplitViewEnabled, openTabs, splitPanePaths]);
+
+  const splitGroupStartIndex = useMemo(() => {
+    if (!splitPaneTabs) {
+      return -1;
+    }
+
+    const leftIndex = openTabs.findIndex((tab) => tab.file.path === splitPaneTabs[0].file.path);
+    const rightIndex = openTabs.findIndex((tab) => tab.file.path === splitPaneTabs[1].file.path);
+
+    if (leftIndex < 0 || rightIndex < 0) {
+      return -1;
+    }
+
+    return Math.min(leftIndex, rightIndex);
+  }, [openTabs, splitPaneTabs]);
 
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
@@ -248,6 +303,37 @@ export function App(): JSX.Element {
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!splitPanePaths) {
+      return;
+    }
+
+    const openPaths = new Set(openTabs.map((tab) => tab.file.path));
+    const splitStillValid =
+      splitPanePaths[0] !== splitPanePaths[1] &&
+      openPaths.has(splitPanePaths[0]) &&
+      openPaths.has(splitPanePaths[1]);
+
+    if (splitStillValid) {
+      return;
+    }
+
+    setIsSplitViewEnabled(false);
+    setSplitPanePaths(null);
+    setSplitAfterIndex(null);
+    setTabSplitTargetIndex(null);
+  }, [openTabs, splitPanePaths]);
+
+  useEffect(() => {
+    if (!activeTabPath) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      scrollTabIntoView(activeTabPath);
+    });
+  }, [activeTabPath, openTabs.length]);
 
   useEffect(() => {
     documentContentRef.current = documentContent;
@@ -382,6 +468,24 @@ export function App(): JSX.Element {
     }
   };
 
+  const clearSplitView = () => {
+    setIsSplitViewEnabled(false);
+    setSplitPanePaths(null);
+    setSplitAfterIndex(null);
+    setTabSplitTargetIndex(null);
+    setSplitPaneRatio(50);
+  };
+
+  const activateEditorTab = (tab: OpenEditorTab) => {
+    activeTabRef.current = tab;
+    documentContentRef.current = tab.draftContent;
+    setActiveTabPath(tab.file.path);
+    setDocumentContent(tab.draftContent);
+    setSaveStatus(tab.status);
+    setSidebarTab('files');
+    scrollTabIntoView(tab.file.path);
+  };
+
   const saveCurrentDocument = async () => {
     const tab = activeTabRef.current;
     const content = documentContentRef.current;
@@ -439,22 +543,37 @@ export function App(): JSX.Element {
     }
   };
 
-  const updateDocumentContent = (content: string) => {
+  const updateTabDocumentContent = (filePath: string, content: string) => {
+    const targetTab = openTabs.find((tab) => tab.file.path === filePath);
+    const nextStatus: SaveStatus = targetTab && content === targetTab.savedContent ? 'saved' : 'unsaved';
+
+    documentContentRef.current = content;
+    setActiveTabPath(filePath);
     setDocumentContent(content);
+    setSaveStatus(nextStatus);
 
-    setSaveStatus((currentStatus) => (currentStatus === 'failed' ? currentStatus : 'unsaved'));
-
-    setOpenTabs((current) =>
-      current.map((tab) =>
-        tab.file.path === activeTabPath
+    setOpenTabs((current) => {
+      const nextTabs = current.map((tab) =>
+        tab.file.path === filePath
           ? {
               ...tab,
               draftContent: content,
-              status: content === tab.savedContent ? 'saved' : 'unsaved'
+              status: (content === tab.savedContent ? 'saved' : 'unsaved') as SaveStatus
             }
           : tab
-      )
-    );
+      );
+
+      activeTabRef.current = nextTabs.find((tab) => tab.file.path === filePath) ?? activeTabRef.current;
+      return nextTabs;
+    });
+  };
+
+  const updateDocumentContent = (content: string) => {
+    if (!activeTabPath) {
+      return;
+    }
+
+    updateTabDocumentContent(activeTabPath, content);
   };
 
   const loadWorkspace = async () => {
@@ -480,6 +599,7 @@ export function App(): JSX.Element {
         setActiveTabPath(null);
         setDocumentContent('');
         setSaveStatus('saved');
+        clearSplitView();
       }
     } catch {
       showToast({
@@ -576,6 +696,7 @@ export function App(): JSX.Element {
       setActiveTabPath(null);
       setDocumentContent('');
       setSaveStatus('saved');
+      clearSplitView();
       return;
     }
 
@@ -725,11 +846,11 @@ export function App(): JSX.Element {
     const existingTab = openTabs.find((tab) => tab.file.path === filePath);
 
     if (existingTab) {
-      setActiveTabPath(filePath);
-      setDocumentContent(existingTab.draftContent);
-      setSaveStatus(existingTab.status);
-      setSidebarTab('files');
-      scrollTabIntoView(filePath);
+      if (splitPanePaths && !splitPanePaths.includes(filePath)) {
+        clearSplitView();
+      }
+
+      activateEditorTab(existingTab);
       return true;
     }
 
@@ -737,12 +858,19 @@ export function App(): JSX.Element {
 
     try {
       const file = await window.veloca.workspace.readMarkdown(filePath);
-      setOpenTabs((current) => [...current, { file, draftContent: file.content, savedContent: file.content, status: 'saved' }]);
-      setActiveTabPath(filePath);
-      setDocumentContent(file.content);
-      setSaveStatus('saved');
-      setSidebarTab('files');
-      scrollTabIntoView(filePath);
+      const nextTab: OpenEditorTab = {
+        file,
+        draftContent: file.content,
+        savedContent: file.content,
+        status: 'saved'
+      };
+
+      if (splitPanePaths && !splitPanePaths.includes(filePath)) {
+        clearSplitView();
+      }
+
+      setOpenTabs((current) => [...current, nextTab]);
+      activateEditorTab(nextTab);
       return true;
     } catch {
       showToast({
@@ -777,6 +905,10 @@ export function App(): JSX.Element {
     const remainingTabs = currentTabs.filter((tab) => tab.file.path !== filePath);
 
     setOpenTabs(remainingTabs);
+
+    if (splitPanePaths?.includes(filePath)) {
+      clearSplitView();
+    }
 
     if (activeTabPath !== filePath) {
       return;
@@ -821,8 +953,7 @@ export function App(): JSX.Element {
     setDocumentContent('');
     setSaveStatus('saved');
     setSaveActionState('idle');
-    setIsSplitViewEnabled(false);
-    setSplitAfterIndex(null);
+    clearSplitView();
     setDraggingTabIndex(null);
     setTabDropTargetIndex(null);
   };
@@ -917,16 +1048,49 @@ export function App(): JSX.Element {
     setIsModeMenuOpen(false);
   };
 
-  const setSplitEditorMode = () => {
-    setIsSplitViewEnabled((current) => {
-      if (!current && openTabs.length > 1) {
-        setSplitAfterIndex(Math.floor(openTabs.length / 2));
-      } else if (current) {
-        setSplitAfterIndex(null);
-      }
+  const enableSplitView = (
+    leftTab: OpenEditorTab,
+    rightTab: OpenEditorTab,
+    dividerIndex: number,
+    activePath = rightTab.file.path
+  ) => {
+    if (leftTab.file.path === rightTab.file.path) {
+      return;
+    }
 
-      return !current;
-    });
+    setIsSplitViewEnabled(true);
+    setSplitPanePaths([leftTab.file.path, rightTab.file.path]);
+    setSplitAfterIndex(Math.max(1, Math.min(dividerIndex, openTabs.length - 1)));
+    setSplitPaneRatio(50);
+    activateEditorTab(activePath === leftTab.file.path ? leftTab : rightTab);
+  };
+
+  const setSplitEditorMode = () => {
+    if (isSplitViewEnabled) {
+      clearSplitView();
+      setIsHeaderMenuOpen(false);
+      return;
+    }
+
+    const activeIndex = openTabs.findIndex((tab) => tab.file.path === activeTabPath);
+
+    if (activeIndex < 0 || openTabs.length < 2) {
+      setIsHeaderMenuOpen(false);
+      return;
+    }
+
+    const neighborIndex = openTabs[activeIndex + 1] ? activeIndex + 1 : activeIndex - 1;
+    const neighborTab = openTabs[neighborIndex];
+    const activeTabItem = openTabs[activeIndex];
+
+    if (activeTabItem && neighborTab) {
+      enableSplitView(
+        activeTabItem,
+        neighborTab,
+        Math.min(activeIndex + 1, openTabs.length - 1),
+        activeTabItem.file.path
+      );
+    }
 
     setIsHeaderMenuOpen(false);
   };
@@ -987,6 +1151,75 @@ export function App(): JSX.Element {
     }
   };
 
+  const getTabDragIntent = (event: DragEvent<HTMLDivElement>): 'after' | 'before' | 'split' => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeX = event.clientX - rect.left;
+    const splitStart = rect.width * 0.28;
+    const splitEnd = rect.width * 0.72;
+
+    if (relativeX >= splitStart && relativeX <= splitEnd) {
+      return 'split';
+    }
+
+    return relativeX < rect.width / 2 ? 'before' : 'after';
+  };
+
+  const splitTabsByIndex = (sourceIndex: number, targetIndex: number) => {
+    if (sourceIndex === targetIndex) {
+      return;
+    }
+
+    const sourceTab = openTabs[sourceIndex];
+    const targetTab = openTabs[targetIndex];
+
+    if (!sourceTab || !targetTab) {
+      return;
+    }
+
+    const reorderedTabs = openTabs.filter((_, index) => index !== sourceIndex);
+    const targetIndexAfterRemoval = reorderedTabs.findIndex((tab) => tab.file.path === targetTab.file.path);
+    const insertionIndex = targetIndexAfterRemoval + 1;
+    reorderedTabs.splice(insertionIndex, 0, sourceTab);
+
+    setOpenTabs(reorderedTabs);
+    setIsSplitViewEnabled(true);
+    setSplitPanePaths([targetTab.file.path, sourceTab.file.path]);
+    setSplitAfterIndex(insertionIndex);
+    activateEditorTab(sourceTab);
+  };
+
+  const startSplitPaneResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const gridElement = splitEditorGridRef.current;
+
+    if (!gridElement) {
+      return;
+    }
+
+    const resizeFromPointer = (clientX: number) => {
+      const rect = gridElement.getBoundingClientRect();
+      const nextRatio = ((clientX - rect.left) / rect.width) * 100;
+      setSplitPaneRatio(Math.min(78, Math.max(22, nextRatio)));
+    };
+
+    const handlePointerMove = (pointerEvent: PointerEvent) => {
+      resizeFromPointer(pointerEvent.clientX);
+    };
+
+    const stopResize = () => {
+      document.body.classList.remove('is-resizing-split-pane');
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    resizeFromPointer(event.clientX);
+    document.body.classList.add('is-resizing-split-pane');
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  };
+
   const onTabDragStart = (event: DragEvent<HTMLDivElement>, index: number) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(index));
@@ -1001,9 +1234,17 @@ export function App(): JSX.Element {
 
     event.preventDefault();
 
-    if (draggingTabIndex !== index) {
-      setTabDropTargetIndex(index);
+    const intent = getTabDragIntent(event);
+    event.dataTransfer.dropEffect = intent === 'split' ? 'copy' : 'move';
+
+    if (intent === 'split' && draggingTabIndex !== index) {
+      setTabSplitTargetIndex(index);
+      setTabDropTargetIndex(null);
+      return;
     }
+
+    setTabSplitTargetIndex(null);
+    setTabDropTargetIndex(intent === 'after' ? index + 1 : index);
   };
 
   const onTabDrop = (event: DragEvent<HTMLDivElement>, index: number) => {
@@ -1013,14 +1254,23 @@ export function App(): JSX.Element {
       return;
     }
 
-    reorderOpenTabs(draggingTabIndex, index);
+    const intent = getTabDragIntent(event);
+
+    if (intent === 'split' && draggingTabIndex !== index) {
+      splitTabsByIndex(draggingTabIndex, index);
+    } else {
+      reorderOpenTabs(draggingTabIndex, intent === 'after' ? index + 1 : index);
+    }
+
     setDraggingTabIndex(null);
     setTabDropTargetIndex(null);
+    setTabSplitTargetIndex(null);
   };
 
   const onTabDragEnd = () => {
     setDraggingTabIndex(null);
     setTabDropTargetIndex(null);
+    setTabSplitTargetIndex(null);
   };
 
   const onTabsDropToEnd = (event: DragEvent<HTMLDivElement>) => {
@@ -1033,6 +1283,7 @@ export function App(): JSX.Element {
     reorderOpenTabs(draggingTabIndex, openTabs.length);
     setDraggingTabIndex(null);
     setTabDropTargetIndex(null);
+    setTabSplitTargetIndex(null);
   };
 
   const onTabsDragOver = (event: DragEvent<HTMLDivElement>) => {
@@ -1041,6 +1292,8 @@ export function App(): JSX.Element {
     }
 
     event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setTabSplitTargetIndex(null);
     setTabDropTargetIndex(openTabs.length);
   };
 
@@ -1068,8 +1321,14 @@ export function App(): JSX.Element {
     const headingIndex = sections.findIndex((section) => section.id === headingId);
 
     window.requestAnimationFrame(() => {
-      const editorHeadings = document.querySelectorAll<HTMLElement>(
-        '.veloca-editor .ProseMirror h1, .veloca-editor .ProseMirror h2, .veloca-editor .ProseMirror h3, .veloca-editor .ProseMirror h4, .veloca-editor .ProseMirror h5, .veloca-editor .ProseMirror h6'
+      const activeEditorRoot = activeFile?.path
+        ? Array.from(document.querySelectorAll<HTMLElement>('.veloca-editor')).find(
+            (element) => element.dataset.filePath === activeFile.path
+          )
+        : null;
+      const headingRoot = activeEditorRoot ?? document;
+      const editorHeadings = headingRoot.querySelectorAll<HTMLElement>(
+        '.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6'
       );
       const targetHeading = headingIndex >= 0 ? editorHeadings[headingIndex] : null;
 
@@ -1309,6 +1568,42 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('keydown', saveOnShortcut);
   }, []);
 
+  const renderSplitEditorPane = (tab: OpenEditorTab, panePosition: 'left' | 'right') => {
+    const isActivePane = tab.file.path === activeTabPath;
+    const paneContent = isActivePane ? documentContent : tab.draftContent;
+
+    return (
+      <section
+        className={`split-editor-pane ${panePosition}${isActivePane ? ' active' : ''}`}
+        key={tab.file.path}
+        onMouseDown={() => {
+          if (!isActivePane) {
+            activateEditorTab(tab);
+          }
+        }}
+      >
+        <div className="split-editor-pane-header">
+          <span className="split-editor-pane-title">
+            <FileText size={13} />
+            <span>{tab.file.name}</span>
+          </span>
+          <span className={tab.status === 'unsaved' ? 'split-editor-pane-dirty is-dirty' : 'split-editor-pane-dirty'} />
+        </div>
+        <div className="editor-pane-scroll">
+          <article className={focusMode ? 'markdown-body split-pane-body focus-mode' : 'markdown-body split-pane-body'}>
+            <MarkdownEditor
+              content={paneContent}
+              filePath={tab.file.path}
+              theme={theme}
+              onChange={(content) => updateTabDocumentContent(tab.file.path, content)}
+              onToast={showToast}
+            />
+          </article>
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div className="app-shell">
       <header className="titlebar" aria-label="Window title bar" />
@@ -1396,6 +1691,100 @@ export function App(): JSX.Element {
               ) : (
                 openTabs.map((tab, index) => {
                   const isActive = tab.file.path === activeTabPath;
+                  const isSplitTab =
+                    splitPaneTabs?.some((splitTab) => splitTab.file.path === tab.file.path) ?? false;
+
+                  if (splitPaneTabs && isSplitTab) {
+                    if (index !== splitGroupStartIndex) {
+                      return null;
+                    }
+
+                    return (
+                      <div className="editor-tab-wrapper editor-split-tab-wrapper" key="split-editor-group">
+                        {tabDropTargetIndex === index && draggingTabIndex !== index && tabSplitTargetIndex === null ? (
+                          <span className="editor-tab-drop-indicator" />
+                        ) : null}
+
+                        <div
+                          className="editor-split-tab-group"
+                          ref={(element) => {
+                            if (!element) {
+                              editorTabElementByPathRef.current.delete(splitPaneTabs[0].file.path);
+                              editorTabElementByPathRef.current.delete(splitPaneTabs[1].file.path);
+                              return;
+                            }
+
+                            editorTabElementByPathRef.current.set(splitPaneTabs[0].file.path, element);
+                            editorTabElementByPathRef.current.set(splitPaneTabs[1].file.path, element);
+                          }}
+                        >
+                          {splitPaneTabs.map((splitTab, paneIndex) => {
+                            const tabIndex = openTabs.findIndex((item) => item.file.path === splitTab.file.path);
+                            const isActiveSplitTab = splitTab.file.path === activeTabPath;
+
+                            return (
+                              <div
+                                aria-label={splitTab.file.name}
+                                aria-selected={isActiveSplitTab}
+                                className={[
+                                  'editor-split-tab-item',
+                                  paneIndex === 0 ? 'left' : 'right',
+                                  isActiveSplitTab ? 'active' : '',
+                                  draggingTabIndex === tabIndex ? 'dragging' : '',
+                                  tabSplitTargetIndex === tabIndex && draggingTabIndex !== tabIndex ? 'split-target' : ''
+                                ]
+                                  .filter(Boolean)
+                                  .join(' ')}
+                                data-tab-path={splitTab.file.path}
+                                draggable
+                                key={splitTab.file.path}
+                                onClick={() => {
+                                  if (!isActiveSplitTab) {
+                                    activateEditorTab(splitTab);
+                                  }
+                                }}
+                                onDragEnd={onTabDragEnd}
+                                onDragOver={(event) => onTabDragOver(event, tabIndex)}
+                                onDragStart={(event) => onTabDragStart(event, tabIndex)}
+                                onDrop={(event) => onTabDrop(event, tabIndex)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    activateEditorTab(splitTab);
+                                  }
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                title={splitTab.file.relativePath}
+                              >
+                                <FileText className="editor-tab-icon" size={13} />
+                                <span className="editor-tab-name">{splitTab.file.name}</span>
+                                <span
+                                  className={
+                                    splitTab.status === 'unsaved'
+                                      ? 'editor-tab-dirty is-dirty'
+                                      : 'editor-tab-dirty'
+                                  }
+                                />
+                                <button
+                                  aria-label={`Close ${splitTab.file.name}`}
+                                  className="editor-tab-close"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void closeTab(splitTab.file.path);
+                                  }}
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  type="button"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div className="editor-tab-wrapper" key={tab.file.path}>
@@ -1403,14 +1792,21 @@ export function App(): JSX.Element {
                         <span className="editor-tab-split-divider" />
                       )}
 
-                      {tabDropTargetIndex === index && draggingTabIndex !== index ? (
+                      {tabDropTargetIndex === index && draggingTabIndex !== index && tabSplitTargetIndex === null ? (
                         <span className="editor-tab-drop-indicator" />
                       ) : null}
 
                       <div
                         aria-label={tab.file.name}
                         aria-selected={isActive}
-                        className={isActive ? 'editor-tab active' : 'editor-tab'}
+                        className={[
+                          'editor-tab',
+                          isActive ? 'active' : '',
+                          draggingTabIndex === index ? 'dragging' : '',
+                          tabSplitTargetIndex === index && draggingTabIndex !== index ? 'split-target' : ''
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
                         data-tab-path={tab.file.path}
                         draggable
                         ref={(element) => {
@@ -1468,7 +1864,7 @@ export function App(): JSX.Element {
                 })
               )}
 
-              {draggingTabIndex !== null && tabDropTargetIndex === openTabs.length ? (
+              {draggingTabIndex !== null && tabDropTargetIndex === openTabs.length && tabSplitTargetIndex === null ? (
                 <span className="editor-tab-drop-indicator editor-tab-drop-indicator-end" />
               ) : null}
             </div>
@@ -1535,17 +1931,18 @@ export function App(): JSX.Element {
                   {EDITOR_MODE_OPTIONS.map((mode) => {
                     const selected = mode.id === activeEditorMode;
 
-                    return (
-                      <button
-                        key={mode.id}
-                        className={`editor-header-menu-item${selected ? ' is-selected' : ''}`}
-                        type="button"
-                        onClick={() => setEditorMode(mode.id)}
-                      >
-                        <span className="editor-header-menu-label">
-                          <span className="editor-header-menu-text">{mode.name}</span>
-                        </span>
-                        {selected ? (
+                      return (
+                        <button
+                          key={mode.id}
+                          className={`editor-header-menu-item${selected ? ' is-selected' : ''}`}
+                          type="button"
+                          onClick={() => setEditorMode(mode.id)}
+                        >
+                          <span className="editor-header-menu-label">
+                            <span className="editor-header-menu-icon">{renderModeIcon(mode.id)}</span>
+                            <span className="editor-header-menu-text">{mode.name}</span>
+                          </span>
+                          {selected ? (
                           <span className="editor-header-menu-mark" />
                         ) : (
                           <span className="editor-header-menu-empty" />
@@ -1620,8 +2017,30 @@ export function App(): JSX.Element {
             </div>
           </header>
 
-          <section className="editor-scroll-area" aria-label="Markdown editor preview">
-            {activeFile ? (
+          <section
+            className={splitPaneTabs ? 'editor-scroll-area is-split-view' : 'editor-scroll-area'}
+            aria-label="Markdown editor preview"
+          >
+            {splitPaneTabs ? (
+              <div
+                className="split-editor-grid"
+                ref={splitEditorGridRef}
+                style={{
+                  gridTemplateColumns: `minmax(180px, ${splitPaneRatio}fr) 10px minmax(180px, ${100 - splitPaneRatio}fr)`
+                }}
+              >
+                {renderSplitEditorPane(splitPaneTabs[0], 'left')}
+                <button
+                  aria-label="Resize split editors"
+                  className="split-editor-resize-handle"
+                  type="button"
+                  onPointerDown={startSplitPaneResize}
+                >
+                  <span />
+                </button>
+                {renderSplitEditorPane(splitPaneTabs[1], 'right')}
+              </div>
+            ) : activeFile ? (
               <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
                 <MarkdownEditor
                   content={documentContent}
@@ -2457,7 +2876,7 @@ function MarkdownEditor({
     let frameId = 0;
     let resizeObserver: ResizeObserver | null = null;
     let observedWrapper: HTMLElement | null = null;
-    const scrollContainer = editorShellRef.current?.closest('.editor-scroll-area');
+    const scrollContainer = editorShellRef.current?.closest('.editor-pane-scroll, .editor-scroll-area');
 
     const updateObservedWrapper = (wrapper: HTMLElement | null) => {
       if (observedWrapper === wrapper) {
@@ -2736,7 +3155,7 @@ function MarkdownEditor({
       : null;
 
   return (
-    <div className="veloca-editor" ref={editorShellRef}>
+    <div className="veloca-editor" data-file-path={filePath} ref={editorShellRef}>
       {tableControlsPortal}
       <EditorContent editor={editor} />
     </div>
