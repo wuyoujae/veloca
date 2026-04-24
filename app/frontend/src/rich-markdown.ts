@@ -879,15 +879,13 @@ export const MermaidNode = Node.create({
 
   addInputRules() {
     return [
-      textblockTypeInputRule({
+      createMermaidInputRule({
         find: mermaidBacktickInputRegex,
-        type: this.type,
-        getAttributes: () => ({ code: '' })
+        type: this.type
       }),
-      textblockTypeInputRule({
+      createMermaidInputRule({
         find: mermaidTildeInputRegex,
-        type: this.type,
-        getAttributes: () => ({ code: '' })
+        type: this.type
       })
     ];
   },
@@ -1035,6 +1033,48 @@ export const MermaidNode = Node.create({
     };
   }
 });
+
+function createMermaidInputRule({ find, type }: { find: RegExp; type: Editor['schema']['nodes'][string] }): InputRule {
+  return new InputRule({
+    find,
+    handler: ({ state, range, chain }) => {
+      const paragraph = state.schema.nodes.paragraph;
+
+      if (!paragraph) {
+        return null;
+      }
+
+      const $from = state.doc.resolve(range.from);
+
+      if (!$from.parent.isTextblock) {
+        return null;
+      }
+
+      const blockStart = $from.before();
+      const blockEnd = $from.after();
+
+      chain()
+        .insertContentAt(
+          {
+            from: blockStart,
+            to: blockEnd
+          },
+          [
+            {
+              attrs: { code: '' },
+              type: type.name
+            },
+            {
+              type: paragraph.name
+            }
+          ]
+        )
+        .setTextSelection(blockStart + 2)
+        .run();
+      return null;
+    }
+  });
+}
 
 const VelocaTable = Table.extend({
   renderMarkdown(node, helpers): string {
