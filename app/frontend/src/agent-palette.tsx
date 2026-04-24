@@ -42,6 +42,15 @@ export interface AgentPaletteAnchor {
   width: number;
 }
 
+export type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
+
+export interface AgentRuntimeContext {
+  currentFilePath?: string;
+  selectedText?: string;
+  workspaceRootPath?: string;
+  workspaceType?: AgentWorkspaceType;
+}
+
 type AgentModelId = 'lite' | 'pro' | 'ultra';
 type AgentAttachmentStatus = 'uploading' | 'parsing' | 'recording' | 'ready';
 type AgentMessageStatus = 'pending' | 'complete' | 'error';
@@ -100,6 +109,7 @@ interface AgentEditingState {
 }
 
 interface AgentPaletteProps {
+  context: AgentRuntimeContext;
   onCanvasClose?: () => void;
   onCanvasOpen?: () => void;
   onToast?: (toast: { description: string; title: string; type: 'info' | 'success' }) => void;
@@ -187,7 +197,14 @@ function AgentMarkdown({ content }: { content: string }): JSX.Element {
   return <div className="agent-ai-markdown" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, visible }: AgentPaletteProps): JSX.Element {
+export function AgentPalette({
+  context,
+  onCanvasClose,
+  onCanvasOpen,
+  onToast,
+  position,
+  visible
+}: AgentPaletteProps): JSX.Element {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
   const [model, setModel] = useState<AgentModelId>('lite');
@@ -649,7 +666,8 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     prompt: string,
     nextModel: AgentModelId,
     messageAttachments: AgentAttachment[],
-    nextWebSearchEnabled: boolean
+    nextWebSearchEnabled: boolean,
+    requestContext: AgentRuntimeContext
   ) => {
     setSendingMessageId(messageId);
     let streamedAnswer = '';
@@ -668,6 +686,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
           name: attachment.name,
           status: attachment.status
         })),
+        context: requestContext,
         message: prompt,
         model: nextModel,
         sessionId,
@@ -803,7 +822,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     openCanvas();
     setEditing(null);
     scheduleScrollToLatest(true);
-    void requestAgentAnswer(sessionId, messageId, prompt, model, messageAttachments, webSearchEnabled);
+    void requestAgentAnswer(sessionId, messageId, prompt, model, messageAttachments, webSearchEnabled, context);
   };
 
   const handlePromptKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -912,7 +931,15 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     setEditing(null);
     openCanvas();
     scheduleScrollToLatest(true);
-    void requestAgentAnswer(sessionId, messageId, prompt, nextModel, editingAttachments, nextWebSearchEnabled);
+    void requestAgentAnswer(
+      sessionId,
+      messageId,
+      prompt,
+      nextModel,
+      editingAttachments,
+      nextWebSearchEnabled,
+      context
+    );
   };
 
   const removeEditingAttachment = (attachmentId: string) => {

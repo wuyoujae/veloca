@@ -212,6 +212,8 @@ VELOCA_AGENT_CONTEXT_WINDOW=128000
 
 The first integrated backend path uses OpenRouter through the package's OpenAI-compatible provider. The renderer calls `window.veloca.agent.sendMessage(...)`; the Electron main process validates the request and calls `veloca.InvokeAgent` with a simple Veloca editor system prompt. Lite / Pro / Ultra are currently UI selections only and all resolve to `VELOCA_AGENT_MODEL` until separate model routing is added.
 
+The Agent system prompt is defined by the AI context design in `docs/models/agent-context.md`. At request time, Veloca replaces runtime variables with the current local time, active file path, workspace root path, and workspace type. The selected editor text is injected as a per-turn `<selected-text>` block in the user prompt rather than as a long-lived system rule.
+
 ## Integration Direction For Veloca
 
 The current implementation uses a backend Agent service boundary:

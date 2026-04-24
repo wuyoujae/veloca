@@ -54,6 +54,7 @@ interface FileOperationResult {
 }
 
 type AgentUiModel = 'lite' | 'pro' | 'ultra';
+type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
 
 interface AgentAttachmentSummary {
   mimeType: string;
@@ -61,8 +62,16 @@ interface AgentAttachmentSummary {
   status: string;
 }
 
+interface AgentRuntimeContext {
+  currentFilePath?: string;
+  selectedText?: string;
+  workspaceRootPath?: string;
+  workspaceType?: AgentWorkspaceType;
+}
+
 interface AgentSendMessageRequest {
   attachments?: AgentAttachmentSummary[];
+  context?: AgentRuntimeContext;
   message: string;
   model: AgentUiModel;
   sessionId: string;

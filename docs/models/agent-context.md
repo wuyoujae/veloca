@@ -103,7 +103,7 @@ Use information in this priority order:
 | `${CURRENTTIME}` | 用户本机当前时间。 | 后端提交 system prompt 前替换为本地时间字符串。 |
 | `${CURRENT_FILE_PATH}` | Agent 当前工作的文件位置。 | 从当前 active file metadata 获取。 |
 | `${WORKSPACE_ROOT_PATH}` | 当前文件所在工作区根位置。 | 从当前 workspace metadata 获取。 |
-| `${WORKSPACE_TYPE}` | 当前工作区类型。 | 使用 `filesystem` 或 `database`。 |
+| `${WORKSPACE_TYPE}` | 当前工作区类型。 | 使用 `filesystem`、`database` 或无可用工作区时的 `none`。 |
 | `${SELECTED_TEXT}` | 用户唤起 Agent 时选中的文本。 | 作为独立上下文字段注入到本轮请求，不放入长期 system prompt。 |
 
 文件系统工作区和数据库工作区的路径语义不同，替换时必须保留这种差异：
@@ -123,6 +123,13 @@ Use information in this priority order:
 - 当前文件路径、工作区根路径和工作区类型只作为元数据发送。
 - Agent session 历史继续由 `otherone-agent` localfile 存储和加载，不写入 Veloca 业务 SQLite 数据。
 - 当用户的问题明显依赖工作区内容时，Agent 应优先基于可用上下文或后续 tools 查找相关信息；如果找不到必要信息，再向用户提出聚焦问题。
+
+## 当前接入状态
+
+- 前端在用户唤起 Agent 时快照当前 active file、工作区根路径、工作区类型和选中文本，并随每次 Agent 请求发送给后端。
+- 后端在调用 `otherone-agent` 前生成完整 system prompt，并将 `${CURRENTTIME}`、`${CURRENT_FILE_PATH}`、`${WORKSPACE_ROOT_PATH}` 和 `${WORKSPACE_TYPE}` 替换为真实请求值。
+- `${SELECTED_TEXT}` 不写入 system prompt，而是以 `<selected-text>` 独立块注入到本轮 user prompt 中。
+- 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
 
 ## 后续扩展
 

@@ -64,7 +64,12 @@ import {
   type WorkspaceAssetPayload,
   type WorkspaceResolvedAsset
 } from './rich-markdown';
-import { AgentPalette, type AgentPaletteAnchor } from './agent-palette';
+import {
+  AgentPalette,
+  type AgentPaletteAnchor,
+  type AgentRuntimeContext,
+  type AgentWorkspaceType
+} from './agent-palette';
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
@@ -368,6 +373,60 @@ function getActiveEditorSelectionRange(): Range | null {
   return range;
 }
 
+function getAgentWorkspaceType(activeFile: MarkdownFileContent | null, workspace: WorkspaceSnapshot): AgentWorkspaceType {
+  if (!activeFile) {
+    return 'none';
+  }
+
+  const activeNode = findNodeByPath(workspace.tree, activeFile.path);
+
+  if (activeNode?.source === 'database' || activeFile.path.startsWith('veloca-db://')) {
+    return 'database';
+  }
+
+  if (activeNode?.source === 'filesystem' || workspace.folders.some((folder) => folder.id === activeFile.workspaceFolderId)) {
+    return 'filesystem';
+  }
+
+  return 'none';
+}
+
+function getAgentWorkspaceRootPath(
+  activeFile: MarkdownFileContent | null,
+  workspace: WorkspaceSnapshot,
+  workspaceType: AgentWorkspaceType
+): string | undefined {
+  if (!activeFile) {
+    return undefined;
+  }
+
+  if (workspaceType === 'database') {
+    return `veloca-db://root/${activeFile.workspaceFolderId}`;
+  }
+
+  if (workspaceType === 'filesystem') {
+    return workspace.folders.find((folder) => folder.id === activeFile.workspaceFolderId)?.path;
+  }
+
+  return undefined;
+}
+
+function buildAgentRuntimeContext(
+  activeFile: MarkdownFileContent | null,
+  workspace: WorkspaceSnapshot,
+  selectionRange: Range | null
+): AgentRuntimeContext {
+  const workspaceType = getAgentWorkspaceType(activeFile, workspace);
+  const selectedText = selectionRange?.toString().trim();
+
+  return {
+    currentFilePath: activeFile?.path,
+    selectedText: selectedText || undefined,
+    workspaceRootPath: getAgentWorkspaceRootPath(activeFile, workspace, workspaceType),
+    workspaceType
+  };
+}
+
 function getCollapsedSelectionEndpointRect(range: Range, collapseToStart: boolean): DOMRect | null {
   const endpointRange = range.cloneRange();
   endpointRange.collapse(collapseToStart);
@@ -542,6 +601,7 @@ export function App(): JSX.Element {
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [agentPaletteOpen, setAgentPaletteOpen] = useState(false);
   const [agentPaletteAnchor, setAgentPaletteAnchor] = useState<AgentPaletteAnchor>(() => getDefaultAgentPaletteAnchor());
+  const [agentRuntimeContext, setAgentRuntimeContext] = useState<AgentRuntimeContext>({ workspaceType: 'none' });
   const [saveActionStatesByPath, setSaveActionStatesByPath] = useState<Record<string, SaveActionState>>({});
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
   const [draggingGroupIndex, setDraggingGroupIndex] = useState<number | null>(null);
@@ -671,6 +731,7 @@ export function App(): JSX.Element {
     const selectionRange = getActiveEditorSelectionRange()?.cloneRange() ?? null;
 
     agentSelectionRangeRef.current = selectionRange;
+    setAgentRuntimeContext(buildAgentRuntimeContext(activeFile, workspace, selectionRange));
     applyAgentSelectionHighlight(selectionRange);
     setAgentPaletteOpen(true);
     setIsModeMenuOpen(false);
@@ -678,7 +739,7 @@ export function App(): JSX.Element {
     setContextMenu(null);
     setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
     window.requestAnimationFrame(positionAgentPalette);
-  }, [positionAgentPalette]);
+  }, [activeFile, positionAgentPalette, workspace]);
 
   const setFileSaveActionState = (filePath: string, nextState: SaveActionState) => {
     const current = saveActionStatesRef.current;
@@ -2833,6 +2894,7 @@ export function App(): JSX.Element {
           </footer>
 
           <AgentPalette
+            context={agentRuntimeContext}
             onCanvasClose={relaxAgentPaletteAfterCanvasClose}
             onCanvasOpen={moveAgentPaletteForCanvasOpen}
             onToast={showToast}

@@ -10,8 +10,18 @@ export interface AgentAttachmentSummary {
   status: string;
 }
 
+export type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
+
+export interface AgentRuntimeContext {
+  currentFilePath?: string;
+  selectedText?: string;
+  workspaceRootPath?: string;
+  workspaceType?: AgentWorkspaceType;
+}
+
 export interface AgentSendMessageRequest {
   attachments?: AgentAttachmentSummary[];
+  context?: AgentRuntimeContext;
   message: string;
   model: AgentUiModel;
   sessionId: string;
@@ -167,25 +177,132 @@ function validateRequest(request: AgentSendMessageRequest): string {
   return prompt;
 }
 
-function buildSystemPrompt(): string {
-  return [
-    '你是 Veloca 编辑器内置的 Agent。',
-    '你擅长 Markdown 写作、内容润色、代码解释、结构整理和编辑器内协作。',
-    '请优先使用用户使用的语言回答；如果用户使用中文，就用简洁自然的中文回答。',
-    '回答要直接、可执行、不过度展开；涉及代码或 Markdown 时保持格式清晰。',
-    '如果上下文不足，请说明需要什么信息，不要编造。'
-  ].join('\n');
+function getCurrentLocalTime(): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'full',
+    timeStyle: 'long'
+  }).format(new Date());
+}
+
+function getContextValue(value: string | undefined, fallback: string): string {
+  return value?.trim() || fallback;
+}
+
+function getWorkspaceType(context?: AgentRuntimeContext): AgentWorkspaceType {
+  if (context?.workspaceType === 'database' || context?.workspaceType === 'filesystem') {
+    return context.workspaceType;
+  }
+
+  return 'none';
+}
+
+function buildSystemPrompt(context?: AgentRuntimeContext): string {
+  const replacements = {
+    CURRENTTIME: getCurrentLocalTime(),
+    CURRENT_FILE_PATH: getContextValue(context?.currentFilePath, 'No active file'),
+    WORKSPACE_ROOT_PATH: getContextValue(context?.workspaceRootPath, 'No active workspace'),
+    WORKSPACE_TYPE: getWorkspaceType(context)
+  };
+
+  return `# Veloca Agent System Prompt
+
+## Identity
+
+- You are **Veloca**, an AI agent built into the Veloca editor.
+- Veloca is a platform for system-level document writing, knowledge work, and cognitive assistance.
+- Your role is to help users think, write, revise, structure, analyze, and connect information inside their active writing workspace.
+
+## Runtime Context
+
+- **Current local time:** ${replacements.CURRENTTIME}
+- **Current file path:** ${replacements.CURRENT_FILE_PATH}
+- **Workspace root path:** ${replacements.WORKSPACE_ROOT_PATH}
+- **Workspace type:** ${replacements.WORKSPACE_TYPE}
+
+## Language Policy
+
+- Reply in the language used by the user unless the user explicitly requests another language.
+- If the user mixes languages, follow the language that best matches the user's direct instruction.
+- Keep wording professional, clear, and easy to understand.
+
+## Context Priority
+
+Use information in this priority order:
+
+1. The user's latest prompt.
+2. The selected text provided by Veloca, when available.
+3. Context you can retrieve from the current file and workspace.
+4. Conversation history from the current Agent session.
+5. Your general knowledge, only when workspace context is not required or cannot be found.
+
+## Workspace Awareness
+
+- You are working inside one active file and one active workspace.
+- For a \`filesystem\` workspace:
+  - The workspace root is a real local directory selected by the user.
+  - Related context is usually located near the current file or elsewhere under the workspace root.
+- For a \`database\` workspace:
+  - The workspace root and files are virtual Veloca database paths.
+  - Do not assume these paths exist on the local filesystem.
+  - Use platform-provided context or tools when they become available.
+- If the workspace type is \`none\`, no active workspace metadata is available for this request.
+
+## Selected Text
+
+- Veloca may provide text selected by the user when the Agent is invoked.
+- Treat selected text as highly relevant context for the user's question.
+- The selected text may be a paragraph, code block, heading section, partial sentence, table content, or mixed Markdown.
+- Do not assume selected text is the whole document.
+
+## Context-Seeking Behavior
+
+- Base your answer on the user's prompt and available workspace context.
+- When the user asks about content that likely depends on files in the workspace, look for relevant context before answering.
+- Prefer context from the active file and nearby workspace files over broad assumptions.
+- If necessary context cannot be found, ask the user a focused follow-up question instead of inventing details.
+
+<tools-use-demo>
+
+- If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
+- Use tools before making claims about project-specific structure, terminology, requirements, or prior decisions.
+- Do not claim that you searched, opened, read, or verified files unless the provided context or tools actually support that claim.
+
+</tools-use-demo>
+
+## Answer Style
+
+- Be concise, direct, and useful.
+- Preserve Markdown structure when editing or generating document content.
+- When giving revisions, prefer ready-to-use text over abstract advice.
+- When explaining, separate conclusions from assumptions.
+- If the user asks for a rewrite, provide the rewritten result first, then brief notes only when helpful.`;
 }
 
 function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): string {
   const metadata: string[] = [];
+  const context = request.context;
+  const selectedText = context?.selectedText?.trim();
+
+  metadata.push(
+    [
+      '<veloca-runtime-context>',
+      `- Current file path: ${getContextValue(context?.currentFilePath, 'No active file')}`,
+      `- Workspace root path: ${getContextValue(context?.workspaceRootPath, 'No active workspace')}`,
+      `- Workspace type: ${getWorkspaceType(context)}`,
+      '</veloca-runtime-context>'
+    ].join('\n')
+  );
+
+  if (selectedText) {
+    metadata.push(['<selected-text>', selectedText, '</selected-text>'].join('\n'));
+  }
 
   if (request.attachments?.length) {
     const attachmentList = request.attachments
       .map((attachment) => `- ${attachment.name} (${attachment.mimeType || 'unknown'}, ${attachment.status})`)
       .join('\n');
 
-    metadata.push(`用户在本轮对话中带了这些附件占位信息：\n${attachmentList}`);
+    metadata.push(`<attachments>\n${attachmentList}\n</attachments>`);
   }
 
   if (request.webSearch) {
@@ -213,7 +330,7 @@ function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolea
       model,
       provider: 'openai' as const,
       stream,
-      systemPrompt: buildSystemPrompt(),
+      systemPrompt: buildSystemPrompt(request.context),
       temperature: 0.4,
       userPrompt: buildUserPrompt(prompt, request)
     },
