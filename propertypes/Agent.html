@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - World-Class Agent Prototype</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - ULTRA PREMIUM SHADCN DESIGN 
+         */
+        :root {
+            --bg: #ffffff;
+            --fg: #09090b;
+            --surface: #f4f4f5;
+            --border: #e4e4e7;
+            --text-body: #3f3f46;
+            --text-muted: #71717a;
+            
+            --radius-lg: 1.25rem; /* 20px */
+            --radius-md: 0.75rem; /* 12px */
+            --radius-sm: 0.5rem;  /* 8px */
+
+            --model-lite-fg: #52525b; --model-lite-bg: transparent;
+            --model-pro-fg: #2563eb;  --model-pro-bg: #eff6ff;
+            --model-ultra-fg: #9333ea; --model-ultra-bg: #f3e8ff;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: #fafafa; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+
+        .editor-bg { width: 100%; max-width: 1000px; height: 100%; padding: 80px 60px; background: #fff; position: relative; border-inline: 1px solid var(--border); }
+        .text-selection { background-color: #bfdbfe; color: #000; padding: 2px 4px; border-radius: 4px; }
+
+        /* ==========================================
+           1. 核心容器 (The Agent Pallete)
+           ========================================== */
+        .agent-overlay {
+            position: absolute;
+            top: 150px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 760px;
+            background: var(--bg);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25), 0 0 0 1px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        /* ==========================================
+           2. PROMPT BOX
+           ========================================== */
+        .prompt-box {
+            padding: 20px 24px 16px 24px;
+            background: var(--bg);
+            border-radius: var(--radius-lg);
+            display: flex; flex-direction: column; position: relative; z-index: 10;
+        }
+
+        .prompt-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
+        .prompt-attachments:empty { margin-bottom: 0; }
+        .attachment-tag {
+            display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;
+        }
+        .att-close { color: var(--text-muted); cursor: pointer; display: flex; align-items: center; margin-left: 4px; transition: color 0.2s; }
+        .att-close:hover { color: var(--fg); }
+
+        .input-wrapper { position: relative; width: 100%; display: flex; align-items: center; min-height: 44px; margin-bottom: 24px; }
+        .prompt-textarea {
+            width: 100%; border: none; outline: none; resize: none; background: transparent;
+            font-family: inherit; font-size: 16px; line-height: 1.6; color: var(--fg);
+            max-height: calc(1.6em * 4); overflow-y: auto;
+        }
+        .prompt-textarea::placeholder { color: var(--text-muted); }
+
+        .voice-wave-container { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; }
+        .wave-line { width: 100%; height: 2px; background: var(--border); position: relative; display: flex; align-items: center; justify-content: center; gap: 3px; }
+        .wave-bar { width: 3px; height: 2px; background: var(--fg); border-radius: 2px; transition: height 0.1s; animation: waveform 1.2s ease-in-out infinite; }
+        .wave-bar:nth-child(even) { animation-delay: 0.2s; }
+        .wave-bar:nth-child(3n) { animation-delay: 0.4s; }
+        @keyframes waveform { 0%, 100% { height: 2px; } 50% { height: 24px; } }
+
+        .prompt-toolbar { display: flex; justify-content: space-between; align-items: center; position: relative; }
+        .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; }
+
+        .icon-btn {
+            display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+            background: transparent; border: none; border-radius: var(--radius-sm);
+            color: var(--text-muted); cursor: pointer; transition: 0.2s;
+        }
+        .icon-btn:hover { background: var(--surface); color: var(--fg); }
+
+        .model-badge {
+            display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+            background: var(--model-lite-bg); color: var(--model-lite-fg);
+            border: none; border-radius: 99px; font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s;
+        }
+        .model-badge:hover { filter: brightness(0.95); }
+
+        .main-action-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 34px; height: 34px; border-radius: var(--radius-sm); border: none; cursor: pointer; transition: all 0.2s;
+        }
+        .main-action-btn.voice { background: var(--surface); color: var(--fg); }
+        .main-action-btn.voice:hover { background: var(--border); }
+        .main-action-btn.send { background: var(--fg); color: var(--bg); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .main-action-btn.send:hover { transform: translateY(-1px); }
+
+        /* Popover Menu */
+        .popover {
+            position: absolute; top: 100%; margin-top: 8px;
+            background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md);
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); padding: 6px;
+            opacity: 0; pointer-events: none; transform: translateY(-5px); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1); z-index: 200;
+            white-space: nowrap; min-width: 140px;
+        }
+        .popover.show { opacity: 1; pointer-events: auto; transform: translateY(0); }
+        .menu-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; cursor: pointer; color: var(--fg); transition: 0.15s; }
+        .menu-item:hover { background: var(--surface); }
+        .menu-item.selected { background: #eff6ff; color: #2563eb; }
+        .menu-separator { height: 1px; background: var(--border); margin: 4px 0; }
+        
+        .dictate-icon { color: var(--text-muted); transition: color 0.2s; }
+        .dictate-icon:hover { color: var(--fg); }
+
+        /* ==========================================
+           3. CANVAS (向下展开的卷轴)
+           ========================================== */
+        .agent-canvas {
+            height: 0; overflow-y: auto; scroll-behavior: smooth; scroll-snap-type: y mandatory;
+            background-color: #fafafa; border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+            transition: height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+        }
+        .agent-canvas.open { height: 460px; border-top: 1px solid var(--border); }
+
+        /* 画布左右安全区控件 (Sticky) */
+        .canvas-control { position: sticky; top: 16px; z-index: 50; }
+        
+        .control-session { display: flex; align-items: center; gap: 4px; padding: 6px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 99px; font-size: 12px; font-weight: 600; color: var(--fg); cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .control-session:hover { background: var(--surface); }
+        
+        .control-close { position: absolute; right: 16px; top: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background: var(--bg); border: 1px solid var(--border); border-radius: 50%; color: var(--text-muted); cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+        .control-close:hover { color: var(--fg); }
+
+        /* 返回最新按钮 (悬浮在画布下方中央) */
+        .scroll-to-bottom-btn {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(10px);
+            background: var(--bg); border: 1px solid var(--border); border-radius: 99px;
+            padding: 8px 16px; font-size: 13px; font-weight: 600; color: var(--fg);
+            display: flex; align-items: center; gap: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            cursor: pointer; opacity: 0; pointer-events: none; transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 100;
+        }
+        .scroll-to-bottom-btn.show { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
+        .scroll-to-bottom-btn:hover { background: var(--surface); }
+
+        /* ==========================================
+           4. QA PAPER (纸张与消息)
+           ========================================== */
+        .qa-paper {
+            min-height: 100%; scroll-snap-align: start; position: relative;
+            padding: 60px 40px 40px 40px; 
+            display: flex; flex-direction: column; gap: 32px;
+        }
+
+        /* ✨ 极其收敛的高级渐变分割线 (仅在非第一张纸出现) ✨ */
+        .qa-paper:not(:first-child)::before {
+            content: ''; position: absolute; top: 0; left: 15%; right: 15%; height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(228, 228, 231, 0.7), transparent);
+        }
+
+        /* --- 用户消息容器 --- */
+        .user-block { display: flex; flex-direction: column; gap: 8px; margin-left: 40px; }
+        .user-bubble { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px 20px; font-size: 15px; line-height: 1.6; color: var(--fg); outline: none; transition: all 0.2s; }
+        .user-meta { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+
+        /* 便当附件 */
+        .bento-grid { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
+        .bento-item {
+            flex: 1 1 auto; max-width: 100%;
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+            background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+            font-size: 13px; font-weight: 500; position: relative;
+        }
+        .bento-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bento-delete { position: absolute; top: -6px; right: -6px; background: var(--bg); border: 1px solid var(--border); border-radius: 50%; width: 18px; height: 18px; display: none; place-items: center; cursor: pointer; color: var(--text-muted); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .bento-delete:hover { color: #ef4444; border-color: #ef4444; }
+
+        .msg-actions { display: flex; flex-shrink: 0; gap: 4px; }
+        .msg-actions button { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; border-radius: 6px; transition: 0.2s; }
+        .msg-actions button:hover { background: var(--border); color: var(--fg); }
+
+        /* 编辑模式 */
+        .user-block.is-editing .user-bubble { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); background: var(--surface); min-height: 100px; }
+        .user-block.is-editing .bento-delete { display: grid; }
+
+        /* --- AI 消息 --- */
+        .ai-msg { margin-right: 40px; font-size: 15px; line-height: 1.7; color: var(--fg); }
+        .ai-msg code { font-family: 'JetBrains Mono', monospace; font-size: 0.9em; background: var(--border); padding: 2px 4px; border-radius: 4px; }
+        .ai-msg pre { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; background: var(--bg); border: 1px solid var(--border); padding: 16px; border-radius: var(--radius-sm); overflow-x: auto; margin-top: 12px; }
+        .ai-msg ul { margin-top: 12px; margin-left: 20px; color: var(--text-body); }
+        .ai-msg li { margin-bottom: 6px; }
+
+    </style>
+</head>
+<body>
+
+    <div class="editor-bg">
+        <div class="editor-text">
+            <h1>The Future of Interfaces</h1>
+            <p>Select text and invoke the agent. <span class="text-selection">The floating palette will appear seamlessly</span>, allowing you to control models, add context, and utilize advanced voice dictation with a single click. Scroll behavior works like a charm.</p>
+        </div>
+
+        <!-- THE AGENT OVERLAY -->
+        <div class="agent-overlay" id="agentOverlay">
+            
+            <!-- PROMPT BOX -->
+            <div class="prompt-box">
+                <!-- 附件预览 -->
+                <div class="prompt-attachments" id="promptAttachments"></div>
+
+                <!-- 输入区 -->
+                <div class="input-wrapper">
+                    <textarea class="prompt-textarea" id="promptInput" rows="1" placeholder="Ask Veloca anything..."></textarea>
+                    
+                    <!-- 高级录音音轨动画 (居中) -->
+                    <div class="voice-wave-container" id="voiceWave">
+                        <div class="wave-line">
+                            <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                            <div class="wave-bar" style="height: 16px;"></div><div class="wave-bar" style="height: 24px;"></div><div class="wave-bar" style="height: 12px;"></div>
+                            <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 底部工具栏 -->
+                <div class="prompt-toolbar">
+                    <div class="toolbar-left">
+                        <!-- + 号按钮 -->
+                        <button class="icon-btn" id="btnPlus"><i data-lucide="plus" style="width: 18px; height: 18px;"></i></button>
+
+                        <!-- 模型选择徽章 -->
+                        <button class="model-badge" id="btnModel">
+                            <i data-lucide="zap" id="currentModelIcon" style="width: 14px; height: 14px;"></i>
+                            <span id="currentModelText">Lite</span>
+                            <i data-lucide="chevron-down" style="width: 12px; height: 12px; opacity: 0.5; margin-left: 2px;"></i>
+                        </button>
+
+                        <!-- Popovers -->
+                        <div class="popover" id="plusPopover" style="left: 0;">
+                            <div class="menu-item" onclick="toggleWebSearch(this)">
+                                <i data-lucide="globe" style="width: 16px; height: 16px;"></i> 
+                                <span>Web Search</span>
+                                <i data-lucide="check" class="check-icon" style="width: 14px; height: 14px; margin-left: 12px; opacity: 0;"></i>
+                            </div>
+                            <div class="menu-item"><i data-lucide="paperclip" style="width: 16px; height: 16px;"></i> <span>Upload File</span></div>
+                        </div>
+
+                        <div class="popover" id="modelPopover" style="left: 40px;">
+                            <div class="menu-item" onclick="selectModel('Lite', 'zap', 'var(--model-lite-fg)', 'var(--model-lite-bg)')">
+                                <i data-lucide="zap" style="width: 16px; height: 16px; color: var(--model-lite-fg);"></i> Lite
+                            </div>
+                            <div class="menu-item" onclick="selectModel('Pro', 'sparkles', 'var(--model-pro-fg)', 'var(--model-pro-bg)')">
+                                <i data-lucide="sparkles" style="width: 16px; height: 16px; color: var(--model-pro-fg);"></i> Pro
+                            </div>
+                            <div class="menu-item" onclick="selectModel('Ultra', 'hexagon', 'var(--model-ultra-fg)', 'var(--model-ultra-bg)')">
+                                <i data-lucide="hexagon" style="width: 16px; height: 16px; color: var(--model-ultra-fg);"></i> Ultra
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="toolbar-right">
+                        <button class="icon-btn" id="btnExpandCanvas" style="display: none;" onclick="toggleCanvas()"><i data-lucide="history" style="width: 18px; height: 18px;"></i></button>
+                        <button class="icon-btn" id="btnDictate" title="Dictate Text"><i data-lucide="mic" class="dictate-icon" style="width: 18px; height: 18px;"></i></button>
+                        <button class="main-action-btn voice" id="btnMainAction"><i data-lucide="audio-lines" id="mainActionIcon" style="width: 18px; height: 18px;"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CANVAS (向下滚出的画布) -->
+            <div class="agent-canvas" id="agentCanvas">
+                <!-- 返回底部的 FAB (基于 Canvas 内绝对定位，但在视口内可见) -->
+                <button class="scroll-to-bottom-btn" id="btnScrollBottom" onclick="scrollToLatest()">
+                    <i data-lucide="arrow-down" style="width: 14px; height: 14px;"></i> Back to latest
+                </button>
+
+                <!-- 绝对定位的控件区 -->
+                <div class="canvas-control">
+                    <!-- Session 切换与下拉框 -->
+                    <div style="position: absolute; left: 16px; top: 0;">
+                        <button class="control-session" id="btnSession">
+                            Session 1 <i data-lucide="chevron-down" style="width: 12px; height: 12px;"></i>
+                        </button>
+                        <div class="popover" id="sessionPopover" style="left: 0; min-width: 160px;">
+                            <div class="menu-item" style="color: #2563eb;"><i data-lucide="plus" style="width: 14px; height: 14px;"></i> New Session</div>
+                            <div class="menu-separator"></div>
+                            <div class="menu-item selected">Session 1</div>
+                            <div class="menu-item">API Refactoring</div>
+                            <div class="menu-item">Marketing Copy</div>
+                        </div>
+                    </div>
+                    
+                    <button class="control-close" onclick="toggleCanvas()"><i data-lucide="chevron-up" style="width: 16px; height: 16px;"></i></button>
+                </div>
+                <!-- 动态 Q&A 将填充于此 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        const promptInput = document.getElementById('promptInput');
+        const btnMainAction = document.getElementById('btnMainAction');
+        const mainActionIcon = document.getElementById('mainActionIcon');
+        const voiceWave = document.getElementById('voiceWave');
+        const agentCanvas = document.getElementById('agentCanvas');
+        const btnExpandCanvas = document.getElementById('btnExpandCanvas');
+        const btnScrollBottom = document.getElementById('btnScrollBottom');
+
+        let isVoiceMode = false;
+        let hasHistory = false;
+        let msgCount = 0; // 用于交替测试数据
+
+        /* --- 1. 输入状态控制 --- */
+        promptInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+
+            if (this.value.trim().length > 0) {
+                btnMainAction.className = 'main-action-btn send';
+                mainActionIcon.setAttribute('data-lucide', 'arrow-up');
+            } else {
+                btnMainAction.className = 'main-action-btn voice';
+                mainActionIcon.setAttribute('data-lucide', 'audio-lines');
+            }
+            lucide.createIcons();
+        });
+
+        btnMainAction.addEventListener('click', () => {
+            if (promptInput.value.trim().length === 0) {
+                isVoiceMode = !isVoiceMode;
+                if (isVoiceMode) {
+                    promptInput.style.display = 'none';
+                    voiceWave.style.display = 'flex';
+                    mainActionIcon.setAttribute('data-lucide', 'square');
+                } else {
+                    promptInput.style.display = 'block';
+                    voiceWave.style.display = 'none';
+                    mainActionIcon.setAttribute('data-lucide', 'audio-lines');
+                }
+                lucide.createIcons();
+            } else {
+                sendMessage(promptInput.value);
+                promptInput.value = '';
+                promptInput.style.height = 'auto';
+                promptInput.dispatchEvent(new Event('input')); 
+            }
+        });
+
+        /* --- 2. 所有弹出层管理 (包含 Session) --- */
+        const btnModel = document.getElementById('btnModel');
+        const btnPlus = document.getElementById('btnPlus');
+        const btnSession = document.getElementById('btnSession');
+        
+        const modelPopover = document.getElementById('modelPopover');
+        const plusPopover = document.getElementById('plusPopover');
+        const sessionPopover = document.getElementById('sessionPopover');
+
+        function closePopovers() { 
+            modelPopover.classList.remove('show'); 
+            plusPopover.classList.remove('show'); 
+            if(sessionPopover) sessionPopover.classList.remove('show');
+        }
+
+        btnModel.addEventListener('click', (e) => { e.stopPropagation(); const s = modelPopover.classList.contains('show'); closePopovers(); if(!s) modelPopover.classList.add('show'); });
+        btnPlus.addEventListener('click', (e) => { e.stopPropagation(); const s = plusPopover.classList.contains('show'); closePopovers(); if(!s) plusPopover.classList.add('show'); });
+        btnSession.addEventListener('click', (e) => { e.stopPropagation(); const s = sessionPopover.classList.contains('show'); closePopovers(); if(!s) sessionPopover.classList.add('show'); });
+        
+        document.addEventListener('click', closePopovers);
+        
+        function toggleWebSearch(el) {
+            const checkIcon = el.querySelector('.check-icon');
+            if (!el.classList.contains('selected')) {
+                el.classList.add('selected'); checkIcon.style.opacity = '1';
+            } else {
+                el.classList.remove('selected'); checkIcon.style.opacity = '0';
+            }
+            closePopovers();
+        }
+
+        function selectModel(name, icon, fg, bg) {
+            btnModel.style.color = fg; btnModel.style.backgroundColor = bg;
+            document.getElementById('currentModelText').innerText = name;
+            document.getElementById('currentModelIcon').setAttribute('data-lucide', icon);
+            lucide.createIcons(); closePopovers();
+        }
+
+        /* --- 3. 卷轴展开逻辑与 Back to latest 按钮 --- */
+        function toggleCanvas() {
+            const isOpen = agentCanvas.classList.contains('open');
+            if (isOpen) {
+                agentCanvas.classList.remove('open');
+                if(hasHistory) btnExpandCanvas.style.display = 'flex';
+                btnScrollBottom.classList.remove('show');
+            } else {
+                agentCanvas.classList.add('open');
+                btnExpandCanvas.style.display = 'none';
+                checkScroll(); // 打开时检查是否需要显示返回底部按钮
+            }
+        }
+
+        function scrollToLatest() {
+            agentCanvas.scrollTo({ top: agentCanvas.scrollHeight, behavior: 'smooth' });
+        }
+
+        function checkScroll() {
+            // 如果距离底部超过 100px 且有历史记录，则显示按钮
+            const isAtBottom = agentCanvas.scrollHeight - agentCanvas.scrollTop - agentCanvas.clientHeight < 100;
+            if (!isAtBottom && hasHistory) {
+                btnScrollBottom.classList.add('show');
+            } else {
+                btnScrollBottom.classList.remove('show');
+            }
+        }
+
+        agentCanvas.addEventListener('scroll', checkScroll);
+
+        /* --- 4. 极限数据生成测试 (Bento & Scroll) --- */
+        function sendMessage(text) {
+            msgCount++;
+            hasHistory = true;
+            if (!agentCanvas.classList.contains('open')) toggleCanvas();
+
+            const paper = document.createElement('div');
+            paper.className = 'qa-paper';
+
+            // 交替生成复杂的 AI 回复和多附件组合来测试 UI 承受能力
+            let bentoContent = '';
+            let aiContent = '';
+
+            if (msgCount % 2 === 1) {
+                bentoContent = `
+                    <div class="bento-item">
+                        <i data-lucide="file-text" style="width:14px; height:14px;"></i>
+                        <span class="bento-name">design_spec.pdf</span>
+                        <div class="bento-delete"><i data-lucide="x" style="width:10px; height:10px;"></i></div>
+                    </div>
+                    <div class="bento-item">
+                        <i data-lucide="image" style="width:14px; height:14px;"></i>
+                        <span class="bento-name">An_absurdly_long_diagram_name_that_tests_ellipsis_logic.png</span>
+                        <div class="bento-delete"><i data-lucide="x" style="width:10px; height:10px;"></i></div>
+                    </div>
+                `;
+                aiContent = `
+                    <p>I have processed the attached files. Based on <code>design_spec.pdf</code>, here are the key takeaways:</p>
+                    <ul>
+                        <li>Ensure consistent typography across all popovers.</li>
+                        <li>The Bento layout gracefully handles overflow constraints.</li>
+                    </ul>
+                    <p>Is there anything specific in the architecture diagram you'd like me to analyze?</p>
+                `;
+            } else {
+                bentoContent = `
+                    <div class="bento-item"><i data-lucide="file-code" style="width:14px; height:14px;"></i><span class="bento-name">main.rs</span><div class="bento-delete"><i data-lucide="x" style="width:10px; height:10px;"></i></div></div>
+                    <div class="bento-item"><i data-lucide="table" style="width:14px; height:14px;"></i><span class="bento-name">metrics.csv</span><div class="bento-delete"><i data-lucide="x" style="width:10px; height:10px;"></i></div></div>
+                    <div class="bento-item"><i data-lucide="file" style="width:14px; height:14px;"></i><span class="bento-name">notes.txt</span><div class="bento-delete"><i data-lucide="x" style="width:10px; height:10px;"></i></div></div>
+                `;
+                aiContent = `
+                    <p>The code analysis is complete. To fix the scroll event bottleneck in <code>main.rs</code>, we should implement a debouncer.</p>
+                    <pre><code>fn debounce(duration: u64) {\n    println!("Optimized the scroll performance!");\n    // Render logic\n}</code></pre>
+                `;
+            }
+
+            paper.innerHTML = `
+                <div class="user-block">
+                    <div class="user-bubble" contenteditable="false">${text}</div>
+                    <div class="user-meta">
+                        <div class="bento-grid">${bentoContent}</div>
+                        <div class="msg-actions">
+                            <button title="Undo"><i data-lucide="undo-2" style="width:14px; height:14px;"></i></button>
+                            <button title="Copy"><i data-lucide="copy" style="width:14px; height:14px;"></i></button>
+                            <button title="Edit" onclick="toggleEditMode(this)"><i data-lucide="pencil" style="width:14px; height:14px;"></i></button>
+                        </div>
+                    </div>
+                </div>
+                <div class="ai-msg">${aiContent}</div>
+            `;
+
+            agentCanvas.appendChild(paper);
+            lucide.createIcons();
+
+            setTimeout(scrollToLatest, 50);
+        }
+
+        window.toggleEditMode = function(btn) {
+            const userBlock = btn.closest('.user-block');
+            const isEditing = userBlock.classList.contains('is-editing');
+            const bubble = userBlock.querySelector('.user-bubble');
+            const actionsDiv = userBlock.querySelector('.msg-actions');
+
+            if (!isEditing) {
+                userBlock.classList.add('is-editing');
+                bubble.setAttribute('contenteditable', 'true');
+                bubble.focus();
+                actionsDiv.innerHTML = `
+                    <button title="Cancel" onclick="toggleEditMode(this.parentNode)"><i data-lucide="x" style="width:14px; height:14px;"></i></button>
+                    <button title="Confirm" onclick="toggleEditMode(this.parentNode)" style="background: var(--fg); color: var(--bg);"><i data-lucide="check" style="width:14px; height:14px;"></i></button>
+                `;
+            } else {
+                userBlock.classList.remove('is-editing');
+                bubble.setAttribute('contenteditable', 'false');
+                actionsDiv.innerHTML = `
+                    <button title="Undo"><i data-lucide="undo-2" style="width:14px; height:14px;"></i></button>
+                    <button title="Copy"><i data-lucide="copy" style="width:14px; height:14px;"></i></button>
+                    <button title="Edit" onclick="toggleEditMode(this)"><i data-lucide="pencil" style="width:14px; height:14px;"></i></button>
+                `;
+            }
+            lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - Ultimate Tab Group Interaction</title>
+    <!-- 引入字体与图标 -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SHADCN LIGHT THEME 
+         */
+        :root {
+            --bg: #ffffff;
+            --fg: #09090b;
+            --surface: #f4f4f5; /* Tab栏背景底色 */
+            --border: #e4e4e7;
+            --border-active: #d4d4d8; /* 激活组的外部包裹边框色 */
+            --text-muted: #71717a;
+            --text-dimmed: #a1a1aa; /* 极暗的文字，用于激活组内未选中的项 */
+            
+            --drag-indicator: #3b82f6; 
+            --merge-bg: #eff6ff;       
+            --merge-border: #bfdbfe;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--fg);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 顶部 Tab 栏容器 */
+        .tab-bar-wrapper {
+            background-color: var(--surface);
+            border-bottom: 1px solid var(--border);
+            height: 44px;
+            display: flex;
+            align-items: flex-end;
+            padding-left: 8px;
+            padding-right: 120px; 
+            position: relative;
+        }
+
+        .tabs-container {
+            display: flex;
+            align-items: flex-end;
+            height: 100%;
+            gap: 4px; /* 稍微增加组之间的间距，让包裹感更明显 */
+            overflow-x: auto;
+            scrollbar-width: none; 
+        }
+        .tabs-container::-webkit-scrollbar { display: none; }
+
+        /* ==========================================
+           核心逻辑：Tab 组 (Group)
+           现在由 Group 来负责背景和边框的渲染
+           ========================================== */
+        .tab-group {
+            display: flex;
+            align-items: flex-end;
+            height: 36px;
+            cursor: grab;
+            position: relative;
+            border-radius: 8px 8px 0 0;
+            background-color: transparent;
+            /* 预设透明边框，防止激活时发生尺寸抖动 */
+            border: 1px solid transparent; 
+            border-bottom: none;
+            transition: background-color 0.15s, border-color 0.15s;
+        }
+
+        .tab-group:active { cursor: grabbing; }
+
+        /* --- 组悬停效果 (未激活时) --- */
+        .tab-group:not(.has-active):hover {
+            background-color: rgba(228, 228, 231, 0.6);
+        }
+
+        /* --- ✨ 核心：组的激活态 (Group Active) ✨ --- */
+        /* 当组内有任意文件被选中时，整个组背景变白，外部边框亮起 */
+        .tab-group.has-active {
+            background-color: var(--bg);
+            border-color: var(--border-active); /* 外边框亮起 */
+        }
+
+        /* 盖住底部的总边框，实现与下方编辑器的无缝连通 */
+        .tab-group.has-active::after {
+            content: ''; position: absolute;
+            bottom: -1px; left: 0; right: 0;
+            height: 1px; background-color: var(--bg);
+            z-index: 10;
+        }
+
+        /* 融合组的特殊阴影反馈：激活时除了边框，顶部再加极细的立体光晕 */
+        .tab-group.merged.has-active {
+            box-shadow: 0 -2px 6px rgba(0,0,0,0.02);
+        }
+
+        /* ==========================================
+           单独的子文件 (Tab Item)
+           ========================================== */
+        .tab {
+            display: flex;
+            align-items: center;
+            height: 100%;
+            padding: 0 14px;
+            min-width: 120px;
+            max-width: 220px;
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 500;
+            user-select: none;
+            position: relative;
+            transition: color 0.2s;
+        }
+
+        .tab-content {
+            display: flex; align-items: center; gap: 8px;
+            flex: 1; overflow: hidden;
+        }
+        
+        .tab-icon { color: var(--text-light); transition: color 0.2s; flex-shrink: 0; }
+        .tab-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* --- ✨ 核心：组内的焦点控制 (Focal Dimming) ✨ --- */
+        
+        /* 1. 组处于激活状态下，当前选中的 Tab：最亮、最抢眼 */
+        .tab-group.has-active .tab.active {
+            color: var(--fg); /* 纯黑 */
+        }
+        .tab-group.has-active .tab.active .tab-icon {
+            color: var(--fg);
+        }
+
+        /* 2. 组处于激活状态下，其他未选中的 Tab：变暗淡，避免喧宾夺主 */
+        .tab-group.has-active .tab:not(.active) {
+            color: var(--text-dimmed); /* 极度压暗的浅灰色 */
+        }
+        .tab-group.has-active .tab:not(.active) .tab-icon {
+            color: var(--border-active);
+        }
+
+        /* 未选中项鼠标悬浮时稍微亮起一点点 */
+        .tab-group.has-active .tab:not(.active):hover {
+            color: var(--text-muted);
+        }
+
+        /* 组内的分割线 */
+        .tab-group.merged .tab:not(:last-child)::before {
+            content: ''; position: absolute;
+            right: 0; top: 10px; bottom: 10px; width: 1px;
+            background-color: var(--border);
+            z-index: 5;
+            transition: background-color 0.2s;
+        }
+        
+        /* 当整个组激活时，组内的分割线变得更清晰一点 */
+        .tab-group.merged.has-active .tab:not(:last-child)::before {
+            background-color: var(--border-active);
+        }
+
+        /* 关闭按钮逻辑 */
+        .tab-close {
+            display: flex; align-items: center; justify-content: center;
+            width: 18px; height: 18px; border-radius: 4px;
+            color: var(--text-light); opacity: 0;
+            transition: all 0.2s; margin-left: 6px;
+        }
+        .tab:hover .tab-close { opacity: 1; }
+        .tab-group.has-active .tab.active .tab-close { opacity: 1; }
+        .tab-close:hover { background-color: var(--surface); color: var(--fg); }
+
+        /* ==========================================
+           拖拽反馈
+           ========================================== */
+        .tab-group.is-dragging { opacity: 0.4; transform: scale(0.95); }
+        .tab-group::before { content: ''; position: absolute; pointer-events: none; opacity: 0; transition: opacity 0.1s; }
+        .tab-group.drag-insert-left::before { left: -4px; top: 4px; bottom: 4px; width: 3px; background-color: var(--drag-indicator); border-radius: 2px; opacity: 1; z-index: 20; }
+        .tab-group.drag-insert-right::before { right: -4px; top: 4px; bottom: 4px; width: 3px; background-color: var(--drag-indicator); border-radius: 2px; opacity: 1; z-index: 20; }
+        .tab-group.drag-merge { background-color: var(--merge-bg); border-color: var(--merge-border); }
+
+        /* 编辑器正文 */
+        .editor-content { flex: 1; padding: 40px; background: var(--bg); }
+        .instruction { max-width: 600px; padding: 24px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); }
+        .instruction h2 { margin-bottom: 12px; font-size: 18px; }
+        .instruction p { color: var(--text-muted); font-size: 14px; margin-bottom: 8px; line-height: 1.6;}
+    </style>
+</head>
+<body>
+
+    <div class="tab-bar-wrapper">
+        <div class="tabs-container" id="tabsContainer">
+            
+            <!-- 独立的文件 -->
+            <div class="tab-group" draggable="true" id="tab1">
+                <div class="tab" onclick="activateTab(this)">
+                    <div class="tab-content">
+                        <i data-lucide="file-text" class="tab-icon" style="width: 14px; height: 14px;"></i>
+                        <span class="tab-title">architecture.md</span>
+                    </div>
+                    <div class="tab-close"><i data-lucide="x" style="width: 12px; height: 12px;"></i></div>
+                </div>
+            </div>
+
+            <!-- 融合状态的文件组 (Merged Group) -->
+            <!-- 默认这个组处于 has-active 状态，并且里面的第一个文件处于 active 状态 -->
+            <div class="tab-group merged has-active" draggable="true" id="tab2">
+                <!-- 亮起 (Active) 的文件 -->
+                <div class="tab active" onclick="activateTab(this)">
+                    <div class="tab-content">
+                        <i data-lucide="file" class="tab-icon" style="width: 14px; height: 14px;"></i>
+                        <span class="tab-title">utils.js</span>
+                    </div>
+                    <div class="tab-close"><i data-lucide="x" style="width: 12px; height: 12px;"></i></div>
+                </div>
+                <!-- 变暗 (Dimmed) 的同组文件 -->
+                <div class="tab" onclick="activateTab(this)">
+                    <div class="tab-content">
+                        <i data-lucide="file-type" class="tab-icon" style="width: 14px; height: 14px;"></i>
+                        <span class="tab-title">types.d.ts</span>
+                    </div>
+                    <div class="tab-close"><i data-lucide="x" style="width: 12px; height: 12px;"></i></div>
+                </div>
+            </div>
+
+            <div class="tab-group" draggable="true" id="tab3">
+                <div class="tab" onclick="activateTab(this)">
+                    <div class="tab-content">
+                        <i data-lucide="file-code" class="tab-icon" style="width: 14px; height: 14px;"></i>
+                        <span class="tab-title">main.ts</span>
+                    </div>
+                    <div class="tab-close"><i data-lucide="x" style="width: 12px; height: 12px;"></i></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="editor-content">
+        <div class="instruction">
+            <h2>✨ Group Selection Spec</h2>
+            <p><strong>1. Click inside the merged group:</strong> Notice how the <b>entire block</b> gets a white background and a subtle border outlining the whole group.</p>
+            <p><strong>2. Focal Dimming:</strong> Look at the file you selected. It's stark black. Now look at the other file in the same group—it is deeply dimmed (grayed out) to eliminate visual noise.</p>
+            <p><strong>3. Seamless Bottom:</strong> The bottom border of the active group is completely removed to fuse naturally with this editor body.</p>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        /* --- 核心：激活状态切换逻辑 --- */
+        function activateTab(clickedTab) {
+            // 1. 清除所有的 active 和 has-active 状态
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-group').forEach(g => g.classList.remove('has-active'));
+
+            // 2. 为当前点击的 tab 添加 active
+            clickedTab.classList.add('active');
+
+            // 3. ✨ 最关键：找到它所在的组 (Group)，让整个组进入 has-active 状态 ✨
+            const parentGroup = clickedTab.closest('.tab-group');
+            if (parentGroup) {
+                parentGroup.classList.add('has-active');
+            }
+        }
+
+        /* --- 智能拖拽系统 (保持之前的逻辑) --- */
+        const container = document.getElementById('tabsContainer');
+        let draggedGroup = null;
+
+        function initDragEvents() {
+            const groups = document.querySelectorAll('.tab-group');
+            groups.forEach(group => {
+                group.removeEventListener('dragstart', handleDragStart);
+                group.removeEventListener('dragend', handleDragEnd);
+                group.removeEventListener('dragover', handleDragOver);
+                group.removeEventListener('dragleave', handleDragLeave);
+                group.removeEventListener('drop', handleDrop);
+
+                group.addEventListener('dragstart', handleDragStart);
+                group.addEventListener('dragend', handleDragEnd);
+                group.addEventListener('dragover', handleDragOver);
+                group.addEventListener('dragleave', handleDragLeave);
+                group.addEventListener('drop', handleDrop);
+            });
+        }
+
+        function handleDragStart(e) {
+            draggedGroup = this;
+            setTimeout(() => this.classList.add('is-dragging'), 0);
+            e.dataTransfer.effectAllowed = 'move';
+        }
+
+        function handleDragEnd(e) {
+            this.classList.remove('is-dragging');
+            draggedGroup = null;
+            clearAllDragCues();
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault(); 
+            if (this === draggedGroup) return;
+
+            const rect = this.getBoundingClientRect();
+            const percentage = (e.clientX - rect.left) / rect.width;
+            clearAllDragCues();
+
+            if (percentage < 0.25) {
+                this.classList.add('drag-insert-left');
+                this.dataset.dropAction = 'insert-left';
+            } else if (percentage > 0.75) {
+                this.classList.add('drag-insert-right');
+                this.dataset.dropAction = 'insert-right';
+            } else {
+                this.classList.add('drag-merge');
+                this.dataset.dropAction = 'merge';
+            }
+        }
+
+        function handleDragLeave(e) {
+            this.classList.remove('drag-insert-left', 'drag-insert-right', 'drag-merge');
+            delete this.dataset.dropAction;
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            if (this === draggedGroup) return;
+
+            const action = this.dataset.dropAction;
+            
+            if (action === 'insert-left') {
+                container.insertBefore(draggedGroup, this);
+            } else if (action === 'insert-right') {
+                container.insertBefore(draggedGroup, this.nextSibling);
+            } else if (action === 'merge') {
+                // 将被拖拽组内的所有 tab 塞入目标组
+                const targetGroup = this;
+                const tabsToMove = Array.from(draggedGroup.querySelectorAll('.tab'));
+                
+                tabsToMove.forEach(tab => targetGroup.appendChild(tab));
+                targetGroup.classList.add('merged');
+                
+                // 如果拖的是一个激活状态的 Tab，还要更新组的激活状态
+                if (draggedGroup.classList.contains('has-active')) {
+                    document.querySelectorAll('.tab-group').forEach(g => g.classList.remove('has-active'));
+                    targetGroup.classList.add('has-active');
+                }
+
+                if (draggedGroup.querySelectorAll('.tab').length === 0) draggedGroup.remove();
+            }
+
+            clearAllDragCues();
+            initDragEvents();
+        }
+
+        function clearAllDragCues() {
+            document.querySelectorAll('.tab-group').forEach(group => {
+                group.classList.remove('drag-insert-left', 'drag-insert-right', 'drag-merge');
+                delete group.dataset.dropAction;
+            });
+        }
+
+        // 支持横向滚动
+        container.addEventListener('wheel', (e) => {
+            if (e.deltaY !== 0) {
+                container.scrollLeft += e.deltaY;
+                e.preventDefault();
+            }
+        });
+
+        initDragEvents();
+    </script>
+</body>
+</html>
