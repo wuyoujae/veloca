@@ -30,6 +30,8 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Sparkles,
   Save,
@@ -199,6 +201,7 @@ marked.setOptions({
 export function App(): JSX.Element {
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [openTabs, setOpenTabs] = useState<OpenEditorTab[]>([]);
@@ -1770,7 +1773,7 @@ export function App(): JSX.Element {
       <header className="titlebar" aria-label="Window title bar" />
 
       <div className="app-layout">
-        <aside className="sidebar">
+        <aside className={isSidebarCollapsed ? 'sidebar collapsed' : 'sidebar'} aria-hidden={isSidebarCollapsed}>
           <div className="sidebar-header">
             <div className="tabs-list">
               <button
@@ -1801,6 +1804,7 @@ export function App(): JSX.Element {
                 onAddFolder={addWorkspaceFolder}
                 onCancelInlineRename={cancelInlineRename}
                 onCommitInlineRename={commitInlineRename}
+                onCollapseSidebar={() => setIsSidebarCollapsed(true)}
                 onCreateDatabaseWorkspace={createDatabaseWorkspace}
                 onContextMenu={openContextMenu}
                 onEditingNodeChange={updateEditingNodeName}
@@ -1824,6 +1828,19 @@ export function App(): JSX.Element {
             </button>
           </div>
         </aside>
+
+        {isSidebarCollapsed && (
+          <div className="sidebar-restore-rail" aria-label="Collapsed sidebar">
+            <button
+              className="sidebar-restore-btn"
+              type="button"
+              aria-label="Expand sidebar"
+              onClick={() => setIsSidebarCollapsed(false)}
+            >
+              <PanelLeftOpen size={17} />
+            </button>
+          </div>
+        )}
 
         <main className="editor-container">
           <header className="editor-header">
@@ -2422,6 +2439,7 @@ interface FileTreeProps {
   onAddFolder: () => void;
   onCancelInlineRename: () => void;
   onCommitInlineRename: () => void;
+  onCollapseSidebar: () => void;
   onCreateDatabaseWorkspace: () => void;
   onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
   onEditingNodeChange: (value: string) => void;
@@ -2438,6 +2456,7 @@ function FileTree({
   onAddFolder,
   onCancelInlineRename,
   onCommitInlineRename,
+  onCollapseSidebar,
   onCreateDatabaseWorkspace,
   onContextMenu,
   onEditingNodeChange,
@@ -2454,6 +2473,9 @@ function FileTree({
           </button>
           <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
             <FolderPlus size={16} />
+          </button>
+          <button className="toolbar-icon-btn" type="button" aria-label="Collapse sidebar" onClick={onCollapseSidebar}>
+            <PanelLeftClose size={16} />
           </button>
         </div>
       </div>

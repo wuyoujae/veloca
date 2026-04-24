@@ -1209,7 +1209,7 @@ function transformCalloutsForEditor(content: string): string {
       nextIndex += 1;
     }
 
-    output.push(renderCalloutHtml(blockLines, matched[1], matched[2]));
+    output.push(renderCalloutHtml(blockLines, matched.type, matched.rawTitle));
     index = nextIndex - 1;
   }
 
