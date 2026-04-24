@@ -57,8 +57,7 @@ import typescriptLanguage from 'shiki/langs/typescript.mjs';
 import vitesseLightTheme from 'shiki/themes/vitesse-light.mjs';
 
 const purifier = typeof window === 'undefined' ? null : DOMPurify(window);
-const mermaidBacktickInputRegex = /^```mermaid[\s\n]$/i;
-const mermaidTildeInputRegex = /^~~~mermaid[\s\n]$/i;
+const mermaidCommandText = '/mermaid';
 const spacedBacktickCodeBlockInputRegex = /^``` ([a-z]+)[\s\n]$/;
 const tildeCodeBlockInputRegex = /^~~~([a-z]+)?[\s\n]$/;
 const shikiTheme = 'vitesse-light';
@@ -877,19 +876,6 @@ export const MermaidNode = Node.create({
     return buildMermaidMarkdown((node.attrs as MermaidBlockAttrs).code);
   },
 
-  addInputRules() {
-    return [
-      createMermaidInputRule({
-        find: mermaidBacktickInputRegex,
-        type: this.type
-      }),
-      createMermaidInputRule({
-        find: mermaidTildeInputRegex,
-        type: this.type
-      })
-    ];
-  },
-
   addNodeView() {
     return ({ node, getPos, view }) => {
       let currentNode = node;
@@ -1035,48 +1021,6 @@ export const MermaidNode = Node.create({
   }
 });
 
-function createMermaidInputRule({ find, type }: { find: RegExp; type: Editor['schema']['nodes'][string] }): InputRule {
-  return new InputRule({
-    find,
-    handler: ({ state, range, chain }) => {
-      const paragraph = state.schema.nodes.paragraph;
-
-      if (!paragraph) {
-        return null;
-      }
-
-      const $from = state.doc.resolve(range.from);
-
-      if (!$from.parent.isTextblock) {
-        return null;
-      }
-
-      const blockStart = $from.before();
-      const blockEnd = $from.after();
-
-      chain()
-        .insertContentAt(
-          {
-            from: blockStart,
-            to: blockEnd
-          },
-          [
-            {
-              attrs: { code: '' },
-              type: type.name
-            },
-            {
-              type: paragraph.name
-            }
-          ]
-        )
-        .setNodeSelection(blockStart)
-        .run();
-      return null;
-    }
-  });
-}
-
 function focusMermaidTextarea(textarea: HTMLTextAreaElement): void {
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(() => {
@@ -1105,6 +1049,76 @@ function isMermaidControlEvent(event: Event, dom: HTMLElement): boolean {
   );
 }
 
+function insertMermaidBlockFromCommand(editor: Editor): boolean {
+  const { empty, $from, $to } = editor.state.selection;
+  const mermaidNodeType = editor.state.schema.nodes.velocaMermaid;
+  const paragraphNodeType = editor.state.schema.nodes.paragraph;
+  const command = parseMermaidCommand($from.parent.textContent);
+
+  if (
+    !empty ||
+    !$from.sameParent($to) ||
+    !mermaidNodeType ||
+    !paragraphNodeType ||
+    $from.parent.type !== paragraphNodeType ||
+    !command ||
+    $from.parentOffset !== $from.parent.content.size ||
+    !isRootParagraphContext($from)
+  ) {
+    return false;
+  }
+
+  const blockStart = $from.before();
+  const blockEnd = $from.after();
+  const mermaidNode = mermaidNodeType.create({ code: '' });
+  const paragraphNode = paragraphNodeType.create();
+
+  const transaction = command.replaceCurrent
+    ? editor.state.tr.replaceWith(blockStart, blockEnd, Fragment.fromArray([mermaidNode, paragraphNode]))
+    : editor.state.tr.replaceWith(
+        blockStart,
+        blockEnd,
+        Fragment.fromArray([
+          paragraphNodeType.create(null, command.prefix ? editor.state.schema.text(command.prefix) : undefined),
+          mermaidNode,
+          paragraphNode
+        ])
+      );
+  const mermaidPosition = command.replaceCurrent
+    ? blockStart
+    : blockStart + (paragraphNodeType.create(null, command.prefix ? editor.state.schema.text(command.prefix) : undefined).nodeSize);
+
+  transaction.setSelection(NodeSelection.create(transaction.doc, mermaidPosition));
+  editor.view.dispatch(transaction.scrollIntoView());
+  return true;
+}
+
+function parseMermaidCommand(text: string): { prefix: string; replaceCurrent: boolean } | null {
+  if (text.trim() === mermaidCommandText) {
+    return {
+      prefix: '',
+      replaceCurrent: true
+    };
+  }
+
+  const commandSuffix = ` ${mermaidCommandText}`;
+
+  if (!text.endsWith(commandSuffix)) {
+    return null;
+  }
+
+  const prefix = text.slice(0, -commandSuffix.length).trimEnd();
+
+  if (!prefix) {
+    return null;
+  }
+
+  return {
+    prefix,
+    replaceCurrent: false
+  };
+}
+
 const VelocaTable = Table.extend({
   renderMarkdown(node, helpers): string {
     return renderVelocaTableToMarkdown(node.toJSON() as JSONContent, helpers);
@@ -1125,6 +1139,25 @@ const VelocaHeading = Heading.extend({
     }
 
     return sanitizeHtml(`<h${level}>${renderMultilineHeadingHtml(content, helpers)}</h${level}>`);
+  }
+});
+
+const VelocaMermaidCommandInput = Extension.create({
+  name: 'velocaMermaidCommandInput',
+  priority: 1100,
+
+  addKeyboardShortcuts() {
+    const editor = this.editor;
+
+    return {
+      Enter: () => {
+        if (editor.view.composing) {
+          return false;
+        }
+
+        return insertMermaidBlockFromCommand(editor);
+      }
+    };
   }
 });
 
@@ -1353,6 +1386,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     TaskItem.configure({
       nested: true
     }),
+    VelocaMermaidCommandInput,
     TyporaTableInput,
     VelocaWritingBehavior,
     VelocaHardBreak,

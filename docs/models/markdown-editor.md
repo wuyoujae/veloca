@@ -39,7 +39,11 @@
 
 ## Mermaid 图表渲染
 
-- 编辑器支持标准 fenced code block 形式的 Mermaid 图表：
+- 编辑器内新增 Mermaid 图表块使用 slash command：
+  - 在根级段落输入 `/mermaid` 并按 `Enter` 时，当前段落会替换为 Mermaid 图表块；
+  - 在已有正文末尾输入 ` /mermaid` 并按 `Enter` 时，正文会保留，Mermaid 图表块会插入到下一行；
+  - `正文/mermaid`、`/mermaid extra` 或命令后继续输入其他字符时都保留为普通内容。
+- 保存后的 Markdown 仍使用标准 fenced code block 形式的 Mermaid 图表：
 
 ````markdown
 ```mermaid
