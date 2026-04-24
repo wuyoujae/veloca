@@ -33,6 +33,7 @@ import {
   Zap,
   type LucideIcon
 } from 'lucide-react';
+import { renderMarkdownToSafeHtml } from './rich-markdown';
 
 export interface AgentPaletteAnchor {
   left: number;
@@ -118,6 +119,12 @@ const attachmentStatusLabel: Record<AgentAttachmentStatus, string> = {
 const createAgentId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+function AgentMarkdown({ content }: { content: string }): JSX.Element {
+  const html = useMemo(() => renderMarkdownToSafeHtml(content), [content]);
+
+  return <div className="agent-ai-markdown" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
 export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, visible }: AgentPaletteProps): JSX.Element {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
@@ -129,6 +136,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [showScrollLatest, setShowScrollLatest] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [copiedAnswerId, setCopiedAnswerId] = useState<string | null>(null);
   const [editing, setEditing] = useState<AgentEditingState | null>(null);
   const [sendingMessageId, setSendingMessageId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<AgentSession[]>([
@@ -400,7 +408,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     setInlineDictating(true);
   };
 
-  const requestAgentAnswer = async (
+  const requestAgentAnswer = (
     sessionId: string,
     messageId: string,
     prompt: string,
@@ -409,9 +417,17 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     nextWebSearchEnabled: boolean
   ) => {
     setSendingMessageId(messageId);
+    let streamedAnswer = '';
+    let unsubscribe = () => {};
+
+    const finishRequest = () => {
+      unsubscribe();
+      setSendingMessageId((current) => (current === messageId ? null : current));
+      scheduleScrollToLatest();
+    };
 
     try {
-      const response = await window.veloca?.agent.sendMessage({
+      const payload = {
         attachments: messageAttachments.map((attachment) => ({
           mimeType: attachment.mimeType,
           name: attachment.name,
@@ -421,24 +437,75 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
         model: nextModel,
         sessionId,
         webSearch: nextWebSearchEnabled
-      });
+      };
+      const streamMessage = window.veloca?.agent.streamMessage;
 
-      if (!response) {
+      if (!streamMessage) {
         throw new Error('Veloca Agent is not available in this runtime.');
       }
 
-      updateSession(sessionId, (session) => ({
-        ...session,
-        messages: session.messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                answer: response.answer || 'Veloca returned an empty response.',
-                status: 'complete'
-              }
-            : message
-        )
-      }));
+      unsubscribe = streamMessage(payload, (event) => {
+        if (event.type === 'delta') {
+          streamedAnswer += event.content;
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    answer: streamedAnswer,
+                    status: 'pending'
+                  }
+                : message
+            )
+          }));
+          return;
+        }
+
+        if (event.type === 'tool_calls') {
+          return;
+        }
+
+        if (event.type === 'complete') {
+          const answer = event.answer || streamedAnswer || 'Veloca returned an empty response.';
+
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    answer,
+                    status: 'complete'
+                  }
+                : message
+            )
+          }));
+          finishRequest();
+          return;
+        }
+
+        if (event.type === 'error') {
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    answer: event.error,
+                    status: 'error'
+                  }
+                : message
+            )
+          }));
+          onToast?.({
+            type: 'info',
+            title: 'Agent request failed',
+            description: event.error
+          });
+          finishRequest();
+        }
+      });
     } catch (error) {
       const description = error instanceof Error ? error.message : 'Agent request failed.';
 
@@ -459,9 +526,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
         title: 'Agent request failed',
         description
       });
-    } finally {
-      setSendingMessageId((current) => (current === messageId ? null : current));
-      scheduleScrollToLatest();
+      finishRequest();
     }
   };
 
@@ -484,7 +549,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     const messageId = createAgentId('message');
     const sessionId = activeSessionId;
     const nextMessage: AgentConversation = {
-      answer: 'Veloca is thinking...',
+      answer: '',
       attachments: messageAttachments,
       id: messageId,
       model,
@@ -571,7 +636,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
         currentMessage.id === messageId
           ? {
               ...currentMessage,
-              answer: 'Veloca is thinking...',
+              answer: '',
               attachments: editingAttachments,
               prompt,
               status: 'pending'
@@ -595,12 +660,12 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     );
   };
 
-  const copyMessage = async (message: AgentConversation) => {
+  const copyTextToClipboard = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(message.prompt);
+      await navigator.clipboard.writeText(text);
     } catch {
       const textarea = document.createElement('textarea');
-      textarea.value = message.prompt;
+      textarea.value = text;
       textarea.style.position = 'fixed';
       textarea.style.opacity = '0';
       document.body.appendChild(textarea);
@@ -608,7 +673,10 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
       document.execCommand('copy');
       document.body.removeChild(textarea);
     }
+  };
 
+  const copyMessage = async (message: AgentConversation) => {
+    await copyTextToClipboard(message.prompt);
     setCopiedMessageId(message.id);
     onToast?.({
       type: 'success',
@@ -617,6 +685,23 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     });
 
     const timer = window.setTimeout(() => setCopiedMessageId(null), 1200);
+    pushTimer(timer);
+  };
+
+  const copyAnswer = async (message: AgentConversation) => {
+    if (!message.answer.trim()) {
+      return;
+    }
+
+    await copyTextToClipboard(message.answer);
+    setCopiedAnswerId(message.id);
+    onToast?.({
+      type: 'success',
+      title: 'Copied',
+      description: 'The AI response has been copied.'
+    });
+
+    const timer = window.setTimeout(() => setCopiedAnswerId(null), 1200);
     pushTimer(timer);
   };
 
@@ -914,23 +999,36 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
               </div>
 
               <div className={`agent-ai-msg ${message.status}`}>
-                {message.webSearch && (
-                  <p className="agent-ai-kicker">
-                    <Globe size={13} />
-                    Web Search context is enabled for this turn.
-                  </p>
-                )}
-                {message.answer.split('\n').map((line, index) => {
-                  if (!line.trim()) {
-                    return null;
-                  }
+                <div className="agent-ai-content">
+                  {message.webSearch && (
+                    <p className="agent-ai-kicker">
+                      <Globe size={13} />
+                      Web Search context is enabled for this turn.
+                    </p>
+                  )}
+                  {message.answer.trim() ? (
+                    <AgentMarkdown content={message.answer} />
+                  ) : (
+                    <div className="agent-typing-indicator" aria-label="Veloca is typing">
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  )}
+                </div>
 
-                  if (line.trim().startsWith('- ')) {
-                    return <li key={`${message.id}-line-${index}`}>{line.trim().slice(2)}</li>;
-                  }
-
-                  return <p key={`${message.id}-line-${index}`}>{line}</p>;
-                })}
+                <div className="agent-ai-actions">
+                  <button
+                    className={copiedAnswerId === message.id ? 'copied' : ''}
+                    type="button"
+                    title="Copy"
+                    aria-label="Copy AI response"
+                    disabled={!message.answer.trim()}
+                    onClick={() => void copyAnswer(message)}
+                  >
+                    <Copy size={14} />
+                  </button>
+                </div>
               </div>
             </section>
           );

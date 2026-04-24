@@ -1368,6 +1368,10 @@ export function transformMarkdownFromEditor(content: string): string {
   return restoreFootnotesFromEditor(restoreCalloutsFromEditor(content));
 }
 
+export function renderMarkdownToSafeHtml(content: string): string {
+  return sanitizeHtml(renderMarkdownHtml(transformMarkdownForEditor(content)));
+}
+
 const CALLOUT_OPENING_LINE_REGEXP = /^\s*>+\s*\[!([A-Z0-9_-]+)\]\s*(.*)$/i;
 const CALLOUT_CONTINUATION_PREFIX_REGEXP = /^\s*>+\s?/;
 

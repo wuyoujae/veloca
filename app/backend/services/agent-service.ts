@@ -24,6 +24,26 @@ export interface AgentSendMessageResponse {
   sessionId: string;
 }
 
+export type AgentStreamEvent =
+  | {
+      content: string;
+      model: string;
+      sessionId: string;
+      type: 'delta' | 'tool_calls';
+    }
+  | {
+      answer: string;
+      model: string;
+      sessionId: string;
+      type: 'complete';
+    }
+  | {
+      error: string;
+      model: string;
+      sessionId: string;
+      type: 'error';
+    };
+
 const defaultAgentBaseUrl = 'https://openrouter.ai/api/v1';
 const defaultAgentModel = 'google/gemini-3.1-flash-lite-preview';
 const defaultContextWindow = 128000;
@@ -146,37 +166,136 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
   return `${metadata.join('\n\n')}\n\n用户问题：\n${prompt}`;
 }
 
-export async function sendAgentMessage(request: AgentSendMessageRequest): Promise<AgentSendMessageResponse> {
+function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolean) {
   const prompt = validateRequest(request);
   const apiKey = getRequiredEnv('VELOCA_AGENT_API_KEY');
   const baseUrl = getOptionalEnv('VELOCA_AGENT_BASE_URL', defaultAgentBaseUrl);
   const model = getOptionalEnv('VELOCA_AGENT_MODEL', defaultAgentModel);
   const contextWindow = getNumberEnv('VELOCA_AGENT_CONTEXT_WINDOW', defaultContextWindow);
 
-  const response = await veloca.InvokeAgent(
-    {
-      contextLoadType: 'localfile',
-      contextWindow,
-      maxIterations: 8,
-      sessionId: request.sessionId,
-      storageType: 'localfile',
-      thresholdPercentage: 0.8
-    },
-    {
+  return {
+    ai: {
       apiKey,
       baseUrl,
       model,
-      provider: 'openai',
-      stream: false,
+      provider: 'openai' as const,
+      stream,
       systemPrompt: buildSystemPrompt(),
       temperature: 0.4,
       userPrompt: buildUserPrompt(prompt, request)
-    }
-  );
+    },
+    input: {
+      contextLoadType: 'localfile' as const,
+      contextWindow,
+      maxIterations: 8,
+      sessionId: request.sessionId,
+      storageType: 'localfile' as const,
+      thresholdPercentage: 0.8
+    },
+    model
+  };
+}
+
+function getStreamDelta(chunk: unknown): string {
+  if (!chunk || typeof chunk !== 'object') {
+    return '';
+  }
+
+  const choices = (chunk as { choices?: Array<{ delta?: { content?: unknown } }> }).choices;
+  const content = choices?.[0]?.delta?.content;
+
+  return typeof content === 'string' ? content : '';
+}
+
+function getChunkTextContent(chunk: unknown): string {
+  if (!chunk || typeof chunk !== 'object') {
+    return '';
+  }
+
+  const content = (chunk as { content?: unknown }).content;
+
+  return typeof content === 'string' ? content : '';
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Agent request failed.';
+}
+
+export async function sendAgentMessage(request: AgentSendMessageRequest): Promise<AgentSendMessageResponse> {
+  const { ai, input, model } = getAgentRuntimeOptions(request, false);
+
+  const response = await veloca.InvokeAgent(input, ai);
 
   return {
     answer: String(response?.content ?? ''),
     model,
     sessionId: request.sessionId
   };
+}
+
+export async function streamAgentMessage(
+  request: AgentSendMessageRequest,
+  emit: (event: AgentStreamEvent) => void
+): Promise<void> {
+  let model = defaultAgentModel;
+
+  try {
+    const options = getAgentRuntimeOptions(request, true);
+    model = options.model;
+
+    const stream = await veloca.InvokeAgent(options.input, options.ai);
+
+    if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
+      throw new Error('Veloca Agent did not return a stream.');
+    }
+
+    let answer = '';
+
+    for await (const chunk of stream) {
+      const chunkType = chunk && typeof chunk === 'object' ? (chunk as { type?: unknown }).type : null;
+
+      if (chunkType === 'error') {
+        const message = getChunkTextContent(chunk) || getErrorMessage((chunk as { error?: unknown }).error);
+        throw new Error(message);
+      }
+
+      if (chunkType === 'tool_calls') {
+        emit({
+          content: getChunkTextContent(chunk),
+          model,
+          sessionId: request.sessionId,
+          type: 'tool_calls'
+        });
+        continue;
+      }
+
+      const delta = getStreamDelta(chunk) || (chunkType === 'complete' ? getChunkTextContent(chunk) : '');
+
+      if (!delta) {
+        continue;
+      }
+
+      answer += delta;
+      emit({
+        content: delta,
+        model,
+        sessionId: request.sessionId,
+        type: 'delta'
+      });
+    }
+
+    emit({
+      answer,
+      model,
+      sessionId: request.sessionId,
+      type: 'complete'
+    });
+  } catch (error) {
+    emit({
+      error: getErrorMessage(error),
+      model,
+      sessionId: request.sessionId,
+      type: 'error'
+    });
+  }
 }

@@ -75,6 +75,26 @@ interface AgentSendMessageResponse {
   sessionId: string;
 }
 
+type AgentStreamEvent =
+  | {
+      content: string;
+      model: string;
+      sessionId: string;
+      type: 'delta' | 'tool_calls';
+    }
+  | {
+      answer: string;
+      model: string;
+      sessionId: string;
+      type: 'complete';
+    }
+  | {
+      error: string;
+      model: string;
+      sessionId: string;
+      type: 'error';
+    };
+
 declare global {
   interface Window {
     veloca?: {
@@ -116,6 +136,7 @@ declare global {
       };
       agent: {
         sendMessage: (payload: AgentSendMessageRequest) => Promise<AgentSendMessageResponse>;
+        streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => () => void;
         onOpenPalette: (callback: () => void) => () => void;
       };
     };

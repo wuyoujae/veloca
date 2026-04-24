@@ -1,6 +1,6 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ThemeMode } from '../services/settings-store';
-import type { AgentSendMessageRequest, AgentSendMessageResponse } from '../services/agent-service';
+import type { AgentSendMessageRequest, AgentSendMessageResponse, AgentStreamEvent } from '../services/agent-service';
 import type {
   FileOperationResult,
   MarkdownFileContent,
@@ -54,6 +54,21 @@ contextBridge.exposeInMainWorld('veloca', {
   agent: {
     sendMessage: (payload: AgentSendMessageRequest) =>
       ipcRenderer.invoke('agent:send-message', payload) as Promise<AgentSendMessageResponse>,
+    streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => {
+      const requestId = `agent-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const listener = (_event: IpcRendererEvent, event: AgentStreamEvent & { requestId?: string }) => {
+        if (event.requestId !== requestId) {
+          return;
+        }
+
+        callback(event);
+      };
+
+      ipcRenderer.on('agent:message-event', listener);
+      ipcRenderer.send('agent:send-message-stream', requestId, payload);
+
+      return () => ipcRenderer.removeListener('agent:message-event', listener);
+    },
     onOpenPalette: (callback: () => void) => {
       const listener = () => callback();
 

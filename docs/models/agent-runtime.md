@@ -33,7 +33,7 @@ Reasons:
 - The local-file storage mode writes to disk through Node `fs`.
 - Tool implementations may access local workspace or editor state and should be mediated through controlled IPC.
 
-Renderer components should call a Veloca-owned IPC/API wrapper. That wrapper should validate input, choose the model configuration, call `otherone-agent`, and stream normalized events back to the Agent UI.
+Renderer components call a Veloca-owned IPC/API wrapper. That wrapper validates input, chooses the model configuration, calls `otherone-agent`, and streams normalized events back to the Agent UI.
 
 ## Basic Local-File Session Flow
 
@@ -200,13 +200,15 @@ The first integrated backend path uses OpenRouter through the package's OpenAI-c
 
 ## Integration Direction For Veloca
 
-The current implementation starts with a backend Agent service boundary:
+The current implementation uses a backend Agent service boundary:
 
 1. Keep the current Agent UI as the renderer surface.
-2. Add an Electron IPC channel such as `agent:send-message`.
+2. Use `agent:send-message-stream` for streaming Agent responses. The legacy `agent:send-message` invoke path remains available for non-streaming calls.
 3. Resolve model selection to backend config.
-4. Call `veloca.InvokeAgent` from the main process.
-5. Normalize the response into UI events: user message stored, assistant response, completion, and error.
+4. Call `veloca.InvokeAgent` from the main process with `stream: true`.
+5. Normalize raw chunks into UI events: `delta`, `tool_calls`, `complete`, and `error`.
 6. Persist the mapping between Veloca UI sessions and `otherone-agent` session ids.
 
-This keeps the UI responsive while preserving security and leaves room to replace the package local-file storage with SQLite later. Streaming deltas and real tool execution are the next likely extension points.
+The preload layer creates a request id per send operation, listens for `agent:message-event`, filters events by request id, and returns an unsubscribe function to the renderer. The Agent palette appends each `delta` to the active AI message so the canvas updates while the model is still generating.
+
+This keeps the UI responsive while preserving security and leaves room to replace the package local-file storage with SQLite later. Real tool execution is the next likely extension point.
