@@ -9,7 +9,7 @@ import {
   type JSONContent,
   type MarkdownRendererHelpers
 } from '@tiptap/core';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { CodeBlock } from '@tiptap/extension-code-block';
 import Emoji from '@tiptap/extension-emoji';
 import FileHandler from '@tiptap/extension-file-handler';
 import HardBreak from '@tiptap/extension-hard-break';
@@ -31,7 +31,7 @@ import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import {
   CellSelection,
   TableMap,
@@ -41,14 +41,27 @@ import {
   findTable,
   selectedRect
 } from '@tiptap/pm/tables';
+import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
-import { common, createLowlight } from 'lowlight';
 import { marked } from 'marked';
+import { createHighlighterCore, type HighlighterCore, type ThemedToken } from 'shiki/core';
+import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
+import bashLanguage from 'shiki/langs/bash.mjs';
+import cssLanguage from 'shiki/langs/css.mjs';
+import htmlLanguage from 'shiki/langs/html.mjs';
+import javascriptLanguage from 'shiki/langs/javascript.mjs';
+import jsonLanguage from 'shiki/langs/json.mjs';
+import markdownLanguage from 'shiki/langs/markdown.mjs';
+import typescriptLanguage from 'shiki/langs/typescript.mjs';
+import vitesseLightTheme from 'shiki/themes/vitesse-light.mjs';
 
 const purifier = typeof window === 'undefined' ? null : DOMPurify(window);
-const lowlight = createLowlight(common);
 const spacedBacktickCodeBlockInputRegex = /^``` ([a-z]+)[\s\n]$/;
 const tildeCodeBlockInputRegex = /^~~~([a-z]+)?[\s\n]$/;
+const shikiTheme = 'vitesse-light';
+const shikiCodeBlockPluginKey = new PluginKey<DecorationSet>('velocaShikiCodeBlock');
+let shikiHighlighter: HighlighterCore | null = null;
+let shikiHighlighterPromise: Promise<HighlighterCore> | null = null;
 
 export const MEDIA_LIMITS = {
   audio: 50 * 1024 * 1024,
@@ -133,10 +146,10 @@ export const VelocaImage = Image.extend({
   }
 });
 
-const VelocaCodeBlockLowlight = CodeBlockLowlight.extend({
+const VelocaCodeBlockShiki = CodeBlock.extend({
   addProseMirrorPlugins() {
     return [
-      ...(this.parent?.() || []),
+      createShikiCodeBlockPlugin(this.name),
       new Plugin({
         props: {
           handleDOMEvents: {
@@ -169,8 +182,6 @@ const VelocaCodeBlockLowlight = CodeBlockLowlight.extend({
 
   renderHTML({ node, HTMLAttributes }) {
     const language = typeof node.attrs.language === 'string' ? node.attrs.language : null;
-    const languageClassPrefix =
-      typeof this.options.languageClassPrefix === 'string' ? this.options.languageClassPrefix : null;
 
     return [
       'pre',
@@ -216,9 +227,9 @@ const VelocaCodeBlockLowlight = CodeBlockLowlight.extend({
       [
         'code',
         mergeAttributes(
-          language && languageClassPrefix
+          language
             ? {
-                class: `${languageClassPrefix}${language}`
+                class: `language-${language}`
               }
             : {}
         ),
@@ -246,6 +257,175 @@ const VelocaCodeBlockLowlight = CodeBlockLowlight.extend({
     ];
   }
 });
+
+function getShikiHighlighter(): Promise<HighlighterCore> {
+  if (shikiHighlighter) {
+    return Promise.resolve(shikiHighlighter);
+  }
+
+  shikiHighlighterPromise ??= createHighlighterCore({
+    engine: createJavaScriptRegexEngine(),
+    langs: [
+      htmlLanguage,
+      cssLanguage,
+      javascriptLanguage,
+      typescriptLanguage,
+      jsonLanguage,
+      markdownLanguage,
+      bashLanguage
+    ],
+    themes: [vitesseLightTheme]
+  }).then((highlighter) => {
+    shikiHighlighter = highlighter;
+    return highlighter;
+  });
+
+  return shikiHighlighterPromise;
+}
+
+function createShikiCodeBlockPlugin(nodeName: string): Plugin<DecorationSet> {
+  return new Plugin<DecorationSet>({
+    key: shikiCodeBlockPluginKey,
+    state: {
+      init: (_, state) => createShikiDecorations(state.doc, nodeName),
+      apply: (transaction, decorations) => {
+        if (!transaction.docChanged && !transaction.getMeta(shikiCodeBlockPluginKey)) {
+          return decorations.map(transaction.mapping, transaction.doc);
+        }
+
+        return createShikiDecorations(transaction.doc, nodeName);
+      }
+    },
+    props: {
+      decorations: (state) => shikiCodeBlockPluginKey.getState(state) ?? DecorationSet.empty
+    },
+    view: (view) => {
+      refreshShikiDecorationsWhenReady(view);
+
+      return {
+        update: (currentView) => {
+          if (!shikiHighlighter) {
+            refreshShikiDecorationsWhenReady(currentView);
+          }
+        }
+      };
+    }
+  });
+}
+
+function refreshShikiDecorationsWhenReady(view: EditorView): void {
+  void getShikiHighlighter()
+    .then(() => {
+      if (view.isDestroyed) {
+        return;
+      }
+
+      view.dispatch(view.state.tr.setMeta(shikiCodeBlockPluginKey, true));
+    })
+    .catch(() => {
+      shikiHighlighterPromise = null;
+    });
+}
+
+function createShikiDecorations(doc: ProseMirrorNode, nodeName: string): DecorationSet {
+  const highlighter = shikiHighlighter;
+
+  if (!highlighter) {
+    return DecorationSet.empty;
+  }
+
+  const decorations: Decoration[] = [];
+
+  doc.descendants((node, position) => {
+    if (node.type.name !== nodeName) {
+      return true;
+    }
+
+    const code = node.textContent;
+    const language = getSupportedShikiLanguage(node.attrs.language, highlighter);
+
+    if (!code || !language) {
+      return false;
+    }
+
+    try {
+      const result = highlighter.codeToTokens(code, {
+        includeExplanation: 'scopeName',
+        lang: language,
+        theme: shikiTheme,
+        tokenizeMaxLineLength: 5000
+      });
+
+      result.tokens.flat().forEach((token) => {
+        if (!token.content.length) {
+          return;
+        }
+
+        decorations.push(
+          Decoration.inline(position + 1 + token.offset, position + 1 + token.offset + token.content.length, {
+            class: `veloca-shiki-token ${getShikiTokenClass(token)}`
+          })
+        );
+      });
+    } catch {
+      return false;
+    }
+
+    return false;
+  });
+
+  return DecorationSet.create(doc, decorations);
+}
+
+function getSupportedShikiLanguage(language: unknown, highlighter: HighlighterCore): string | null {
+  if (typeof language !== 'string') {
+    return null;
+  }
+
+  const normalized = language.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  try {
+    return highlighter.resolveLangAlias(normalized);
+  } catch {
+    return null;
+  }
+}
+
+function getShikiTokenClass(token: ThemedToken): string {
+  const scopes = token.explanation
+    ?.flatMap((explanation) => explanation.scopes.map((scope) => scope.scopeName))
+    .join(' ') ?? '';
+
+  if (/\bcomment\b|\bquote\b/.test(scopes)) {
+    return 'veloca-token-comment';
+  }
+
+  if (/\bstring\b/.test(scopes)) {
+    return 'veloca-token-string';
+  }
+
+  if (/\bentity\.name\.function\b|\bsupport\.function\b/.test(scopes)) {
+    return 'veloca-token-function';
+  }
+
+  if (
+    /\bkeyword\b|\bstorage\.type\b|\bentity\.name\.tag\b|\bentity\.name\.type\b|\bsupport\.type\b|\bsupport\.class\b/.test(
+      scopes
+    )
+  ) {
+    return 'veloca-token-keyword';
+  }
+
+  if (/\bentity\.other\.attribute-name\b|\bmeta\.attribute\b|\bconstant\.numeric\b|\bconstant\.language\b/.test(scopes)) {
+    return 'veloca-token-function';
+  }
+
+  return 'veloca-token-default';
+}
 
 function findCodeCopyButton(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof HTMLElement)) {
@@ -839,12 +1019,11 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     Placeholder.configure({
       placeholder: 'Start writing in Markdown...'
     }),
-      VelocaCodeBlockLowlight.configure({
+      VelocaCodeBlockShiki.configure({
         HTMLAttributes: {
           class: 'veloca-code-block'
-        },
-      lowlight
-    }),
+        }
+      }),
     Highlight,
     VelocaMarkdownInput,
     Link.configure({
