@@ -208,6 +208,8 @@ const agentPromptMinimumHeight = 188;
 const agentViewportGutter = 16;
 const agentSelectionGap = 12;
 const agentSelectionHighlightName = 'veloca-agent-selection';
+const agentPromptEdgeGap = 24;
+const agentSelectionViewportGap = 24;
 
 interface CssHighlightRegistry {
   delete: (name: string) => boolean;
@@ -295,6 +297,17 @@ function getAgentPaletteCenterLeft(editorRect: DOMRect | null, width: number): n
   return clampNumber(viewportLeft, editorRect.left + halfWidth, editorRect.right - halfWidth);
 }
 
+function getAgentPaletteMaxTop(editorRect: DOMRect | null): number {
+  if (typeof window === 'undefined') {
+    return 140;
+  }
+
+  const viewportBottom = window.innerHeight - agentPromptMinimumHeight - agentPromptEdgeGap;
+  const editorBottom = editorRect ? editorRect.bottom - agentPromptMinimumHeight - agentPromptEdgeGap : viewportBottom;
+
+  return Math.min(viewportBottom, editorBottom);
+}
+
 function getDefaultAgentPaletteAnchor(range?: Range | null): AgentPaletteAnchor {
   if (typeof window === 'undefined') {
     return {
@@ -311,7 +324,7 @@ function getDefaultAgentPaletteAnchor(range?: Range | null): AgentPaletteAnchor 
     ? editorRect.top + clampNumber(editorRect.height * 0.14, 76, 132)
     : clampNumber(window.innerHeight * 0.22, 92, 180);
   const minTop = editorRect ? editorRect.top + 54 : 54;
-  const maxTop = Math.max(minTop, window.innerHeight - agentPromptMinimumHeight - 24);
+  const maxTop = Math.max(minTop, getAgentPaletteMaxTop(editorRect));
 
   return {
     left: getAgentPaletteCenterLeft(editorRect, width),
@@ -352,6 +365,12 @@ function getLastSelectionLineRect(range: Range): DOMRect | null {
   return rects.at(-1) ?? null;
 }
 
+function getFirstSelectionLineRect(range: Range): DOMRect | null {
+  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+
+  return rects[0] ?? null;
+}
+
 function getSelectionScrollContainer(range: Range): HTMLElement | null {
   const selectionElement = getElementFromNode(range.commonAncestorContainer);
   const scrollContainer = selectionElement?.closest('.editor-pane-scroll, .editor-scroll-area');
@@ -370,7 +389,7 @@ function getAgentPaletteAnchor(rangeOverride?: Range | null): AgentPaletteAnchor
 
   const editorRect = getAgentViewportRect(range);
   const minTop = editorRect ? editorRect.top + 54 : 54;
-  const maxTop = Math.max(minTop, window.innerHeight - agentPromptMinimumHeight - 24);
+  const maxTop = Math.max(minTop, getAgentPaletteMaxTop(editorRect));
 
   return {
     ...defaultAnchor,
@@ -404,6 +423,41 @@ function scrollSelectionIntoAgentPosition(rangeOverride?: Range | null): boolean
   scrollContainer.scrollBy({
     behavior: 'smooth',
     top: scrollDelta
+  });
+
+  return true;
+}
+
+function relaxSelectionAfterCanvasClose(rangeOverride?: Range | null): boolean {
+  const range = rangeOverride === undefined ? getActiveEditorSelectionRange() : rangeOverride;
+
+  if (!range) {
+    return false;
+  }
+
+  const firstRect = getFirstSelectionLineRect(range);
+  const lastRect = getLastSelectionLineRect(range);
+  const scrollContainer = getSelectionScrollContainer(range);
+  const editorRect = getAgentViewportRect(range);
+
+  if (!firstRect || !lastRect || !scrollContainer || !editorRect) {
+    return false;
+  }
+
+  const safeSelectionTop = editorRect.top + agentSelectionViewportGap;
+  const currentPromptTop = getAgentPaletteAnchor(range).top;
+  const maxPromptTop = Math.max(editorRect.top + 54, getAgentPaletteMaxTop(editorRect));
+  const neededDownForSelection = Math.max(0, safeSelectionTop - firstRect.top);
+  const availableDownForPrompt = Math.max(0, maxPromptTop - currentPromptTop);
+  const scrollDownDistance = Math.min(neededDownForSelection, availableDownForPrompt);
+
+  if (scrollDownDistance < 4) {
+    return false;
+  }
+
+  scrollContainer.scrollBy({
+    behavior: 'smooth',
+    top: -scrollDownDistance
   });
 
   return true;
@@ -517,10 +571,27 @@ export function App(): JSX.Element {
     return [leftTab, rightTab] as const;
   }, [isSplitViewEnabled, openTabByPath, splitPanePaths]);
 
-  const positionAgentPalette = useCallback((allowScroll = false) => {
+  const positionAgentPalette = useCallback(() => {
     const selectionRange = agentSelectionRangeRef.current;
 
-    if (allowScroll && scrollSelectionIntoAgentPosition(selectionRange)) {
+    setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
+  }, []);
+
+  const moveAgentPaletteForCanvasOpen = useCallback(() => {
+    const selectionRange = agentSelectionRangeRef.current;
+
+    if (scrollSelectionIntoAgentPosition(selectionRange)) {
+      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange)), 240);
+      return;
+    }
+
+    setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
+  }, []);
+
+  const relaxAgentPaletteAfterCanvasClose = useCallback(() => {
+    const selectionRange = agentSelectionRangeRef.current;
+
+    if (relaxSelectionAfterCanvasClose(selectionRange)) {
       window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange)), 240);
       return;
     }
@@ -537,8 +608,8 @@ export function App(): JSX.Element {
     setIsModeMenuOpen(false);
     setIsHeaderMenuOpen(false);
     setContextMenu(null);
-    setAgentPaletteAnchor(getDefaultAgentPaletteAnchor(selectionRange));
-    window.requestAnimationFrame(() => positionAgentPalette(true));
+    setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
+    window.requestAnimationFrame(positionAgentPalette);
   }, [positionAgentPalette]);
 
   const setFileSaveActionState = (filePath: string, nextState: SaveActionState) => {
@@ -770,7 +841,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    const repositionAgentPalette = () => positionAgentPalette(false);
+    const repositionAgentPalette = () => positionAgentPalette();
 
     window.addEventListener('resize', repositionAgentPalette);
     return () => window.removeEventListener('resize', repositionAgentPalette);
@@ -2693,7 +2764,13 @@ export function App(): JSX.Element {
             <span>UTF-8</span>
           </footer>
 
-          <AgentPalette onToast={showToast} position={agentPaletteAnchor} visible={agentPaletteOpen} />
+          <AgentPalette
+            onCanvasClose={relaxAgentPaletteAfterCanvasClose}
+            onCanvasOpen={moveAgentPaletteForCanvasOpen}
+            onToast={showToast}
+            position={agentPaletteAnchor}
+            visible={agentPaletteOpen}
+          />
         </main>
       </div>
 

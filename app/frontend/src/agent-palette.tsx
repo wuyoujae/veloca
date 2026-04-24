@@ -74,6 +74,8 @@ interface AgentEditingState {
 }
 
 interface AgentPaletteProps {
+  onCanvasClose?: () => void;
+  onCanvasOpen?: () => void;
   onToast?: (toast: { description: string; title: string; type: 'info' | 'success' }) => void;
   position: AgentPaletteAnchor;
   visible: boolean;
@@ -114,7 +116,7 @@ const attachmentStatusLabel: Record<AgentAttachmentStatus, string> = {
 const createAgentId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-export function AgentPalette({ onToast, position, visible }: AgentPaletteProps): JSX.Element {
+export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, visible }: AgentPaletteProps): JSX.Element {
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
   const [model, setModel] = useState<AgentModelId>('lite');
@@ -247,6 +249,16 @@ export function AgentPalette({ onToast, position, visible }: AgentPaletteProps):
 
   const scheduleScrollToLatest = () => {
     window.setTimeout(scrollToLatest, 60);
+  };
+
+  const openCanvas = () => {
+    onCanvasOpen?.();
+    setCanvasOpen(true);
+  };
+
+  const closeCanvas = () => {
+    setCanvasOpen(false);
+    onCanvasClose?.();
   };
 
   const selectModel = (nextModel: AgentModelId) => {
@@ -422,7 +434,7 @@ Here is a concise direction:
     }));
     setInput('');
     setAttachments([]);
-    setCanvasOpen(true);
+    openCanvas();
     setEditing(null);
     scheduleScrollToLatest();
   };
@@ -445,7 +457,7 @@ Here is a concise direction:
 
     setSessions((current) => [...current, nextSession]);
     setActiveSessionId(nextSession.id);
-    setCanvasOpen(false);
+    closeCanvas();
     setEditing(null);
     setPopover(null);
   };
@@ -669,7 +681,7 @@ Here is a concise direction:
 
           <div className="agent-toolbar-right">
             {hasHistory && !canvasOpen && (
-              <button className="agent-icon-btn" type="button" aria-label="Open conversation history" onClick={() => setCanvasOpen(true)}>
+              <button className="agent-icon-btn" type="button" aria-label="Open conversation history" onClick={openCanvas}>
                 <History size={18} />
               </button>
             )}
@@ -738,7 +750,7 @@ Here is a concise direction:
             </div>
           </div>
 
-          <button className="agent-control-close" type="button" aria-label="Collapse conversation canvas" onClick={() => setCanvasOpen(false)}>
+          <button className="agent-control-close" type="button" aria-label="Collapse conversation canvas" onClick={closeCanvas}>
             <ChevronDown className="agent-collapse-icon" size={16} />
           </button>
         </div>
