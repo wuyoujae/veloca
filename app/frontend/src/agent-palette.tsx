@@ -38,6 +38,7 @@ export interface AgentPaletteAnchor {
   left: number;
   mode: 'center' | 'selection';
   top: number;
+  width: number;
 }
 
 type AgentModelId = 'lite' | 'pro' | 'ultra';
@@ -544,7 +545,8 @@ Here is a concise direction:
 
   const overlayStyle = {
     '--agent-left': `${position.left}px`,
-    '--agent-top': `${position.top}px`
+    '--agent-top': `${position.top}px`,
+    '--agent-width': `${position.width}px`
   } as CSSProperties;
 
   return (

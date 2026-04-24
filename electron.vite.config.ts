@@ -32,10 +32,7 @@ export default defineConfig({
     build: {
       outDir: '../../dist/frontend',
       rollupOptions: {
-        input: {
-          agent: resolve('app/frontend/agent.html'),
-          main: resolve('app/frontend/index.html')
-        }
+        input: resolve('app/frontend/index.html')
       }
     }
   }

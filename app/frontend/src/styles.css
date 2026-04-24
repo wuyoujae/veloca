@@ -80,19 +80,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.agent-window-html,
-.agent-window-body,
-.agent-window-body #root {
-  background: transparent;
-  overflow: hidden;
-}
-
-.agent-window-shell {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
-}
-
 button,
 select {
   font: inherit;
@@ -1119,6 +1106,10 @@ button {
   overflow: hidden;
 }
 
+.editor-scroll-area.has-agent-overlay:not(.is-split-view) {
+  padding-bottom: max(calc(var(--statusbar-clearance) + 8px), 340px);
+}
+
 .split-editor-grid {
   display: grid;
   width: 100%;
@@ -1280,7 +1271,7 @@ button {
   left: var(--agent-left);
   z-index: 250;
   display: flex;
-  width: min(760px, calc(100vw - 32px));
+  width: min(var(--agent-width, 760px), calc(100vw - 32px));
   max-height: calc(100vh - 32px);
   flex-direction: column;
   border-radius: var(--agent-radius-lg);

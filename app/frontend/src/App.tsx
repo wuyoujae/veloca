@@ -64,6 +64,7 @@ import {
   type WorkspaceAssetPayload,
   type WorkspaceResolvedAsset
 } from './rich-markdown';
+import { AgentPalette, type AgentPaletteAnchor } from './agent-palette';
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
@@ -162,18 +163,6 @@ interface EditorModeOption {
   name: string;
 }
 
-interface AgentViewportAnchor {
-  left: number;
-  mode: 'center' | 'selection';
-  top: number;
-}
-
-interface AgentWindowAnchor {
-  mode: 'center' | 'selection';
-  x: number;
-  y: number;
-}
-
 const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
   { id: 'standard', name: 'Standard Markdown' },
   { id: 'agent', name: 'Agent Mode' },
@@ -217,24 +206,73 @@ marked.setOptions({
 const agentPaletteWidth = 760;
 const agentPromptMinimumHeight = 188;
 const agentViewportGutter = 16;
+const agentSelectionGap = 12;
 
 function clampNumber(value: number, minimum: number, maximum: number): number {
+  if (maximum < minimum) {
+    return minimum;
+  }
+
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-function getDefaultAgentPaletteAnchor(): AgentViewportAnchor {
+function getAgentViewportRect(range?: Range | null): DOMRect | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const selectionScrollContainer = range ? getSelectionScrollContainer(range) : null;
+  const editorElement =
+    selectionScrollContainer ??
+    document.querySelector<HTMLElement>('.editor-scroll-area:not(.is-split-view), .editor-scroll-area') ??
+    document.querySelector<HTMLElement>('.editor-container');
+
+  return editorElement?.getBoundingClientRect() ?? null;
+}
+
+function getAgentPaletteWidth(editorRect: DOMRect | null): number {
+  const viewportWidth = typeof window === 'undefined' ? agentPaletteWidth : window.innerWidth;
+  const maxViewportWidth = Math.max(280, viewportWidth - agentViewportGutter * 2);
+  const maxEditorWidth = editorRect ? Math.max(280, editorRect.width - agentViewportGutter * 2) : maxViewportWidth;
+
+  return Math.min(agentPaletteWidth, maxViewportWidth, maxEditorWidth);
+}
+
+function getAgentPaletteCenterLeft(editorRect: DOMRect | null, width: number): number {
+  if (typeof window === 'undefined' || !editorRect) {
+    return width / 2;
+  }
+
+  const halfWidth = width / 2;
+  const editorCenter = editorRect.left + editorRect.width / 2;
+  const viewportLeft = clampNumber(editorCenter, halfWidth + agentViewportGutter, window.innerWidth - halfWidth - agentViewportGutter);
+
+  return clampNumber(viewportLeft, editorRect.left + halfWidth, editorRect.right - halfWidth);
+}
+
+function getDefaultAgentPaletteAnchor(range?: Range | null): AgentPaletteAnchor {
   if (typeof window === 'undefined') {
     return {
       left: agentPaletteWidth / 2,
       mode: 'center',
-      top: 140
+      top: 140,
+      width: agentPaletteWidth
     };
   }
 
+  const editorRect = getAgentViewportRect(range);
+  const width = getAgentPaletteWidth(editorRect);
+  const baseTop = editorRect
+    ? editorRect.top + clampNumber(editorRect.height * 0.14, 76, 132)
+    : clampNumber(window.innerHeight * 0.22, 92, 180);
+  const minTop = editorRect ? editorRect.top + 54 : 54;
+  const maxTop = Math.max(minTop, window.innerHeight - agentPromptMinimumHeight - 24);
+
   return {
-    left: window.innerWidth / 2,
+    left: getAgentPaletteCenterLeft(editorRect, width),
     mode: 'center',
-    top: clampNumber(window.innerHeight * 0.22, 92, 180)
+    top: clampNumber(baseTop, minTop, maxTop),
+    width
   };
 }
 
@@ -276,33 +314,27 @@ function getSelectionScrollContainer(range: Range): HTMLElement | null {
   return scrollContainer instanceof HTMLElement ? scrollContainer : null;
 }
 
-function getAgentPaletteAnchor(): AgentViewportAnchor {
+function getAgentPaletteAnchor(): AgentPaletteAnchor {
   const range = getActiveEditorSelectionRange();
   const rect = range ? getLastSelectionLineRect(range) : null;
+  const defaultAnchor = getDefaultAgentPaletteAnchor(range);
 
   if (!rect) {
-    return getDefaultAgentPaletteAnchor();
+    return defaultAnchor;
   }
 
-  const responsiveWidth = Math.min(agentPaletteWidth, window.innerWidth - agentViewportGutter * 2);
-  const halfWidth = responsiveWidth / 2;
+  const editorRect = getAgentViewportRect(range);
+  const minTop = editorRect ? editorRect.top + 54 : 54;
+  const maxTop = Math.max(minTop, window.innerHeight - agentPromptMinimumHeight - 24);
 
   return {
-    left: clampNumber(rect.left + rect.width / 2, halfWidth + agentViewportGutter, window.innerWidth - halfWidth - agentViewportGutter),
+    ...defaultAnchor,
     mode: 'selection',
-    top: Math.max(54, rect.bottom + 12)
+    top: clampNumber(rect.bottom + agentSelectionGap, minTop, maxTop)
   };
 }
 
-function toAgentWindowAnchor(anchor: AgentViewportAnchor): AgentWindowAnchor {
-  return {
-    mode: anchor.mode,
-    x: window.screenX + anchor.left,
-    y: window.screenY + anchor.top
-  };
-}
-
-function scrollSelectionIntoAgentSpace(): boolean {
+function scrollSelectionIntoAgentPosition(): boolean {
   const range = getActiveEditorSelectionRange();
 
   if (!range) {
@@ -316,15 +348,17 @@ function scrollSelectionIntoAgentSpace(): boolean {
     return false;
   }
 
-  const overflow = rect.bottom + 12 + agentPromptMinimumHeight - (window.innerHeight - 24);
+  const defaultAnchor = getDefaultAgentPaletteAnchor(range);
+  const targetLastLineBottom = defaultAnchor.top - agentSelectionGap;
+  const scrollDelta = rect.bottom - targetLastLineBottom;
 
-  if (overflow <= 0) {
+  if (Math.abs(scrollDelta) < 4) {
     return false;
   }
 
   scrollContainer.scrollBy({
     behavior: 'smooth',
-    top: overflow + 40
+    top: scrollDelta
   });
 
   return true;
@@ -343,6 +377,8 @@ export function App(): JSX.Element {
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [agentPaletteOpen, setAgentPaletteOpen] = useState(false);
+  const [agentPaletteAnchor, setAgentPaletteAnchor] = useState<AgentPaletteAnchor>(() => getDefaultAgentPaletteAnchor());
   const [saveActionStatesByPath, setSaveActionStatesByPath] = useState<Record<string, SaveActionState>>({});
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
   const [draggingGroupIndex, setDraggingGroupIndex] = useState<number | null>(null);
@@ -435,22 +471,23 @@ export function App(): JSX.Element {
     return [leftTab, rightTab] as const;
   }, [isSplitViewEnabled, openTabByPath, splitPanePaths]);
 
-  const openAgentWindow = useCallback((allowScroll = false) => {
-    setIsModeMenuOpen(false);
-    setIsHeaderMenuOpen(false);
-    setContextMenu(null);
-
-    const openWithCurrentAnchor = () => {
-      void window.veloca?.agent.open(toAgentWindowAnchor(getAgentPaletteAnchor()));
-    };
-
-    if (allowScroll && scrollSelectionIntoAgentSpace()) {
-      window.setTimeout(openWithCurrentAnchor, 180);
+  const positionAgentPalette = useCallback((allowScroll = false) => {
+    if (allowScroll && scrollSelectionIntoAgentPosition()) {
+      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor()), 240);
       return;
     }
 
-    openWithCurrentAnchor();
+    setAgentPaletteAnchor(getAgentPaletteAnchor());
   }, []);
+
+  const openAgentPalette = useCallback(() => {
+    setAgentPaletteOpen(true);
+    setIsModeMenuOpen(false);
+    setIsHeaderMenuOpen(false);
+    setContextMenu(null);
+    setAgentPaletteAnchor(getDefaultAgentPaletteAnchor(getActiveEditorSelectionRange()));
+    window.requestAnimationFrame(() => positionAgentPalette(true));
+  }, [positionAgentPalette]);
 
   const setFileSaveActionState = (filePath: string, nextState: SaveActionState) => {
     const current = saveActionStatesRef.current;
@@ -637,6 +674,7 @@ export function App(): JSX.Element {
         setSettingsOpen(false);
         setIsModeMenuOpen(false);
         setIsHeaderMenuOpen(false);
+        setAgentPaletteOpen(false);
       }
     };
 
@@ -646,23 +684,36 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const openOnAgentShortcut = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
       const isFnKey = event.key === 'Fn' || event.code === 'Fn';
+      const isFallbackShortcut = (event.metaKey || event.ctrlKey) && key === 'j';
 
-      if (!isFnKey) {
+      if (!isFnKey && !isFallbackShortcut) {
         return;
       }
 
       event.preventDefault();
-      openAgentWindow(true);
+      openAgentPalette();
     };
 
     window.addEventListener('keydown', openOnAgentShortcut);
     return () => window.removeEventListener('keydown', openOnAgentShortcut);
-  }, [openAgentWindow]);
+  }, [openAgentPalette]);
 
   useEffect(() => {
-    return window.veloca?.agent.onOpenRequest(() => openAgentWindow(true));
-  }, [openAgentWindow]);
+    return window.veloca?.agent.onOpenPalette(openAgentPalette);
+  }, [openAgentPalette]);
+
+  useEffect(() => {
+    if (!agentPaletteOpen) {
+      return;
+    }
+
+    const repositionAgentPalette = () => positionAgentPalette(false);
+
+    window.addEventListener('resize', repositionAgentPalette);
+    return () => window.removeEventListener('resize', repositionAgentPalette);
+  }, [agentPaletteOpen, positionAgentPalette]);
 
   useEffect(() => {
     loadWorkspace();
@@ -2517,7 +2568,12 @@ export function App(): JSX.Element {
           </header>
 
           <section
-            className={splitPaneTabs ? 'editor-scroll-area is-split-view' : 'editor-scroll-area'}
+            className={[
+              splitPaneTabs ? 'editor-scroll-area is-split-view' : 'editor-scroll-area',
+              agentPaletteOpen ? 'has-agent-overlay' : ''
+            ]
+              .filter(Boolean)
+              .join(' ')}
             aria-label="Markdown editor preview"
           >
             {splitPaneTabs ? (
@@ -2575,6 +2631,8 @@ export function App(): JSX.Element {
             <span>{documentContent.length} Characters</span>
             <span>UTF-8</span>
           </footer>
+
+          <AgentPalette onToast={showToast} position={agentPaletteAnchor} visible={agentPaletteOpen} />
         </main>
       </div>
 

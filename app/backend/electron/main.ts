@@ -3,13 +3,10 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
-  globalShortcut,
   ipcMain,
   net,
   protocol,
-  screen,
   shell,
-  type Input,
   type OpenDialogOptions
 } from 'electron';
 import { join } from 'node:path';
@@ -40,30 +37,7 @@ import {
   validateWorkspacePath
 } from '../services/workspace-service';
 
-interface AgentWindowAnchor {
-  mode: 'center' | 'selection';
-  x: number;
-  y: number;
-}
-
-const agentWindowMargin = 8;
-const agentWindowTopInset = 16;
-const agentWindowTargetWidth = 820;
-const agentWindowTargetHeight = 700;
-
-let mainWindowRef: BrowserWindow | null = null;
-let agentWindowRef: BrowserWindow | null = null;
-let lastAgentShortcutAt = 0;
-
-function clampNumber(value: number, minimum: number, maximum: number): number {
-  if (maximum < minimum) {
-    return minimum;
-  }
-
-  return Math.min(Math.max(value, minimum), maximum);
-}
-
-function createMainWindow(): BrowserWindow {
+function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 780,
@@ -88,151 +62,21 @@ function createMainWindow(): BrowserWindow {
   }
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (!isAgentShortcutInput(input)) {
+    const normalizedKey = input.key.toLowerCase();
+    const normalizedCode = input.code.toLowerCase();
+    const isFnKey =
+      normalizedKey === 'fn' ||
+      normalizedCode === 'fn' ||
+      normalizedKey === 'fnlock' ||
+      normalizedCode === 'fnlock';
+
+    if (input.type !== 'keyDown' || input.isAutoRepeat || !isFnKey) {
       return;
     }
 
     event.preventDefault();
-    requestAgentOpenFromRenderer(mainWindow);
+    mainWindow.webContents.send('agent:open-palette');
   });
-
-  mainWindow.on('closed', () => {
-    if (mainWindowRef === mainWindow) {
-      mainWindowRef = null;
-    }
-
-    if (agentWindowRef && !agentWindowRef.isDestroyed()) {
-      agentWindowRef.close();
-    }
-  });
-
-  mainWindowRef = mainWindow;
-  return mainWindow;
-}
-
-function createAgentWindow(): BrowserWindow {
-  const agentWindow = new BrowserWindow({
-    width: agentWindowTargetWidth,
-    height: agentWindowTargetHeight,
-    minWidth: 420,
-    minHeight: 360,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    title: 'Veloca Agent',
-    backgroundColor: '#00000000',
-    webPreferences: {
-      preload: join(__dirname, '../preload/preload.mjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false
-    }
-  });
-
-  agentWindow.setAlwaysOnTop(true, 'floating');
-
-  if (process.env.ELECTRON_RENDERER_URL) {
-    agentWindow.loadURL(`${process.env.ELECTRON_RENDERER_URL}/agent.html`);
-  } else {
-    agentWindow.loadFile(join(__dirname, '../../frontend/agent.html'));
-  }
-
-  agentWindow.on('closed', () => {
-    if (agentWindowRef === agentWindow) {
-      agentWindowRef = null;
-    }
-  });
-
-  agentWindowRef = agentWindow;
-  return agentWindow;
-}
-
-function getAgentWindowBounds(sourceWindow: BrowserWindow | null, anchor?: AgentWindowAnchor) {
-  const sourceBounds = sourceWindow?.isDestroyed() ? null : sourceWindow?.getBounds();
-  const fallbackPoint = sourceBounds
-    ? {
-        x: sourceBounds.x + sourceBounds.width / 2,
-        y: sourceBounds.y + Math.min(180, Math.max(92, sourceBounds.height * 0.22))
-      }
-    : screen.getCursorScreenPoint();
-  const targetPoint = anchor ?? {
-    mode: 'center' as const,
-    x: fallbackPoint.x,
-    y: fallbackPoint.y
-  };
-  const display = screen.getDisplayNearestPoint({
-    x: Math.round(targetPoint.x),
-    y: Math.round(targetPoint.y)
-  });
-  const workArea = display.workArea;
-  const width = Math.max(420, Math.min(agentWindowTargetWidth, workArea.width - agentWindowMargin * 2));
-  const height = Math.max(360, Math.min(agentWindowTargetHeight, workArea.height - agentWindowMargin * 2));
-  const preferredX = targetPoint.x - width / 2;
-  const preferredY = targetPoint.y - agentWindowTopInset;
-
-  return {
-    x: Math.round(
-      clampNumber(preferredX, workArea.x + agentWindowMargin, workArea.x + workArea.width - width - agentWindowMargin)
-    ),
-    y: Math.round(
-      clampNumber(preferredY, workArea.y + agentWindowMargin, workArea.y + workArea.height - height - agentWindowMargin)
-    ),
-    width: Math.round(width),
-    height: Math.round(height)
-  };
-}
-
-function showAgentWindow(sourceWindow: BrowserWindow | null, anchor?: AgentWindowAnchor): void {
-  const agentWindow = agentWindowRef && !agentWindowRef.isDestroyed() ? agentWindowRef : createAgentWindow();
-  const bounds = getAgentWindowBounds(sourceWindow, anchor);
-
-  agentWindow.setBounds(bounds, false);
-  agentWindow.show();
-  agentWindow.focus();
-}
-
-function requestAgentOpenFromRenderer(sourceWindow: BrowserWindow): void {
-  const now = Date.now();
-
-  if (now - lastAgentShortcutAt < 180) {
-    return;
-  }
-
-  lastAgentShortcutAt = now;
-  sourceWindow.webContents.send('agent:request-open');
-}
-
-function isAgentShortcutInput(input: Input): boolean {
-  const normalizedKey = input.key.toLowerCase();
-  const normalizedCode = input.code.toLowerCase();
-
-  return (
-    normalizedKey === 'fn' ||
-    normalizedCode === 'fn' ||
-    ((input.meta || input.control) && normalizedKey === 'j')
-  );
-}
-
-function registerAgentShortcuts(): void {
-  const shortcuts = ['CommandOrControl+J', 'Fn'];
-
-  for (const shortcut of shortcuts) {
-    try {
-      globalShortcut.register(shortcut, () => {
-        if (mainWindowRef && !mainWindowRef.isDestroyed()) {
-          requestAgentOpenFromRenderer(mainWindowRef);
-          return;
-        }
-
-        showAgentWindow(null);
-      });
-    } catch {
-      // Some platforms do not expose Fn as an Electron accelerator.
-    }
-  }
 }
 
 function registerIpcHandlers(): void {
@@ -325,15 +169,6 @@ function registerIpcHandlers(): void {
     const resolvedPath = validateWorkspacePath(filePath);
     clipboard.writeText(resolvedPath);
   });
-  ipcMain.handle('agent:open', (event, anchor?: AgentWindowAnchor) => {
-    const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindowRef;
-    showAgentWindow(sourceWindow, anchor);
-  });
-  ipcMain.handle('agent:close', () => {
-    if (agentWindowRef && !agentWindowRef.isDestroyed()) {
-      agentWindowRef.hide();
-    }
-  });
 }
 
 function registerAssetProtocol(): void {
@@ -371,7 +206,6 @@ app.whenReady().then(() => {
   getDatabase();
   registerIpcHandlers();
   registerAssetProtocol();
-  registerAgentShortcuts();
   createMainWindow();
 
   app.on('activate', () => {
@@ -388,6 +222,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
-  globalShortcut.unregisterAll();
   closeDatabase();
 });
