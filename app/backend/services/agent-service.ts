@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { basename, join, relative, sep } from 'node:path';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { veloca } from 'otherone-agent';
 import { getWorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
 
@@ -74,6 +75,11 @@ export type AgentStreamEvent =
 const defaultAgentBaseUrl = 'https://openrouter.ai/api/v1';
 const defaultAgentModel = 'google/gemini-3.1-flash-lite-preview';
 const defaultContextWindow = 128000;
+const bashDefaultTimeoutMs = 10000;
+const bashMaxCommandLength = 2000;
+const bashMaxOutputBytes = 16384;
+const bashMaxTimeoutMs = 120000;
+const bashSandboxExecPath = '/usr/bin/sandbox-exec';
 const maxDirectoryTreeCharacters = 30000;
 const maxDirectoryTreeDepth = 8;
 const maxDirectoryTreeNodes = 1200;
@@ -133,6 +139,46 @@ interface DirectoryTreeStats {
 
 interface DirectoryTreeWalkState extends DirectoryTreeStats {
   nodes: number;
+}
+
+interface BashCommandInput {
+  command: string;
+  cwd?: string;
+  description?: string;
+  timeout?: number;
+}
+
+interface BashCommandOutput {
+  blocked: boolean;
+  cwd: string;
+  durationMs: number;
+  error?: string;
+  exitCode: number | null;
+  interrupted: boolean;
+  noOutputExpected: boolean;
+  ok: boolean;
+  outputTruncated: boolean;
+  sandboxStatus: {
+    enabled: boolean;
+    filesystem: 'workspace-write';
+    network: 'blocked';
+  };
+  stderr: string;
+  stdout: string;
+  timedOut: boolean;
+  workspaceRootPath?: string;
+}
+
+interface CapturedOutput {
+  stderr: string;
+  stdout: string;
+  truncated: boolean;
+}
+
+interface OutputBuffer {
+  bytes: number;
+  chunks: Buffer[];
+  truncated: boolean;
 }
 
 function loadLocalEnv(): void {
@@ -236,6 +282,414 @@ function getWorkspaceType(context?: AgentRuntimeContext): AgentWorkspaceType {
   }
 
   return 'none';
+}
+
+function createBashOutput(
+  values: Partial<BashCommandOutput> & Pick<BashCommandOutput, 'cwd' | 'ok'>
+): BashCommandOutput {
+  const stdout = values.stdout ?? '';
+  const stderr = values.stderr ?? '';
+
+  return {
+    blocked: values.blocked ?? false,
+    cwd: values.cwd,
+    durationMs: values.durationMs ?? 0,
+    error: values.error,
+    exitCode: values.exitCode ?? null,
+    interrupted: values.interrupted ?? false,
+    noOutputExpected: values.noOutputExpected ?? (stdout.trim().length === 0 && stderr.trim().length === 0),
+    ok: values.ok,
+    outputTruncated: values.outputTruncated ?? false,
+    sandboxStatus: values.sandboxStatus ?? {
+      enabled: false,
+      filesystem: 'workspace-write',
+      network: 'blocked'
+    },
+    stderr,
+    stdout,
+    timedOut: values.timedOut ?? false,
+    workspaceRootPath: values.workspaceRootPath
+  };
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function normalizeOptionalTimeout(value: unknown): number | undefined {
+  const timeout = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return undefined;
+  }
+
+  return Math.min(Math.floor(timeout), bashMaxTimeoutMs);
+}
+
+function normalizeBashInput(command: unknown, cwd: unknown, timeout: unknown, description: unknown): BashCommandInput {
+  const normalizedCommand = typeof command === 'string' ? command : '';
+  let normalizedCwd = normalizeOptionalString(cwd);
+  let normalizedTimeout = normalizeOptionalTimeout(timeout);
+  let normalizedDescription = normalizeOptionalString(description);
+
+  if (typeof cwd === 'number' && normalizedTimeout === undefined) {
+    normalizedTimeout = normalizeOptionalTimeout(cwd);
+    normalizedCwd = undefined;
+  }
+
+  if (typeof timeout === 'string' && normalizedTimeout === undefined && normalizedDescription === undefined) {
+    normalizedDescription = timeout.trim() || undefined;
+  }
+
+  return {
+    command: normalizedCommand,
+    cwd: normalizedCwd,
+    description: normalizedDescription,
+    timeout: normalizedTimeout
+  };
+}
+
+function isSameOrChildPath(parentPath: string, childPath: string): boolean {
+  const relativePath = relative(parentPath, childPath);
+
+  return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function resolveBashCwd(workspaceRootPath: string, cwd: string | undefined): string {
+  if (cwd && isAbsolute(cwd)) {
+    throw new Error('Bash cwd must be relative to the active workspace root.');
+  }
+
+  const rootPath = realpathSync(workspaceRootPath);
+  const candidatePath = cwd ? resolve(rootPath, cwd) : rootPath;
+
+  if (!existsSync(candidatePath)) {
+    throw new Error('Bash cwd does not exist inside the active workspace.');
+  }
+
+  const resolvedCwd = realpathSync(candidatePath);
+  const stats = statSync(resolvedCwd);
+
+  if (!stats.isDirectory()) {
+    throw new Error('Bash cwd must be a directory.');
+  }
+
+  if (!isSameOrChildPath(rootPath, resolvedCwd)) {
+    throw new Error('Bash cwd is outside the active workspace root.');
+  }
+
+  return resolvedCwd;
+}
+
+function getBlockedBashReason(command: string): string | null {
+  const checks: Array<[RegExp, string]> = [
+    [/(^|[;&|]\s*)sudo(\s|$)/, 'sudo is not allowed in Veloca Agent bash commands.'],
+    [/(^|[;&|]\s*)su(\s|$)/, 'Switching users is not allowed in Veloca Agent bash commands.'],
+    [/\bgit\s+reset\s+--hard\b/, 'git reset --hard is blocked.'],
+    [/\bgit\s+clean\b/, 'git clean is blocked.'],
+    [/(^|[;&|]\s*)diskutil(\s|$)/, 'diskutil is blocked.'],
+    [/(^|[;&|]\s*)mkfs(\s|$)/, 'mkfs is blocked.'],
+    [/(^|[;&|]\s*)shutdown(\s|$)/, 'shutdown is blocked.'],
+    [/(^|[;&|]\s*)reboot(\s|$)/, 'reboot is blocked.'],
+    [/(^|[;&|]\s*)launchctl(\s|$)/, 'launchctl is blocked.'],
+    [/(^|[;&|]\s*)osascript(\s|$)/, 'osascript is blocked.'],
+    [/(^|[;&|]\s*)nohup(\s|$)/, 'Background commands are not supported.'],
+    [/(^|[;&|]\s*)disown(\s|$)/, 'Background commands are not supported.'],
+    [/\bdd\b[^;&|]*\bof=/, 'dd writes with of= are blocked.'],
+    [/(^|[\s"'=])~(?=\/|\s|$)/, 'Home-directory paths are blocked; use workspace-relative paths.'],
+    [/(^|[\s"'=])\.\.(?=\/|\s|$)/, 'Parent-directory traversal is blocked; use workspace-relative paths.'],
+    [
+      /(^|[\s"'=])\/(?!dev\/null(?=\s|$)|bin\/|usr\/bin\/|usr\/local\/bin\/|opt\/homebrew\/bin\/)/,
+      'Absolute local paths outside the workspace command model are blocked; use cwd and relative paths.'
+    ],
+    [/\brm\b(?=[^;&|]*\s-[^\s;&|]*r)(?=[^;&|]*\s-[^\s;&|]*f)/, 'rm -rf style commands are blocked.']
+  ];
+
+  for (const [pattern, reason] of checks) {
+    if (pattern.test(command)) {
+      return reason;
+    }
+  }
+
+  const withoutFdRedirects = command.replace(/[<>]&\d/g, '');
+
+  if (/(^|[^&])&(\s|$)/.test(withoutFdRedirects)) {
+    return 'Background commands are not supported.';
+  }
+
+  return null;
+}
+
+function quoteSandboxPath(pathValue: string): string {
+  return JSON.stringify(pathValue);
+}
+
+function buildBashSandboxProfile(workspaceRootPath: string, sandboxRootPath: string): string {
+  return `(version 1)
+(deny default)
+(allow process*)
+(allow signal (target same-sandbox))
+(allow sysctl-read)
+(allow mach-lookup)
+(allow file-read-metadata)
+(allow file-read*)
+(allow file-write*
+  (subpath ${quoteSandboxPath(workspaceRootPath)})
+  (subpath ${quoteSandboxPath(sandboxRootPath)})
+)
+(deny network*)`;
+}
+
+function createOutputBuffer(): OutputBuffer {
+  return {
+    bytes: 0,
+    chunks: [],
+    truncated: false
+  };
+}
+
+function appendOutput(buffer: OutputBuffer, chunk: Buffer): void {
+  const remainingBytes = bashMaxOutputBytes - buffer.bytes;
+
+  if (remainingBytes <= 0) {
+    buffer.truncated = true;
+    return;
+  }
+
+  if (chunk.byteLength > remainingBytes) {
+    buffer.chunks.push(chunk.subarray(0, remainingBytes));
+    buffer.bytes += remainingBytes;
+    buffer.truncated = true;
+    return;
+  }
+
+  buffer.chunks.push(chunk);
+  buffer.bytes += chunk.byteLength;
+}
+
+function readOutputBuffer(buffer: OutputBuffer): string {
+  const output = Buffer.concat(buffer.chunks).toString('utf8');
+
+  if (!buffer.truncated) {
+    return output;
+  }
+
+  return `${output}\n\n[output truncated - exceeded ${bashMaxOutputBytes} bytes]`;
+}
+
+function executeSandboxedBash(command: string, cwd: string, workspaceRootPath: string, timeoutMs: number): Promise<CapturedOutput & {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+}> {
+  const sandboxRootPath = join(workspaceRootPath, '.veloca', 'bash-sandbox');
+  const sandboxHomePath = join(sandboxRootPath, 'home');
+  const sandboxTmpPath = join(sandboxRootPath, 'tmp');
+  const sandboxProfile = buildBashSandboxProfile(workspaceRootPath, sandboxRootPath);
+  const stdoutBuffer = createOutputBuffer();
+  const stderrBuffer = createOutputBuffer();
+
+  mkdirSync(sandboxHomePath, { recursive: true });
+  mkdirSync(sandboxTmpPath, { recursive: true });
+
+  return new Promise((resolveCommand, rejectCommand) => {
+    const started = spawn(bashSandboxExecPath, ['-p', sandboxProfile, '/bin/sh', '-lc', command], {
+      cwd,
+      detached: true,
+      env: {
+        ...process.env,
+        HOME: sandboxHomePath,
+        TMPDIR: sandboxTmpPath
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+
+      if (started.pid) {
+        try {
+          process.kill(-started.pid, 'SIGTERM');
+        } catch {
+          started.kill('SIGTERM');
+        }
+
+        killTimer = setTimeout(() => {
+          if (!started.killed && started.pid) {
+            try {
+              process.kill(-started.pid, 'SIGKILL');
+            } catch {
+              started.kill('SIGKILL');
+            }
+          }
+        }, 1000);
+      }
+    }, timeoutMs);
+
+    started.stdout?.on('data', (chunk: Buffer) => appendOutput(stdoutBuffer, chunk));
+    started.stderr?.on('data', (chunk: Buffer) => appendOutput(stderrBuffer, chunk));
+    started.on('error', (error) => {
+      clearTimeout(timeoutTimer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+
+      rejectCommand(error);
+    });
+    started.on('close', (exitCode, signal) => {
+      clearTimeout(timeoutTimer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+
+      resolveCommand({
+        exitCode,
+        signal,
+        stderr: readOutputBuffer(stderrBuffer),
+        stdout: readOutputBuffer(stdoutBuffer),
+        timedOut,
+        truncated: stdoutBuffer.truncated || stderrBuffer.truncated
+      });
+    });
+  });
+}
+
+async function runBashCommand(context: AgentRuntimeContext | undefined, input: BashCommandInput): Promise<BashCommandOutput> {
+  const startedAt = Date.now();
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const command = input.command.trim();
+  const sandboxStatus = {
+    enabled: true,
+    filesystem: 'workspace-write' as const,
+    network: 'blocked' as const
+  };
+
+  if (workspaceType !== 'filesystem') {
+    return createBashOutput({
+      blocked: true,
+      cwd: 'No filesystem workspace',
+      error: 'Bash commands are only available in filesystem workspaces.',
+      ok: false,
+      workspaceRootPath
+    });
+  }
+
+  if (!workspaceRootPath) {
+    return createBashOutput({
+      blocked: true,
+      cwd: 'No active workspace',
+      error: 'No active workspace root is available for bash execution.',
+      ok: false
+    });
+  }
+
+  if (!findWorkspaceRootNode(workspaceRootPath, workspaceType)) {
+    return createBashOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: 'The active workspace root is not registered in Veloca.',
+      ok: false,
+      workspaceRootPath
+    });
+  }
+
+  if (!existsSync(bashSandboxExecPath) || process.platform !== 'darwin') {
+    return createBashOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: 'Bash sandbox is unavailable on this platform, so the command was not executed.',
+      ok: false,
+      workspaceRootPath
+    });
+  }
+
+  if (!command) {
+    return createBashOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: 'Bash command cannot be empty.',
+      ok: false,
+      sandboxStatus,
+      workspaceRootPath
+    });
+  }
+
+  if (command.length > bashMaxCommandLength) {
+    return createBashOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: `Bash command cannot exceed ${bashMaxCommandLength} characters.`,
+      ok: false,
+      sandboxStatus,
+      workspaceRootPath
+    });
+  }
+
+  const blockedReason = getBlockedBashReason(command);
+
+  if (blockedReason) {
+    return createBashOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: blockedReason,
+      ok: false,
+      sandboxStatus,
+      workspaceRootPath
+    });
+  }
+
+  let cwd: string;
+
+  try {
+    cwd = resolveBashCwd(workspaceRootPath, input.cwd);
+  } catch (error) {
+    return createBashOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: getErrorMessage(error),
+      ok: false,
+      sandboxStatus,
+      workspaceRootPath
+    });
+  }
+
+  const timeoutMs = input.timeout ?? bashDefaultTimeoutMs;
+
+  try {
+    const result = await executeSandboxedBash(command, cwd, realpathSync(workspaceRootPath), timeoutMs);
+    const stderr = result.timedOut
+      ? `${result.stderr}${result.stderr ? '\n' : ''}Command exceeded timeout of ${timeoutMs} ms`
+      : result.stderr;
+
+    return createBashOutput({
+      cwd,
+      durationMs: Date.now() - startedAt,
+      exitCode: result.exitCode,
+      interrupted: result.timedOut || result.signal !== null,
+      ok: result.exitCode === 0 && !result.timedOut,
+      outputTruncated: result.truncated,
+      sandboxStatus,
+      stderr,
+      stdout: result.stdout,
+      timedOut: result.timedOut,
+      workspaceRootPath
+    });
+  } catch (error) {
+    return createBashOutput({
+      cwd,
+      durationMs: Date.now() - startedAt,
+      error: getErrorMessage(error),
+      ok: false,
+      sandboxStatus,
+      stderr: getErrorMessage(error),
+      workspaceRootPath
+    });
+  }
 }
 
 function escapeRegex(value: string): string {
@@ -522,6 +976,38 @@ function buildAgentTools() {
           required: []
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'run_bash_command',
+        description:
+          'Run a foreground bash command inside the active filesystem workspace. The command is sandboxed, network access is blocked, and writes are limited to the workspace.',
+        parameters: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              description: 'The bash command to run. Keep it short and explain the purpose before using it.'
+            },
+            cwd: {
+              type: 'string',
+              description:
+                'Optional working directory relative to the active workspace root. Use an empty string to run at the workspace root.'
+            },
+            timeout: {
+              type: 'number',
+              description:
+                'Optional timeout in milliseconds. Defaults to 10000 and cannot exceed 120000.'
+            },
+            description: {
+              type: 'string',
+              description: 'Optional short description of why this command is needed.'
+            }
+          },
+          required: ['command']
+        }
+      }
     }
   ];
 }
@@ -529,7 +1015,9 @@ function buildAgentTools() {
 function buildAgentToolRealizers(context?: AgentRuntimeContext) {
   return {
     get_workspace_directory_tree: (velocaignore?: string) =>
-      getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined)
+      getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined),
+    run_bash_command: (command?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
+      runBashCommand(context, normalizeBashInput(command, cwd, timeout, description))
   };
 }
 
@@ -603,6 +1091,10 @@ Use information in this priority order:
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
 - Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
+- Use \`run_bash_command\` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
+- Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.
+- Do not run dangerous, destructive, privileged, background, or network-dependent commands. Network access is blocked in the bash sandbox.
+- Do not claim that a bash command succeeded unless the tool result reports success.
 - Use tools before making claims about project-specific structure, terminology, requirements, or prior decisions.
 - Do not claim that you searched, opened, read, or verified files unless the provided context or tools actually support that claim.
 
