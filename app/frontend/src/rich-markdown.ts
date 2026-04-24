@@ -255,8 +255,32 @@ const VelocaCodeBlockShiki = CodeBlock.extend({
         })
       })
     ];
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      ...this.parent?.(),
+      'Ctrl-a': () => selectCurrentCodeBlockContent(this.editor),
+      'Mod-a': () => selectCurrentCodeBlockContent(this.editor)
+    };
   }
 });
+
+function selectCurrentCodeBlockContent(editor: Editor): boolean {
+  const { selection } = editor.state;
+  const codeBlockDepth = findAncestorDepth(selection.$from, 'codeBlock');
+
+  if (codeBlockDepth <= 0) {
+    return false;
+  }
+
+  const codeBlock = selection.$from.node(codeBlockDepth);
+  const from = selection.$from.start(codeBlockDepth);
+  const to = from + codeBlock.content.size;
+
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
+  return true;
+}
 
 function getShikiHighlighter(): Promise<HighlighterCore> {
   if (shikiHighlighter) {
