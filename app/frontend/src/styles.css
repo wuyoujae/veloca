@@ -23,6 +23,11 @@
   --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
   --success: #10b981;
   --info: #3b82f6;
+  --tab-border-active: #3f3f46;
+  --tab-text-dimmed: #71717a;
+  --tab-merge-background: rgba(59, 130, 246, 0.12);
+  --tab-merge-border: rgba(96, 165, 250, 0.45);
+  --tab-insert-indicator: #3b82f6;
   --radius: 0.5rem;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
@@ -50,6 +55,10 @@
   --overlay: rgba(255, 255, 255, 0.45);
   --toast-background: rgba(255, 255, 255, 0.9);
   --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.02);
+  --tab-border-active: #d4d4d8;
+  --tab-text-dimmed: #a1a1aa;
+  --tab-merge-background: #eff6ff;
+  --tab-merge-border: #bfdbfe;
 }
 
 * {
@@ -346,10 +355,10 @@ button {
   justify-content: space-between;
   gap: 12px;
   position: relative;
-  height: 56px;
-  padding: 0 12px;
+  height: 48px;
+  padding: 0 12px 0 0;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--background) 92%, transparent);
+  background: var(--muted);
   transition: border-color 0.3s ease, background-color 0.25s ease;
 }
 
@@ -362,23 +371,17 @@ button {
   align-items: flex-end;
   flex: 1;
   min-width: 0;
-  height: 47px;
-  gap: 3px;
-  padding: 6px 0 7px;
-  scrollbar-gutter: stable;
+  height: 100%;
+  gap: 4px;
+  padding: 0 0 0 8px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--muted) transparent;
+  scrollbar-width: none;
   scroll-behavior: smooth;
 }
 
 .editor-tabs::-webkit-scrollbar {
-  height: 4px;
-}
-
-.editor-tabs::-webkit-scrollbar-thumb {
-  border-radius: 99px;
+  display: none;
 }
 
 .editor-tabs * {
@@ -398,23 +401,24 @@ button {
   position: relative;
   display: inline-flex;
   align-items: flex-end;
-  height: 35px;
+  height: 36px;
 }
 
 .editor-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 0 0 auto;
-  max-width: 270px;
-  min-width: 0;
-  height: 33px;
-  padding: 0 8px 0 10px;
-  font-size: 12px;
+  min-width: 120px;
+  max-width: 220px;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
   position: relative;
-  border-radius: 6px 6px 0 0;
+  border-radius: 8px 8px 0 0;
   border: 1px solid transparent;
-  border-bottom-color: transparent;
+  border-bottom: 0;
   background: transparent;
   color: var(--muted-foreground);
   cursor: grab;
@@ -430,15 +434,13 @@ button {
 .editor-tab:hover,
 .editor-tab:focus-visible {
   color: var(--foreground);
-  background: var(--accent);
+  background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
 }
 
 .editor-tab.active {
   background: var(--background);
   color: var(--foreground);
-  border-color: var(--border);
-  border-bottom-color: var(--background);
-  box-shadow: 0 -1px 0 var(--border);
+  border-color: var(--tab-border-active);
 }
 
 .editor-tab.active::after {
@@ -451,36 +453,59 @@ button {
   background: var(--background);
 }
 
-.editor-tab.split-target {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--info) 10%, var(--background));
-  border-color: color-mix(in srgb, var(--info) 32%, var(--border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 16%, transparent);
+.editor-tab.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+  transform: scale(0.95);
 }
 
-.editor-tab.dragging,
-.editor-split-tab-item.dragging {
-  opacity: 0.55;
-  cursor: grabbing;
-  transform: translateY(-1px) scale(0.98);
+.editor-tab::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.editor-tab.drag-insert-left::before,
+.editor-tab.drag-insert-right::before {
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--tab-insert-indicator);
+  opacity: 1;
+  z-index: 20;
+}
+
+.editor-tab.drag-insert-left::before {
+  left: -4px;
+}
+
+.editor-tab.drag-insert-right::before {
+  right: -4px;
+}
+
+.editor-tab.drag-merge {
+  background: var(--tab-merge-background);
+  border-color: var(--tab-merge-border);
+  color: var(--foreground);
 }
 
 .editor-split-tab-wrapper {
-  height: 35px;
+  height: 36px;
 }
 
 .editor-split-tab-group {
   position: relative;
   display: inline-flex;
-  align-items: stretch;
+  align-items: flex-end;
   flex: 0 0 auto;
-  min-width: 260px;
-  max-width: 420px;
-  height: 33px;
-  overflow: hidden;
+  height: 36px;
+  overflow: visible;
   border: 1px solid transparent;
   border-bottom: 0;
-  border-radius: 7px 7px 0 0;
+  border-radius: 8px 8px 0 0;
   background: transparent;
   cursor: grab;
   transition:
@@ -493,13 +518,13 @@ button {
 }
 
 .editor-split-tab-group:not(.has-active):hover {
-  background: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
 }
 
 .editor-split-tab-group.has-active {
   background: var(--background);
-  border-color: color-mix(in srgb, var(--foreground) 16%, var(--border));
-  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.03);
+  border-color: var(--tab-border-active);
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.02);
 }
 
 .editor-split-tab-group.has-active::after {
@@ -514,9 +539,9 @@ button {
 }
 
 .editor-split-tab-group.is-dragging {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: grabbing;
-  transform: scale(0.96);
+  transform: scale(0.95);
 }
 
 .editor-split-tab-group::before {
@@ -532,8 +557,8 @@ button {
   top: 4px;
   bottom: 4px;
   width: 3px;
-  border-radius: 3px;
-  background: var(--info);
+  border-radius: 2px;
+  background: var(--tab-insert-indicator);
   opacity: 1;
   z-index: 20;
 }
@@ -547,22 +572,23 @@ button {
 }
 
 .editor-split-tab-group.drag-merge {
-  background: color-mix(in srgb, var(--info) 10%, var(--background));
-  border-color: color-mix(in srgb, var(--info) 32%, var(--border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 16%, transparent);
+  background: var(--tab-merge-background);
+  border-color: var(--tab-merge-border);
 }
 
 .editor-split-tab-item {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 118px;
-  max-width: 210px;
-  padding: 0 8px 0 10px;
+  gap: 8px;
+  min-width: 120px;
+  max-width: 220px;
+  height: 100%;
+  padding: 0 14px;
   color: var(--muted-foreground);
   cursor: grab;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   user-select: none;
   transition:
     color 0.18s ease,
@@ -571,15 +597,27 @@ button {
 }
 
 .editor-split-tab-item + .editor-split-tab-item {
-  border-left: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-left: 0;
+}
+
+.editor-split-tab-item:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 0;
+  bottom: 10px;
+  width: 1px;
+  z-index: 5;
+  background: var(--border);
+  transition: background-color 0.18s ease;
 }
 
 .editor-split-tab-group.has-active .editor-split-tab-item {
-  color: color-mix(in srgb, var(--muted-foreground) 72%, var(--background));
+  color: var(--tab-text-dimmed);
 }
 
 .editor-split-tab-group.has-active .editor-split-tab-item .editor-tab-icon {
-  color: color-mix(in srgb, var(--muted-foreground) 45%, var(--background));
+  color: var(--tab-border-active);
 }
 
 .editor-split-tab-group.has-active .editor-split-tab-item.active {
@@ -594,12 +632,8 @@ button {
   color: var(--muted-foreground);
 }
 
-.editor-split-tab-group.has-active .editor-split-tab-item + .editor-split-tab-item {
-  border-left-color: color-mix(in srgb, var(--foreground) 14%, var(--border));
-}
-
-.editor-split-tab-item.split-target {
-  color: var(--foreground);
+.editor-split-tab-group.has-active .editor-split-tab-item:not(:last-child)::before {
+  background: var(--tab-border-active);
 }
 
 .editor-tab-icon {
@@ -618,19 +652,18 @@ button {
 
 .editor-tab-drop-indicator {
   position: absolute;
-  left: -3px;
-  top: 7px;
+  left: -4px;
+  top: 4px;
   width: 3px;
-  height: 16px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--foreground) 72%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 24%, transparent);
+  height: 28px;
+  border-radius: 2px;
+  background: var(--tab-insert-indicator);
 }
 
 .editor-tab-drop-indicator-end {
   position: relative;
   width: 3px;
-  height: 16px;
+  height: 28px;
   margin-right: 2px;
 }
 
@@ -646,9 +679,9 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
-  margin-left: 2px;
+  width: 18px;
+  height: 18px;
+  margin-left: 0;
   padding: 0;
   border: 0;
   border-radius: 4px;
@@ -691,9 +724,9 @@ button {
   display: inline-flex;
   align-items: flex-end;
   flex-shrink: 0;
-  gap: 6px;
+  gap: 4px;
   height: 100%;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
 }
 
 .editor-action-btn {
@@ -701,10 +734,10 @@ button {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 29px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
@@ -732,7 +765,7 @@ button {
 }
 
 .editor-action-btn-save {
-  width: 34px;
+  width: 28px;
   padding: 0;
 }
 
