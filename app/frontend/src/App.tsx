@@ -1699,14 +1699,31 @@ export function App(): JSX.Element {
                       return null;
                     }
 
+                    const splitTabIndexes = splitPaneTabs.map((splitTab) =>
+                      openTabs.findIndex((item) => item.file.path === splitTab.file.path)
+                    );
+                    const isDraggingSplitGroup =
+                      draggingTabIndex !== null && splitTabIndexes.includes(draggingTabIndex);
+                    const isMergeTargetGroup =
+                      tabSplitTargetIndex !== null && splitTabIndexes.includes(tabSplitTargetIndex);
+                    const isInsertBeforeGroup =
+                      tabDropTargetIndex === splitGroupStartIndex && !isMergeTargetGroup;
+                    const isInsertAfterGroup =
+                      tabDropTargetIndex === splitGroupStartIndex + splitPaneTabs.length && !isMergeTargetGroup;
+
                     return (
                       <div className="editor-tab-wrapper editor-split-tab-wrapper" key="split-editor-group">
-                        {tabDropTargetIndex === index && draggingTabIndex !== index && tabSplitTargetIndex === null ? (
-                          <span className="editor-tab-drop-indicator" />
-                        ) : null}
-
                         <div
-                          className="editor-split-tab-group"
+                          className={[
+                            'editor-split-tab-group',
+                            'has-active',
+                            isDraggingSplitGroup ? 'is-dragging' : '',
+                            isMergeTargetGroup ? 'drag-merge' : '',
+                            isInsertBeforeGroup ? 'drag-insert-left' : '',
+                            isInsertAfterGroup ? 'drag-insert-right' : ''
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                           ref={(element) => {
                             if (!element) {
                               editorTabElementByPathRef.current.delete(splitPaneTabs[0].file.path);

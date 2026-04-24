@@ -485,22 +485,78 @@ button {
   max-width: 420px;
   height: 33px;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-bottom-color: var(--background);
+  border: 1px solid transparent;
+  border-bottom: 0;
   border-radius: 7px 7px 0 0;
-  background: var(--background);
-  box-shadow: 0 -1px 0 var(--border);
+  background: transparent;
+  cursor: grab;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.16s ease;
   animation: editorTabEnter 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.editor-split-tab-group::after {
+.editor-split-tab-group:not(.has-active):hover {
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.editor-split-tab-group.has-active {
+  background: var(--background);
+  border-color: color-mix(in srgb, var(--foreground) 16%, var(--border));
+  box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.03);
+}
+
+.editor-split-tab-group.has-active::after {
   content: '';
   position: absolute;
   bottom: -1px;
   left: 0;
   right: 0;
   height: 1px;
+  z-index: 10;
   background: var(--background);
+}
+
+.editor-split-tab-group.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+  transform: scale(0.96);
+}
+
+.editor-split-tab-group::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.editor-split-tab-group.drag-insert-left::before,
+.editor-split-tab-group.drag-insert-right::before {
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--info);
+  opacity: 1;
+  z-index: 20;
+}
+
+.editor-split-tab-group.drag-insert-left::before {
+  left: -4px;
+}
+
+.editor-split-tab-group.drag-insert-right::before {
+  right: -4px;
+}
+
+.editor-split-tab-group.drag-merge {
+  background: color-mix(in srgb, var(--info) 10%, var(--background));
+  border-color: color-mix(in srgb, var(--info) 32%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 16%, transparent);
 }
 
 .editor-split-tab-item {
@@ -514,44 +570,42 @@ button {
   color: var(--muted-foreground);
   cursor: grab;
   font-size: 12px;
+  user-select: none;
   transition:
-    background-color 0.18s ease,
     color 0.18s ease,
     opacity 0.18s ease,
     transform 0.18s ease;
 }
 
 .editor-split-tab-item + .editor-split-tab-item {
-  border-left: 1px solid var(--border);
+  border-left: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
 }
 
-.editor-split-tab-item:hover,
-.editor-split-tab-item:focus-visible,
-.editor-split-tab-item.active {
-  background: color-mix(in srgb, var(--accent) 70%, transparent);
+.editor-split-tab-group.has-active .editor-split-tab-item {
+  color: color-mix(in srgb, var(--muted-foreground) 72%, var(--background));
+}
+
+.editor-split-tab-group.has-active .editor-split-tab-item .editor-tab-icon {
+  color: color-mix(in srgb, var(--muted-foreground) 45%, var(--background));
+}
+
+.editor-split-tab-group.has-active .editor-split-tab-item.active {
   color: var(--foreground);
 }
 
-.editor-split-tab-item.active::before {
-  content: '';
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 0;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
-  background: var(--foreground);
+.editor-split-tab-group.has-active .editor-split-tab-item.active .editor-tab-icon {
+  color: var(--foreground);
+}
+
+.editor-split-tab-group.has-active .editor-split-tab-item:not(.active):hover {
+  color: var(--muted-foreground);
+}
+
+.editor-split-tab-group.has-active .editor-split-tab-item + .editor-split-tab-item {
+  border-left-color: color-mix(in srgb, var(--foreground) 14%, var(--border));
 }
 
 .editor-split-tab-item.split-target {
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--info) 14%, transparent) 0 49%,
-      color-mix(in srgb, var(--foreground) 35%, transparent) 49% 51%,
-      color-mix(in srgb, var(--info) 14%, transparent) 51% 100%
-    ),
-    var(--accent);
   color: var(--foreground);
 }
 
