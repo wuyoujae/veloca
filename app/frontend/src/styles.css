@@ -1522,9 +1522,13 @@ button {
 }
 
 .agent-dictate-btn.listening {
-  color: #2563eb;
-  background: #dbeafe;
+  background: transparent;
+  color: #60a5fa;
   animation: agentDictateBreath 1.35s ease-in-out infinite;
+}
+
+.agent-dictate-btn.listening:hover {
+  background: transparent;
 }
 
 .agent-model-badge {
@@ -1983,15 +1987,11 @@ button {
 @keyframes agentDictateBreath {
   0%,
   100% {
-    background: #eff6ff;
     color: #60a5fa;
-    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
   }
 
   50% {
-    background: #dbeafe;
     color: #2563eb;
-    box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.16);
   }
 }
 

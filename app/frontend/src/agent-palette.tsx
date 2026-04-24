@@ -139,7 +139,6 @@ export function AgentPalette({ onToast, position, visible }: AgentPaletteProps):
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
-  const inlineDictationTimerRef = useRef<number | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
@@ -162,10 +161,6 @@ export function AgentPalette({ onToast, position, visible }: AgentPaletteProps):
       setPopover(null);
       setVoiceMode('idle');
       setInlineDictating(false);
-      if (inlineDictationTimerRef.current !== null) {
-        window.clearTimeout(inlineDictationTimerRef.current);
-        inlineDictationTimerRef.current = null;
-      }
       return;
     }
 
@@ -378,24 +373,12 @@ export function AgentPalette({ onToast, position, visible }: AgentPaletteProps):
 
   const toggleInlineDictation = () => {
     if (inlineDictating) {
+      insertTextAtCursor('请把这段 Markdown 改得更清晰。');
       setInlineDictating(false);
-      if (inlineDictationTimerRef.current !== null) {
-        window.clearTimeout(inlineDictationTimerRef.current);
-        inlineDictationTimerRef.current = null;
-      }
       return;
     }
 
     setInlineDictating(true);
-
-    const timer = window.setTimeout(() => {
-      insertTextAtCursor('请把这段 Markdown 改得更清晰。');
-      setInlineDictating(false);
-      inlineDictationTimerRef.current = null;
-    }, 1200);
-
-    inlineDictationTimerRef.current = timer;
-    pushTimer(timer);
   };
 
   const buildAgentAnswer = (prompt: string, nextModel: AgentModelId, nextAttachments: AgentAttachment[]) => {
