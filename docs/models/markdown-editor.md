@@ -28,7 +28,7 @@
   - 用户消息右下方提供撤销、复制、编辑按钮，其中复制会写入剪贴板，编辑会让消息进入可编辑状态，并允许删除本轮附件；
   - 编辑确认后会用修改后的 prompt 和附件重新生成当前原型回复。
 - Agent 已接入后端流式事件通道，AI 回复会在同一条消息中按 `delta` 增量显示，完成后标记为完整状态，错误时展示错误文本并触发 toast。
-- AI 回复内容复用编辑器侧 `rich-markdown` 的 Markdown 渲染与 HTML 清洗能力，支持段落、列表、标题、引用、代码块和表格等基础 Markdown；AI 回复完成后才会在回复下方显示复制按钮，用于复制原始 AI 回复文本。
+- AI 回复内容复用编辑器侧 `rich-markdown` 的 Markdown 渲染与 HTML 清洗能力，支持段落、列表、标题、引用、代码块、Mermaid 图表和表格等基础 Markdown；AI 回复完成后才会在回复下方显示复制按钮，用于复制原始 AI 回复文本。
 - 画布浮动按钮有两种互斥状态：当用户离开最新对话纸张时，底部显示 `Back to latest`；当用户仍在最新对话但上滑打断流式自动贴底时，底部显示仅含图标的恢复自动滚动按钮。
 - 用户发送新消息或点击 `Back to latest` 会进入自动贴底状态；流式输出期间会持续滚动到最新内容底部，用户上滑会打断该状态，用户滚到画布底部或点击恢复按钮会重新进入该状态。
 - 画布左上 session 控件和右上折叠控件在打开或发送后短暂出现，用户 4 秒无画布操作后上滑淡出；用户上滑查看历史内容时重新出现，向下滚动时隐藏。
@@ -36,6 +36,28 @@
 - `Back to latest` 只会在当前 session 至少有两轮对话，且用户滚动到非最新纸张时，从画布底部弹出。
 - 对话画布左上角提供 session 控制菜单，第一个 item 固定为 `New Session`，后续 item 为从本地 `otherone-agent` 记忆中恢复的已有 session；新建 session 会通过后端 IPC 落入 Agent 本地文件存储。
 - 当前 Agent 回复已经接入后端流式 Agent 服务；语音识别、Web Search 和附件真实解析仍为前端原型状态，后续需要替换为后端 API、请求拦截器和统一消息组件处理。
+
+## Mermaid 图表渲染
+
+- 编辑器支持标准 fenced code block 形式的 Mermaid 图表：
+
+````markdown
+```mermaid
+flowchart TD
+  A[Start] --> B[Done]
+```
+````
+
+- Markdown 进入编辑器时，根级 `mermaid` 代码围栏会转换为 `velocaMermaid` 原子块节点；普通语言代码块继续使用现有 Shiki 代码块，不改变原有代码块体验。
+- `velocaMermaid` 节点默认显示渲染后的图表卡片；用户点击 `Edit` 后进入源码编辑状态，点击 `Save` 后更新图表源码并重新渲染，点击 `Cancel` 放弃本次编辑。
+- 保存和导出编辑器 Markdown 时，Mermaid 节点始终序列化回标准 ` ```mermaid ` fenced code block，不写入 Veloca 内部 HTML 结构，保证文档可被其他 Markdown 工具读取。
+- Mermaid 渲染使用官方 `mermaid` 包动态加载，避免拖慢编辑器初始启动；当前依赖为 MIT license，可用于商业项目。
+- 安全策略集中在 `rich-markdown`：
+  - Mermaid 使用 `startOnLoad: false`、`securityLevel: 'strict'`、`htmlLabels: false`；
+  - Mermaid 输出 SVG 写入 DOM 前会再次经过 DOMPurify 清洗；
+  - 禁止 `script`、`foreignObject`、事件属性和 `srcdoc` 等高风险内容。
+- Agent 回复中的 Mermaid 围栏会先渲染为安全占位块，React 挂载后再异步 hydrate 为 SVG；如果渲染失败，回复区显示错误状态并保留源码内容，复制回复时仍复制原始 AI Markdown。
+- Mermaid 图表渲染跟随当前深色/浅色主题；主题切换后，新渲染的图表使用对应 Mermaid theme。
 
 ## 打开文件与标签
 

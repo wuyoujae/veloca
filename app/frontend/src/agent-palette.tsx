@@ -33,7 +33,7 @@ import {
   Zap,
   type LucideIcon
 } from 'lucide-react';
-import { renderMarkdownToSafeHtml } from './rich-markdown';
+import { hydrateMermaidBlocks, renderMarkdownToSafeHtml } from './rich-markdown';
 
 export interface AgentPaletteAnchor {
   left: number;
@@ -192,9 +192,18 @@ function normalizeStoredSession(session: StoredAgentSession): AgentSession {
 }
 
 function AgentMarkdown({ content }: { content: string }): JSX.Element {
+  const markdownRef = useRef<HTMLDivElement | null>(null);
   const html = useMemo(() => renderMarkdownToSafeHtml(content), [content]);
 
-  return <div className="agent-ai-markdown" dangerouslySetInnerHTML={{ __html: html }} />;
+  useEffect(() => {
+    if (!markdownRef.current) {
+      return;
+    }
+
+    hydrateMermaidBlocks(markdownRef.current);
+  }, [html]);
+
+  return <div ref={markdownRef} className="agent-ai-markdown" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 export function AgentPalette({

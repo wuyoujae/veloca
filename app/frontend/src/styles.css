@@ -2094,6 +2094,27 @@ button {
   word-break: break-word;
 }
 
+.agent-ai-markdown .veloca-mermaid-agent-block {
+  display: block;
+  margin: 14px 0;
+  padding: 16px;
+  overflow-x: auto;
+  border: 1px solid var(--agent-border);
+  border-radius: var(--agent-radius-sm);
+  background: var(--agent-bg);
+}
+
+.agent-ai-markdown .veloca-mermaid-agent-block svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.agent-ai-markdown .veloca-mermaid-agent-block pre {
+  margin-bottom: 0;
+}
+
 .agent-ai-markdown table {
   display: block;
   width: 100%;
@@ -3144,6 +3165,7 @@ button {
 .veloca-editor .ProseMirror video,
 .veloca-editor .ProseMirror iframe,
 .veloca-editor .ProseMirror audio,
+.veloca-mermaid-node,
 .veloca-html-block > * {
   max-width: 100%;
 }
@@ -3152,6 +3174,7 @@ button {
 .veloca-editor .ProseMirror video,
 .veloca-editor .ProseMirror iframe,
 .veloca-editor .ProseMirror audio,
+.veloca-mermaid-node,
 .veloca-html-block {
   display: block;
   margin: 22px auto;
@@ -3189,6 +3212,132 @@ button {
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) + 2px);
   background: color-mix(in srgb, var(--background) 82%, var(--muted) 18%);
+}
+
+.veloca-mermaid-node {
+  overflow: hidden;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 2px);
+  background: color-mix(in srgb, var(--background) 86%, var(--muted) 14%);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
+  transition: border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.veloca-mermaid-node:hover,
+.veloca-mermaid-node.ProseMirror-selectednode {
+  border-color: color-mix(in srgb, var(--muted-foreground) 45%, var(--border));
+}
+
+.veloca-mermaid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 68%, transparent);
+}
+
+.veloca-mermaid-label {
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.veloca-mermaid-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+}
+
+.veloca-mermaid-button:hover {
+  border-color: var(--muted-foreground);
+  background: var(--accent);
+}
+
+.veloca-mermaid-button:active {
+  transform: scale(0.97);
+}
+
+.veloca-mermaid-button.primary {
+  border-color: var(--foreground);
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.veloca-mermaid-preview {
+  min-height: 160px;
+  padding: 20px;
+  overflow-x: auto;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+}
+
+.veloca-mermaid-preview svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.veloca-mermaid-preview.is-empty,
+.veloca-mermaid-preview.is-error,
+.veloca-mermaid-status {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  text-align: center;
+}
+
+.veloca-mermaid-preview.is-error,
+.veloca-mermaid-status.is-error {
+  color: #dc2626;
+}
+
+.veloca-mermaid-editor-panel {
+  padding: 12px;
+}
+
+.veloca-mermaid-textarea {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--code-background);
+  color: var(--editor-copy);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.veloca-mermaid-textarea:focus {
+  border-color: var(--muted-foreground);
+}
+
+.veloca-mermaid-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .veloca-html-block--callout,

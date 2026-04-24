@@ -44,6 +44,7 @@ import {
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import StarterKit from '@tiptap/starter-kit';
 import { marked } from 'marked';
+import type { Mermaid, MermaidConfig } from 'mermaid';
 import { createHighlighterCore, type HighlighterCore, type ThemedToken } from 'shiki/core';
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
 import bashLanguage from 'shiki/langs/bash.mjs';
@@ -56,12 +57,16 @@ import typescriptLanguage from 'shiki/langs/typescript.mjs';
 import vitesseLightTheme from 'shiki/themes/vitesse-light.mjs';
 
 const purifier = typeof window === 'undefined' ? null : DOMPurify(window);
+const mermaidBacktickInputRegex = /^```mermaid[\s\n]$/i;
+const mermaidTildeInputRegex = /^~~~mermaid[\s\n]$/i;
 const spacedBacktickCodeBlockInputRegex = /^``` ([a-z]+)[\s\n]$/;
 const tildeCodeBlockInputRegex = /^~~~([a-z]+)?[\s\n]$/;
 const shikiTheme = 'vitesse-light';
 const shikiCodeBlockPluginKey = new PluginKey<DecorationSet>('velocaShikiCodeBlock');
 let shikiHighlighter: HighlighterCore | null = null;
 let shikiHighlighterPromise: Promise<HighlighterCore> | null = null;
+let mermaidModulePromise: Promise<Mermaid> | null = null;
+let mermaidRenderId = 0;
 
 export const MEDIA_LIMITS = {
   audio: 50 * 1024 * 1024,
@@ -71,6 +76,10 @@ export const MEDIA_LIMITS = {
 
 type HtmlBlockAttrs = {
   html: string;
+};
+
+type MermaidBlockAttrs = {
+  code: string;
 };
 
 type MediaNodeAttrs = {
@@ -819,6 +828,214 @@ export const HtmlBlockNode = Node.create({
   }
 });
 
+export const MermaidNode = Node.create({
+  name: 'velocaMermaid',
+  group: 'block',
+  atom: true,
+  draggable: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      code: {
+        default: ''
+      }
+    } satisfies Record<keyof MermaidBlockAttrs, { default: string }>;
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'section[data-veloca-mermaid]',
+        getAttrs: (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return false;
+          }
+
+          return {
+            code: decodeOriginalMarkdown(element.dataset.mermaidCode ?? '')
+          };
+        }
+      }
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const code = (HTMLAttributes as MermaidBlockAttrs).code ?? '';
+
+    return [
+      'section',
+      {
+        class: 'veloca-mermaid-block',
+        'data-mermaid-code': encodeOriginalMarkdown(code),
+        'data-veloca-mermaid': 'true'
+      }
+    ];
+  },
+
+  renderMarkdown(node) {
+    return buildMermaidMarkdown((node.attrs as MermaidBlockAttrs).code);
+  },
+
+  addInputRules() {
+    return [
+      textblockTypeInputRule({
+        find: mermaidBacktickInputRegex,
+        type: this.type,
+        getAttributes: () => ({ code: '' })
+      }),
+      textblockTypeInputRule({
+        find: mermaidTildeInputRegex,
+        type: this.type,
+        getAttributes: () => ({ code: '' })
+      })
+    ];
+  },
+
+  addNodeView() {
+    return ({ node, getPos, view }) => {
+      let currentNode = node;
+      let editing = !(currentNode.attrs as MermaidBlockAttrs).code.trim();
+      let draftCode = (currentNode.attrs as MermaidBlockAttrs).code;
+      let renderVersion = 0;
+
+      const dom = document.createElement('section');
+      const header = document.createElement('div');
+      const label = document.createElement('span');
+      const editButton = document.createElement('button');
+      const preview = document.createElement('div');
+      const editorPanel = document.createElement('div');
+      const textarea = document.createElement('textarea');
+      const actions = document.createElement('div');
+      const saveButton = document.createElement('button');
+      const cancelButton = document.createElement('button');
+
+      dom.dataset.velocaMermaid = 'true';
+      dom.contentEditable = 'false';
+      dom.className = 'veloca-mermaid-node';
+
+      header.className = 'veloca-mermaid-header';
+      label.className = 'veloca-mermaid-label';
+      label.textContent = 'Mermaid';
+
+      editButton.className = 'veloca-mermaid-button';
+      editButton.type = 'button';
+
+      preview.className = 'veloca-mermaid-preview';
+      editorPanel.className = 'veloca-mermaid-editor-panel';
+      textarea.className = 'veloca-mermaid-textarea';
+      textarea.spellcheck = false;
+
+      actions.className = 'veloca-mermaid-actions';
+      saveButton.className = 'veloca-mermaid-button primary';
+      saveButton.type = 'button';
+      saveButton.textContent = 'Save';
+      cancelButton.className = 'veloca-mermaid-button';
+      cancelButton.type = 'button';
+      cancelButton.textContent = 'Cancel';
+
+      actions.append(saveButton, cancelButton);
+      editorPanel.append(textarea, actions);
+      header.append(label, editButton);
+      dom.append(header, preview, editorPanel);
+
+      const getCode = () => (currentNode.attrs as MermaidBlockAttrs).code ?? '';
+
+      const setEditing = (nextEditing: boolean) => {
+        editing = nextEditing;
+        draftCode = getCode();
+        textarea.value = draftCode;
+        dom.classList.toggle('is-editing', editing);
+        preview.hidden = editing;
+        editorPanel.hidden = !editing;
+        editButton.textContent = editing ? 'Preview' : 'Edit';
+
+        if (editing) {
+          window.requestAnimationFrame(() => textarea.focus());
+          return;
+        }
+
+        void renderPreview();
+      };
+
+      const renderPreview = async () => {
+        const code = getCode().trim();
+        const version = (renderVersion += 1);
+
+        preview.replaceChildren();
+
+        if (!code) {
+          preview.textContent = 'Click Edit to add a Mermaid diagram.';
+          preview.classList.add('is-empty');
+          preview.classList.remove('is-error');
+          return;
+        }
+
+        preview.classList.remove('is-empty', 'is-error');
+        preview.textContent = 'Rendering diagram...';
+
+        try {
+          const svg = await renderMermaidToSafeSvg(code);
+
+          if (version !== renderVersion) {
+            return;
+          }
+
+          preview.innerHTML = svg;
+        } catch (error) {
+          if (version !== renderVersion) {
+            return;
+          }
+
+          preview.classList.add('is-error');
+          preview.textContent = getMermaidErrorMessage(error);
+        }
+      };
+
+      editButton.addEventListener('click', () => setEditing(!editing));
+      cancelButton.addEventListener('click', () => setEditing(false));
+      saveButton.addEventListener('click', () => {
+        const pos = typeof getPos === 'function' ? getPos() : null;
+
+        if (typeof pos !== 'number') {
+          return;
+        }
+
+        const transaction = view.state.tr.setNodeMarkup(pos, undefined, {
+          ...currentNode.attrs,
+          code: draftCode
+        });
+        view.dispatch(transaction);
+        setEditing(false);
+      });
+      textarea.addEventListener('input', () => {
+        draftCode = textarea.value;
+      });
+
+      setEditing(editing);
+
+      return {
+        dom,
+        update(updatedNode) {
+          if (updatedNode.type.name !== 'velocaMermaid') {
+            return false;
+          }
+
+          const previousCode = getCode();
+          currentNode = updatedNode;
+
+          if (!editing && previousCode !== getCode()) {
+            void renderPreview();
+          }
+
+          return true;
+        },
+        ignoreMutation: () => true
+      };
+    };
+  }
+});
+
 const VelocaTable = Table.extend({
   renderMarkdown(node, helpers): string {
     return renderVelocaTableToMarkdown(node.toJSON() as JSONContent, helpers);
@@ -1043,11 +1260,12 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     Placeholder.configure({
       placeholder: 'Start writing in Markdown...'
     }),
-      VelocaCodeBlockShiki.configure({
-        HTMLAttributes: {
-          class: 'veloca-code-block'
-        }
-      }),
+    MermaidNode,
+    VelocaCodeBlockShiki.configure({
+      HTMLAttributes: {
+        class: 'veloca-code-block'
+      }
+    }),
     Highlight,
     VelocaMarkdownInput,
     Link.configure({
@@ -1344,9 +1562,11 @@ export function sanitizeHtml(html: string): string {
       'class',
       'controls',
       'data-callout-type',
+      'data-mermaid-code',
       'data-veloca-callout',
       'data-veloca-footnotes',
       'data-veloca-html-block',
+      'data-veloca-mermaid',
       'data-veloca-original-markdown',
       'href',
       'id',
@@ -1361,15 +1581,179 @@ export function sanitizeHtml(html: string): string {
 }
 
 export function transformMarkdownForEditor(content: string): string {
-  return transformFootnotesForEditor(transformCalloutsForEditor(content));
+  return transformFootnotesForEditor(transformMermaidForEditor(transformCalloutsForEditor(content)));
 }
 
 export function transformMarkdownFromEditor(content: string): string {
-  return restoreFootnotesFromEditor(restoreCalloutsFromEditor(content));
+  return restoreFootnotesFromEditor(restoreMermaidFromEditor(restoreCalloutsFromEditor(content)));
 }
 
 export function renderMarkdownToSafeHtml(content: string): string {
   return sanitizeHtml(renderMarkdownHtml(transformMarkdownForEditor(content)));
+}
+
+export async function renderMermaidToSafeSvg(code: string): Promise<string> {
+  if (!code.trim()) {
+    return '';
+  }
+
+  const mermaid = await loadMermaid();
+  mermaid.initialize(getMermaidConfig());
+
+  const result = await mermaid.render(`veloca-mermaid-${Date.now()}-${mermaidRenderId += 1}`, code);
+  return sanitizeMermaidSvg(result.svg);
+}
+
+export function hydrateMermaidBlocks(root: ParentNode): void {
+  const blocks = Array.from(root.querySelectorAll<HTMLElement>('section[data-veloca-mermaid="true"]'));
+
+  blocks.forEach((block) => {
+    if (block.dataset.mermaidHydrated === 'true') {
+      return;
+    }
+
+    const code = block.querySelector('code')?.textContent ?? decodeOriginalMarkdown(block.dataset.mermaidCode ?? '');
+
+    block.dataset.mermaidHydrated = 'true';
+    block.classList.add('veloca-mermaid-agent-block');
+    block.replaceChildren(buildMermaidStatusElement('Rendering diagram...'));
+
+    void renderMermaidToSafeSvg(code)
+      .then((svg) => {
+        block.innerHTML = svg;
+      })
+      .catch((error) => {
+        const source = document.createElement('pre');
+        const codeElement = document.createElement('code');
+
+        block.replaceChildren(buildMermaidStatusElement(getMermaidErrorMessage(error), true), source);
+        codeElement.textContent = code;
+        source.append(codeElement);
+      });
+  });
+}
+
+function buildMermaidStatusElement(message: string, isError = false): HTMLElement {
+  const element = document.createElement('div');
+  element.className = isError ? 'veloca-mermaid-status is-error' : 'veloca-mermaid-status';
+  element.textContent = message;
+  return element;
+}
+
+async function loadMermaid(): Promise<Mermaid> {
+  if (!mermaidModulePromise) {
+    mermaidModulePromise = import('mermaid').then((module) => module.default);
+  }
+
+  return mermaidModulePromise;
+}
+
+function getMermaidConfig(): MermaidConfig {
+  const theme = typeof document !== 'undefined' && document.documentElement.dataset.theme === 'light' ? 'default' : 'dark';
+
+  return {
+    flowchart: {
+      htmlLabels: false
+    },
+    securityLevel: 'strict',
+    startOnLoad: false,
+    theme,
+    themeVariables: {
+      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+    }
+  };
+}
+
+function sanitizeMermaidSvg(svg: string): string {
+  if (!purifier) {
+    return svg;
+  }
+
+  return purifier.sanitize(svg, {
+    ADD_ATTR: ['aria-roledescription', 'class', 'role', 'style', 'viewBox', 'xmlns'],
+    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'srcdoc'],
+    FORBID_TAGS: ['foreignObject', 'script'],
+    USE_PROFILES: {
+      svg: true,
+      svgFilters: true
+    }
+  });
+}
+
+function getMermaidErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return `Mermaid render failed: ${error.message}`;
+  }
+
+  return 'Mermaid render failed. Check the diagram syntax.';
+}
+
+function transformMermaidForEditor(content: string): string {
+  const lines = content.split('\n');
+  const output: string[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const opening = lines[index].match(/^( {0,3})(```|~~~)mermaid[ \t]*$/i);
+
+    if (!opening) {
+      output.push(lines[index]);
+      continue;
+    }
+
+    const fence = opening[2];
+    const blockLines = [lines[index]];
+    const codeLines: string[] = [];
+    let nextIndex = index + 1;
+    let closed = false;
+
+    while (nextIndex < lines.length) {
+      const line = lines[nextIndex];
+
+      if (new RegExp(`^ {0,3}${escapeRegExp(fence)}[ \\t]*$`).test(line)) {
+        blockLines.push(line);
+        closed = true;
+        break;
+      }
+
+      blockLines.push(line);
+      codeLines.push(line);
+      nextIndex += 1;
+    }
+
+    if (!closed) {
+      output.push(...blockLines);
+      index = nextIndex - 1;
+      continue;
+    }
+
+    output.push(renderMermaidHtmlBlock(codeLines.join('\n'), blockLines.join('\n')));
+    index = nextIndex;
+  }
+
+  return output.join('\n');
+}
+
+function restoreMermaidFromEditor(content: string): string {
+  return content.replace(
+    /<section\b[^>]*data-veloca-mermaid="true"[^>]*data-mermaid-code="([^"]*)"[^>]*>[\s\S]*?<\/section>/gi,
+    (_match, encodedCode: string) => buildMermaidMarkdown(decodeOriginalMarkdown(encodedCode))
+  );
+}
+
+function renderMermaidHtmlBlock(code: string, originalMarkdown?: string): string {
+  const markdown = originalMarkdown ?? buildMermaidMarkdown(code);
+
+  return [
+    `<section class="veloca-mermaid-block" data-veloca-mermaid="true" data-mermaid-code="${encodeOriginalMarkdown(code)}" data-veloca-original-markdown="${encodeOriginalMarkdown(markdown)}">`,
+    '<pre><code class="language-mermaid">',
+    escapeHtmlText(code),
+    '</code></pre>',
+    '</section>'
+  ].join('');
+}
+
+function buildMermaidMarkdown(code: string): string {
+  return ['```mermaid', code.trimEnd(), '```'].join('\n');
 }
 
 const CALLOUT_OPENING_LINE_REGEXP = /^\s*>+\s*\[!([A-Z0-9_-]+)\]\s*(.*)$/i;
@@ -3168,6 +3552,17 @@ function escapeHtmlAttribute(value: unknown): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function escapeHtmlText(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function buildYoutubeEmbedUrl(url: string): string {
