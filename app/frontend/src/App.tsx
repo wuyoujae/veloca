@@ -1775,23 +1775,26 @@ export function App(): JSX.Element {
       <div className="app-layout">
         <aside className={isSidebarCollapsed ? 'sidebar collapsed' : 'sidebar'} aria-hidden={isSidebarCollapsed}>
           <div className="sidebar-header">
-            <div className="tabs-list">
+            <div className="sidebar-header-controls">
+              <span className="sidebar-header-spacer" aria-hidden="true" />
+              <div className="tabs-list sidebar-tabs-list">
+                <button
+                  className={sidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
+                  type="button"
+                  onClick={() => setSidebarTab('files')}
+                >
+                  Files
+                </button>
+                <button
+                  className={sidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
+                  type="button"
+                  onClick={() => setSidebarTab('outline')}
+                >
+                  Outline
+                </button>
+              </div>
               <button
-                className={sidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
-                type="button"
-                onClick={() => setSidebarTab('files')}
-              >
-                Files
-              </button>
-              <button
-                className={sidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
-                type="button"
-                onClick={() => setSidebarTab('outline')}
-              >
-                Outline
-              </button>
-              <button
-                className="tab-trigger sidebar-toggle-trigger"
+                className="sidebar-toggle-btn"
                 type="button"
                 aria-label="Collapse sidebar"
                 onClick={() => setIsSidebarCollapsed(true)}
