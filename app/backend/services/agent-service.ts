@@ -24,6 +24,22 @@ export interface AgentSendMessageResponse {
   sessionId: string;
 }
 
+export interface AgentStoredConversation {
+  answer: string;
+  attachments: AgentAttachmentSummary[];
+  id: string;
+  model: AgentUiModel;
+  prompt: string;
+  status: 'complete';
+  webSearch: boolean;
+}
+
+export interface AgentStoredSession {
+  id: string;
+  messages: AgentStoredConversation[];
+  name: string;
+}
+
 export type AgentStreamEvent =
   | {
       content: string;
@@ -49,6 +65,23 @@ const defaultAgentModel = 'google/gemini-3.1-flash-lite-preview';
 const defaultContextWindow = 128000;
 const maxPromptLength = 20000;
 let envLoaded = false;
+
+interface StoredAgentSessionSummary {
+  create_at?: unknown;
+  session_id?: unknown;
+  status?: unknown;
+}
+
+interface StoredAgentEntry {
+  content?: unknown;
+  create_at?: unknown;
+  entry_id?: unknown;
+  role?: unknown;
+}
+
+interface StoredAgentSessionData {
+  entries?: StoredAgentEntry[];
+}
 
 function loadLocalEnv(): void {
   if (envLoaded) {
@@ -219,6 +252,106 @@ function getChunkTextContent(chunk: unknown): string {
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Agent request failed.';
+}
+
+function getStoredSessionId(session: StoredAgentSessionSummary): string {
+  return typeof session.session_id === 'string' ? session.session_id : '';
+}
+
+function getStoredTimestamp(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value : new Date(0).toISOString();
+}
+
+function getStoredEntryContent(entry: StoredAgentEntry): string {
+  return typeof entry.content === 'string' ? entry.content : '';
+}
+
+function getStoredEntryId(entry: StoredAgentEntry, fallback: string): string {
+  return typeof entry.entry_id === 'string' && entry.entry_id.trim() ? entry.entry_id : fallback;
+}
+
+function getDisplayPrompt(content: string): string {
+  const metadataSeparator = '\n\n用户问题：\n';
+  const separatorIndex = content.lastIndexOf(metadataSeparator);
+
+  if (separatorIndex < 0) {
+    return content;
+  }
+
+  return content.slice(separatorIndex + metadataSeparator.length).trim();
+}
+
+function sortStoredSessions(sessions: StoredAgentSessionSummary[]): StoredAgentSessionSummary[] {
+  return [...sessions]
+    .filter((session) => getStoredSessionId(session) && Number(session.status ?? 0) !== 1)
+    .sort((left, right) => getStoredTimestamp(left.create_at).localeCompare(getStoredTimestamp(right.create_at)));
+}
+
+function mapStoredEntriesToConversations(sessionId: string, entries: StoredAgentEntry[]): AgentStoredConversation[] {
+  const conversations: AgentStoredConversation[] = [];
+
+  for (const [index, entry] of entries.entries()) {
+    const role = typeof entry.role === 'string' ? entry.role : '';
+    const content = getStoredEntryContent(entry);
+
+    if (role === 'user') {
+      conversations.push({
+        answer: '',
+        attachments: [],
+        id: getStoredEntryId(entry, `${sessionId}-message-${index}`),
+        model: 'lite',
+        prompt: getDisplayPrompt(content),
+        status: 'complete',
+        webSearch: false
+      });
+      continue;
+    }
+
+    if (role === 'assistant' && conversations.length > 0) {
+      const latestConversation = conversations[conversations.length - 1];
+      latestConversation.answer = latestConversation.answer ? `${latestConversation.answer}\n\n${content}` : content;
+    }
+  }
+
+  return conversations.filter((conversation) => conversation.prompt.trim() || conversation.answer.trim());
+}
+
+function readStoredSession(sessionId: string, displayIndex: number): AgentStoredSession {
+  const sessionData = veloca.ReadSessionData(sessionId) as StoredAgentSessionData;
+  const messages = mapStoredEntriesToConversations(sessionId, sessionData.entries ?? []);
+
+  return {
+    id: sessionId,
+    messages,
+    name: `Session ${displayIndex + 1}`
+  };
+}
+
+function readStoredSessionSummaries(): StoredAgentSessionSummary[] {
+  const sessions = veloca.GetAllSessions() as StoredAgentSessionSummary[];
+
+  return sortStoredSessions(Array.isArray(sessions) ? sessions : []);
+}
+
+export function createAgentSession(): AgentStoredSession {
+  const sessionId = veloca.CreateNewSession();
+  const sessions = readStoredSessionSummaries();
+  const sessionIndex = Math.max(
+    0,
+    sessions.findIndex((session) => getStoredSessionId(session) === sessionId)
+  );
+
+  return readStoredSession(sessionId, sessionIndex);
+}
+
+export function listAgentSessions(): AgentStoredSession[] {
+  const sessions = readStoredSessionSummaries();
+
+  if (sessions.length === 0) {
+    return [createAgentSession()];
+  }
+
+  return sessions.map((session, index) => readStoredSession(getStoredSessionId(session), index));
 }
 
 export async function sendAgentMessage(request: AgentSendMessageRequest): Promise<AgentSendMessageResponse> {

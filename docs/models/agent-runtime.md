@@ -163,13 +163,27 @@ In local-file mode, `otherone-agent` writes to:
 
 The file is relative to `process.cwd()`. It contains sessions, entries, tool results, token consumption, and compacted summaries. This runtime directory is ignored by Git via `.gitignore`.
 
-Before production integration, Veloca should decide whether Agent history should stay in this local JSON file, be copied into the existing SQLite backend, or be wrapped with a custom persistence layer. The package's built-in database helpers target PostgreSQL tables:
+Veloca keeps this Agent memory separate from product business data. Workspace data, settings, virtual documents, and assets continue to live in the app SQLite database under Electron's user data directory. Agent conversation memory currently stays in the `otherone-agent` local-file store only, because Veloca does not have an account system yet. When account support is added, this boundary should stay intact and the Agent memory layer can migrate independently.
+
+The package's built-in database helpers target PostgreSQL tables:
 
 - `veloca_session`
 - `veloca_entries`
 - `veloca_compacted_entries`
 
 Those tables intentionally do not match the current Veloca SQLite stack.
+
+## Session Management
+
+Veloca now exposes a small backend-owned session API over IPC:
+
+- `agent:list-sessions`: reads `otherone-agent` local-file sessions, creates one default session if the store is empty, and maps stored entries back into the Agent canvas shape.
+- `agent:create-session`: calls `veloca.CreateNewSession()` and returns the newly created local-file session.
+- `agent:send-message-stream`: sends the active session id into `veloca.InvokeAgent()`, so follow-up turns reuse the same context memory.
+
+The renderer no longer treats Agent sessions as throwaway UI-only state. On mount, the Agent palette calls `window.veloca.agent.listSessions()`, restores historical sessions, and selects the newest session by default. The session switcher uses the same `otherone-agent` session ids that are passed back to the runtime, which means switching to an older session and sending a new message continues that session's saved context.
+
+`otherone-agent` does not currently store Veloca UI metadata such as the selected Lite / Pro / Ultra badge, upload attachment UI state, or Web Search toggle separately. Persisted history therefore restores the durable user/assistant text from local memory and treats attachment chips as per-turn runtime context until a dedicated metadata layer is added.
 
 ## Configuration Notes
 
@@ -207,7 +221,7 @@ The current implementation uses a backend Agent service boundary:
 3. Resolve model selection to backend config.
 4. Call `veloca.InvokeAgent` from the main process with `stream: true`.
 5. Normalize raw chunks into UI events: `delta`, `tool_calls`, `complete`, and `error`.
-6. Persist the mapping between Veloca UI sessions and `otherone-agent` session ids.
+6. Use `otherone-agent` local-file session ids directly as Veloca Agent session ids.
 
 The preload layer creates a request id per send operation, listens for `agent:message-event`, filters events by request id, and returns an unsubscribe function to the renderer. The Agent palette appends each `delta` to the active AI message so the canvas updates while the model is still generating.
 

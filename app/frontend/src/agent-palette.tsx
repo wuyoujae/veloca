@@ -70,6 +70,29 @@ interface AgentSession {
   name: string;
 }
 
+interface StoredAgentAttachment {
+  id?: string;
+  mimeType: string;
+  name: string;
+  status: string;
+}
+
+interface StoredAgentConversation {
+  answer: string;
+  attachments?: StoredAgentAttachment[];
+  id: string;
+  model: AgentModelId;
+  prompt: string;
+  status: AgentMessageStatus;
+  webSearch: boolean;
+}
+
+interface StoredAgentSession {
+  id: string;
+  messages: StoredAgentConversation[];
+  name: string;
+}
+
 interface AgentEditingState {
   attachments: AgentAttachment[];
   messageId: string;
@@ -119,6 +142,45 @@ const attachmentStatusLabel: Record<AgentAttachmentStatus, string> = {
 const createAgentId = (prefix: string): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+const initialAgentSession: AgentSession = {
+  id: 'session-1',
+  messages: [],
+  name: 'Session 1'
+};
+
+function normalizeStoredModel(model: string): AgentModelId {
+  return model === 'pro' || model === 'ultra' ? model : 'lite';
+}
+
+function normalizeStoredStatus(status: string): AgentMessageStatus {
+  return status === 'error' || status === 'pending' ? status : 'complete';
+}
+
+function normalizeStoredAttachmentStatus(status: string): AgentAttachmentStatus {
+  return status === 'uploading' || status === 'parsing' || status === 'recording' ? status : 'ready';
+}
+
+function normalizeStoredSession(session: StoredAgentSession): AgentSession {
+  return {
+    id: session.id,
+    messages: session.messages.map((message) => ({
+      answer: message.answer,
+      attachments: (message.attachments ?? []).map((attachment) => ({
+        id: attachment.id ?? createAgentId('attachment'),
+        mimeType: attachment.mimeType,
+        name: attachment.name,
+        status: normalizeStoredAttachmentStatus(attachment.status)
+      })),
+      id: message.id,
+      model: normalizeStoredModel(message.model),
+      prompt: message.prompt,
+      status: normalizeStoredStatus(message.status),
+      webSearch: message.webSearch
+    })),
+    name: session.name
+  };
+}
+
 function AgentMarkdown({ content }: { content: string }): JSX.Element {
   const html = useMemo(() => renderMarkdownToSafeHtml(content), [content]);
 
@@ -142,14 +204,8 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   const [copiedAnswerId, setCopiedAnswerId] = useState<string | null>(null);
   const [editing, setEditing] = useState<AgentEditingState | null>(null);
   const [sendingMessageId, setSendingMessageId] = useState<string | null>(null);
-  const [sessions, setSessions] = useState<AgentSession[]>([
-    {
-      id: 'session-1',
-      messages: [],
-      name: 'Session 1'
-    }
-  ]);
-  const [activeSessionId, setActiveSessionId] = useState('session-1');
+  const [sessions, setSessions] = useState<AgentSession[]>([initialAgentSession]);
+  const [activeSessionId, setActiveSessionId] = useState(initialAgentSession.id);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -176,6 +232,51 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
       if (canvasControlsTimerRef.current) {
         window.clearTimeout(canvasControlsTimerRef.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    let canceled = false;
+
+    const loadSessions = async () => {
+      const listSessions = window.veloca?.agent.listSessions;
+
+      if (!listSessions) {
+        return;
+      }
+
+      try {
+        const storedSessions = await listSessions();
+
+        if (canceled || storedSessions.length === 0) {
+          return;
+        }
+
+        const nextSessions = storedSessions.map((session) => normalizeStoredSession(session as StoredAgentSession));
+
+        setSessions(nextSessions);
+        setActiveSessionId((current) =>
+          nextSessions.some((session) => session.id === current)
+            ? current
+            : nextSessions[nextSessions.length - 1].id
+        );
+      } catch (error) {
+        if (canceled) {
+          return;
+        }
+
+        onToast?.({
+          type: 'info',
+          title: 'Agent history unavailable',
+          description: error instanceof Error ? error.message : 'Unable to load local Agent sessions.'
+        });
+      }
+    };
+
+    void loadSessions();
+
+    return () => {
+      canceled = true;
     };
   }, []);
 
@@ -715,17 +816,46 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   };
 
   const createSession = () => {
-    const nextSession: AgentSession = {
-      id: createAgentId('session'),
-      messages: [],
-      name: `Session ${sessions.length + 1}`
-    };
+    const createStoredSession = window.veloca?.agent.createSession;
 
-    setSessions((current) => [...current, nextSession]);
-    setActiveSessionId(nextSession.id);
-    closeCanvas();
-    setEditing(null);
-    setPopover(null);
+    if (!createStoredSession) {
+      const nextSession: AgentSession = {
+        id: createAgentId('session'),
+        messages: [],
+        name: `Session ${sessions.length + 1}`
+      };
+
+      setSessions((current) => [...current, nextSession]);
+      setActiveSessionId(nextSession.id);
+      closeCanvas();
+      setEditing(null);
+      setPopover(null);
+      return;
+    }
+
+    void createStoredSession()
+      .then((storedSession) => {
+        const nextSession = normalizeStoredSession(storedSession as StoredAgentSession);
+
+        setSessions((current) => {
+          if (current.some((session) => session.id === nextSession.id)) {
+            return current.map((session) => (session.id === nextSession.id ? nextSession : session));
+          }
+
+          return [...current, nextSession];
+        });
+        setActiveSessionId(nextSession.id);
+        closeCanvas();
+        setEditing(null);
+        setPopover(null);
+      })
+      .catch((error) => {
+        onToast?.({
+          type: 'info',
+          title: 'Agent session unavailable',
+          description: error instanceof Error ? error.message : 'Unable to create a local Agent session.'
+        });
+      });
   };
 
   const switchSession = (sessionId: string) => {

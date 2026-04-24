@@ -18,7 +18,13 @@ import {
   setTheme,
   type ThemeMode
 } from '../services/settings-store';
-import { sendAgentMessage, streamAgentMessage, type AgentSendMessageRequest } from '../services/agent-service';
+import {
+  createAgentSession,
+  listAgentSessions,
+  sendAgentMessage,
+  streamAgentMessage,
+  type AgentSendMessageRequest
+} from '../services/agent-service';
 import {
   addWorkspaceFolders,
   createDatabaseWorkspace,
@@ -95,6 +101,12 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('agent:send-message', (_event, request: AgentSendMessageRequest) => {
     return sendAgentMessage(request);
+  });
+  ipcMain.handle('agent:list-sessions', () => {
+    return listAgentSessions();
+  });
+  ipcMain.handle('agent:create-session', () => {
+    return createAgentSession();
   });
   ipcMain.on('agent:send-message-stream', (event, requestId: string, request: AgentSendMessageRequest) => {
     if (!requestId || typeof requestId !== 'string') {

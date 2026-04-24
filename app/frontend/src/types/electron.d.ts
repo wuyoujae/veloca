@@ -75,6 +75,22 @@ interface AgentSendMessageResponse {
   sessionId: string;
 }
 
+interface AgentStoredConversation {
+  answer: string;
+  attachments: AgentAttachmentSummary[];
+  id: string;
+  model: AgentUiModel;
+  prompt: string;
+  status: 'complete';
+  webSearch: boolean;
+}
+
+interface AgentStoredSession {
+  id: string;
+  messages: AgentStoredConversation[];
+  name: string;
+}
+
 type AgentStreamEvent =
   | {
       content: string;
@@ -135,6 +151,8 @@ declare global {
         platform: NodeJS.Platform;
       };
       agent: {
+        listSessions: () => Promise<AgentStoredSession[]>;
+        createSession: () => Promise<AgentStoredSession>;
         sendMessage: (payload: AgentSendMessageRequest) => Promise<AgentSendMessageResponse>;
         streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => () => void;
         onOpenPalette: (callback: () => void) => () => void;

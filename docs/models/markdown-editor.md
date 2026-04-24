@@ -34,8 +34,8 @@
 - 画布左上 session 控件和右上折叠控件在打开或发送后短暂出现，用户 4 秒无画布操作后上滑淡出；用户上滑查看历史内容时重新出现，向下滚动时隐藏。
 - 对话画布右上角按钮用于折叠画布；折叠后，如果当前 session 已有消息，prompt 工具栏右侧会出现历史按钮用于重新展开。
 - `Back to latest` 只会在当前 session 至少有两轮对话，且用户滚动到非最新纸张时，从画布底部弹出。
-- 对话画布左上角提供 session 控制菜单，第一个 item 固定为 `New Session`，后续 item 为已有 session。
-- 当前 Agent 回复、语音识别、Web Search 和附件处理均为前端原型状态，后续接入真实 Agent 服务时需要替换为后端 API、请求拦截器和统一消息组件处理。
+- 对话画布左上角提供 session 控制菜单，第一个 item 固定为 `New Session`，后续 item 为从本地 `otherone-agent` 记忆中恢复的已有 session；新建 session 会通过后端 IPC 落入 Agent 本地文件存储。
+- 当前 Agent 回复已经接入后端流式 Agent 服务；语音识别、Web Search 和附件真实解析仍为前端原型状态，后续需要替换为后端 API、请求拦截器和统一消息组件处理。
 
 ## 打开文件与标签
 
