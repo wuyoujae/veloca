@@ -2229,6 +2229,7 @@ button {
   color: var(--muted-foreground);
   overflow: hidden;
   white-space: nowrap;
+  user-select: none;
 }
 
 .markdown-body pre > .veloca-code-toolbar > .veloca-code-language,
@@ -2242,6 +2243,7 @@ button {
   font-weight: 600;
   line-height: 1;
   text-transform: uppercase;
+  user-select: none;
 }
 
 .markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button,
