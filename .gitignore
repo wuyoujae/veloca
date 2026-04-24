@@ -2,6 +2,7 @@ node_modules/
 dist/
 out/
 release/
+.veloca/
 .DS_Store
 *.log
 .env
