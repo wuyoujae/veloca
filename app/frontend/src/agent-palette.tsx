@@ -135,6 +135,9 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   const [inlineDictating, setInlineDictating] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [showScrollLatest, setShowScrollLatest] = useState(false);
+  const [showResumeAutoScroll, setShowResumeAutoScroll] = useState(false);
+  const [autoScrollLocked, setAutoScrollLockedState] = useState(false);
+  const [canvasControlsVisible, setCanvasControlsVisible] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [copiedAnswerId, setCopiedAnswerId] = useState<string | null>(null);
   const [editing, setEditing] = useState<AgentEditingState | null>(null);
@@ -152,6 +155,10 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const timersRef = useRef<number[]>([]);
+  const canvasControlsTimerRef = useRef<number | null>(null);
+  const autoScrollLockedRef = useRef(false);
+  const lastCanvasScrollTopRef = useRef(0);
+  const programmaticScrollUntilRef = useRef(0);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === activeSessionId) ?? sessions[0],
@@ -166,6 +173,9 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     return () => {
       timersRef.current.forEach((timer) => window.clearTimeout(timer));
       timersRef.current = [];
+      if (canvasControlsTimerRef.current) {
+        window.clearTimeout(canvasControlsTimerRef.current);
+      }
     };
   }, []);
 
@@ -213,11 +223,12 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
   useEffect(() => {
     if (!canvasOpen) {
       setShowScrollLatest(false);
+      setShowResumeAutoScroll(false);
       return;
     }
 
-    window.requestAnimationFrame(checkCanvasScroll);
-  }, [activeMessages.length, canvasOpen]);
+    window.requestAnimationFrame(updateCanvasScrollState);
+  }, [activeMessages.length, canvasOpen, sendingMessageId]);
 
   const pushTimer = (timer: number) => {
     timersRef.current.push(timer);
@@ -231,48 +242,171 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     updateSession(activeSessionId, updater);
   };
 
-  const checkCanvasScroll = () => {
+  const setAutoScrollLocked = (locked: boolean) => {
+    autoScrollLockedRef.current = locked;
+    setAutoScrollLockedState(locked);
+  };
+
+  const getCanvasScrollSnapshot = () => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) {
+      return null;
+    }
+
+    const papers = canvas.querySelectorAll<HTMLElement>('.agent-qa-paper');
+    const latestPaper = papers.item(papers.length - 1);
+
+    if (!latestPaper) {
+      return {
+        isAtBottom: true,
+        isViewingLatest: true,
+        latestTop: 0
+      };
+    }
+
+    const latestTop = latestPaper.offsetTop;
+    const isViewingLatest = canvas.scrollTop >= latestTop - 72;
+    const isAtBottom = canvas.scrollHeight - canvas.scrollTop - canvas.clientHeight < 18;
+
+    return {
+      isAtBottom,
+      isViewingLatest,
+      latestTop
+    };
+  };
+
+  const updateCanvasScrollState = () => {
+    const snapshot = getCanvasScrollSnapshot();
+
+    if (!snapshot) {
+      return;
+    }
+
+    const shouldShowLatest = activeMessages.length > 1 && !snapshot.isViewingLatest;
+
+    setShowScrollLatest(shouldShowLatest);
+    setShowResumeAutoScroll(
+      Boolean(sendingMessageId) && !shouldShowLatest && snapshot.isViewingLatest && !autoScrollLockedRef.current && !snapshot.isAtBottom
+    );
+
+    if (snapshot.isAtBottom && snapshot.isViewingLatest) {
+      setAutoScrollLocked(true);
+    }
+  };
+
+  const clearCanvasControlsTimer = () => {
+    if (!canvasControlsTimerRef.current) {
+      return;
+    }
+
+    window.clearTimeout(canvasControlsTimerRef.current);
+    canvasControlsTimerRef.current = null;
+  };
+
+  const hideCanvasControls = () => {
+    clearCanvasControlsTimer();
+    setCanvasControlsVisible(false);
+  };
+
+  const scheduleCanvasControlsHide = () => {
+    clearCanvasControlsTimer();
+    canvasControlsTimerRef.current = window.setTimeout(() => {
+      setCanvasControlsVisible(false);
+      canvasControlsTimerRef.current = null;
+    }, 4000);
+  };
+
+  const revealCanvasControls = () => {
+    setCanvasControlsVisible(true);
+    scheduleCanvasControlsHide();
+  };
+
+  const scrollToCanvasBottom = (behavior: ScrollBehavior = 'smooth') => {
     const canvas = canvasRef.current;
 
     if (!canvas) {
       return;
     }
 
-    const papers = canvas.querySelectorAll<HTMLElement>('.agent-qa-paper');
-    const latestPaper = papers.item(papers.length - 1);
-    const isBeforeLatestPaper = latestPaper ? canvas.scrollTop < latestPaper.offsetTop - 80 : false;
-
-    setShowScrollLatest(activeMessages.length > 1 && isBeforeLatestPaper);
+    programmaticScrollUntilRef.current = Date.now() + (behavior === 'smooth' ? 650 : 120);
+    canvas.scrollTo({
+      behavior,
+      top: canvas.scrollHeight - canvas.clientHeight
+    });
   };
 
   const scrollToLatest = () => {
+    setAutoScrollLocked(true);
+    setShowScrollLatest(false);
+    setShowResumeAutoScroll(false);
+    scrollToCanvasBottom('smooth');
+    hideCanvasControls();
+  };
+
+  const resumeAutoScroll = () => {
+    setAutoScrollLocked(true);
+    setShowResumeAutoScroll(false);
+    scrollToCanvasBottom('smooth');
+  };
+
+  const followStreamToBottom = () => {
+    if (!autoScrollLockedRef.current) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => scrollToCanvasBottom('auto'));
+  };
+
+  const scheduleScrollToLatest = (lockToBottom = false) => {
+    if (lockToBottom) {
+      setAutoScrollLocked(true);
+    }
+
+    window.setTimeout(() => {
+      if (lockToBottom || autoScrollLockedRef.current) {
+        scrollToCanvasBottom('smooth');
+      }
+      updateCanvasScrollState();
+    }, 60);
+  };
+
+  const handleCanvasScroll = () => {
     const canvas = canvasRef.current;
 
     if (!canvas) {
       return;
     }
 
-    const papers = canvas.querySelectorAll<HTMLElement>('.agent-qa-paper');
-    const latestPaper = papers.item(papers.length - 1);
+    const currentScrollTop = canvas.scrollTop;
+    const previousScrollTop = lastCanvasScrollTopRef.current;
+    const movedUp = currentScrollTop < previousScrollTop - 6;
+    const movedDown = currentScrollTop > previousScrollTop + 6;
+    const isProgrammaticScroll = Date.now() < programmaticScrollUntilRef.current;
 
-    canvas.scrollTo({
-      behavior: 'smooth',
-      top: latestPaper?.offsetTop ?? canvas.scrollHeight
-    });
-    setShowScrollLatest(false);
-  };
+    lastCanvasScrollTopRef.current = currentScrollTop;
 
-  const scheduleScrollToLatest = () => {
-    window.setTimeout(scrollToLatest, 60);
+    if (movedUp) {
+      setAutoScrollLocked(false);
+      revealCanvasControls();
+    } else if (movedDown && !isProgrammaticScroll) {
+      hideCanvasControls();
+    }
+
+    updateCanvasScrollState();
   };
 
   const openCanvas = () => {
     onCanvasOpen?.();
     setCanvasOpen(true);
+    revealCanvasControls();
   };
 
   const closeCanvas = () => {
     setCanvasOpen(false);
+    setAutoScrollLocked(false);
+    setShowResumeAutoScroll(false);
+    hideCanvasControls();
     onCanvasClose?.();
   };
 
@@ -459,6 +593,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
                 : message
             )
           }));
+          followStreamToBottom();
           return;
         }
 
@@ -566,7 +701,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     setAttachments([]);
     openCanvas();
     setEditing(null);
-    scheduleScrollToLatest();
+    scheduleScrollToLatest(true);
     void requestAgentAnswer(sessionId, messageId, prompt, model, messageAttachments, webSearchEnabled);
   };
 
@@ -597,7 +732,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
     setActiveSessionId(sessionId);
     setEditing(null);
     setPopover(null);
-    window.requestAnimationFrame(checkCanvasScroll);
+    window.requestAnimationFrame(updateCanvasScrollState);
   };
 
   const startEditMessage = (message: AgentConversation) => {
@@ -645,7 +780,8 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
       )
     }));
     setEditing(null);
-    scheduleScrollToLatest();
+    openCanvas();
+    scheduleScrollToLatest(true);
     void requestAgentAnswer(sessionId, messageId, prompt, nextModel, editingAttachments, nextWebSearchEnabled);
   };
 
@@ -718,6 +854,7 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
         'agent-overlay',
         visible ? 'is-visible' : '',
         canvasOpen ? 'has-open-canvas' : '',
+        autoScrollLocked ? 'is-auto-scrolling' : '',
         position.mode === 'center' ? 'is-centered' : ''
       ]
         .filter(Boolean)
@@ -869,17 +1006,8 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
         <input className="agent-file-input" multiple onChange={handleFileInputChange} ref={fileInputRef} type="file" />
       </section>
 
-      <div className={`agent-canvas${canvasOpen ? ' open' : ''}`} ref={canvasRef} onScroll={checkCanvasScroll}>
-        <button
-          className={`agent-scroll-to-bottom-btn${showScrollLatest ? ' show' : ''}`}
-          type="button"
-          onClick={scrollToLatest}
-        >
-          <ArrowDown size={14} />
-          <span>Back to latest</span>
-        </button>
-
-        <div className="agent-canvas-control">
+      <div className={`agent-canvas${canvasOpen ? ' open' : ''}`} ref={canvasRef} onScroll={handleCanvasScroll}>
+        <div className={`agent-canvas-control${canvasControlsVisible || popover === 'session' ? ' show' : ''}`}>
           <div className="agent-session-control-wrap">
             <button
               className="agent-control-session"
@@ -1017,22 +1145,43 @@ export function AgentPalette({ onCanvasClose, onCanvasOpen, onToast, position, v
                   )}
                 </div>
 
-                <div className="agent-ai-actions">
-                  <button
-                    className={copiedAnswerId === message.id ? 'copied' : ''}
-                    type="button"
-                    title="Copy"
-                    aria-label="Copy AI response"
-                    disabled={!message.answer.trim()}
-                    onClick={() => void copyAnswer(message)}
-                  >
-                    <Copy size={14} />
-                  </button>
-                </div>
+                {message.status === 'complete' && message.answer.trim() && (
+                  <div className="agent-ai-actions">
+                    <button
+                      className={copiedAnswerId === message.id ? 'copied' : ''}
+                      type="button"
+                      title="Copy"
+                      aria-label="Copy AI response"
+                      onClick={() => void copyAnswer(message)}
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
             </section>
           );
         })}
+      </div>
+
+      <div className={`agent-canvas-floating-actions${canvasOpen ? ' show' : ''}`}>
+        <button
+          className={`agent-floating-action agent-back-latest-btn${showScrollLatest ? ' show' : ''}`}
+          type="button"
+          onClick={scrollToLatest}
+        >
+          <ArrowDown size={14} />
+          <span>Back to latest</span>
+        </button>
+        <button
+          className={`agent-floating-action agent-resume-autoscroll-btn${!showScrollLatest && showResumeAutoScroll ? ' show' : ''}`}
+          type="button"
+          aria-label="Resume auto-scroll"
+          title="Resume auto-scroll"
+          onClick={resumeAutoScroll}
+        >
+          <ArrowDown size={16} />
+        </button>
       </div>
     </div>
   );
