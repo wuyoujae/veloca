@@ -4,6 +4,8 @@
 
 Veloca now includes `otherone-agent@^0.2.0`, a Node.js and TypeScript Agent runtime library. The package is installed from npm and exposes a CommonJS entry at `dist/index.js` with TypeScript declarations at `dist/index.d.ts`.
 
+`otherone-agent@0.2.0` publishes CommonJS output and calls `require('uuid')` internally. `uuid@13` is ESM-only and crashes under Electron's embedded Node 20 CommonJS loader with `ERR_REQUIRE_ESM`, so Veloca pins the package's transitive `uuid` dependency to `11.1.0` through npm `overrides`. Keep this override until `otherone-agent` publishes an ESM-safe build or removes the CommonJS `require('uuid')` path.
+
 The public import is:
 
 ```ts
