@@ -82,6 +82,8 @@ Use information in this priority order:
 <tools-use-demo>
 
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
+- Use `get_workspace_directory_tree` to inspect the active workspace structure before making claims about available folders or files.
+- When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
 - Use tools before making claims about project-specific structure, terminology, requirements, or prior decisions.
 - Do not claim that you searched, opened, read, or verified files unless the provided context or tools actually support that claim.
 
@@ -130,10 +132,30 @@ Use information in this priority order:
 - 后端在调用 `otherone-agent` 前生成完整 system prompt，并将 `${CURRENTTIME}`、`${CURRENT_FILE_PATH}`、`${WORKSPACE_ROOT_PATH}` 和 `${WORKSPACE_TYPE}` 替换为真实请求值。
 - `${SELECTED_TEXT}` 不写入 system prompt，而是以 `<selected-text>` 独立块注入到本轮 user prompt 中。
 - 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
+- 后端已经暴露只读 tool `get_workspace_directory_tree`，用于获取当前活动工作区目录树。
+
+## Workspace Directory Tree Tool
+
+`get_workspace_directory_tree` 是第一批 Agent workspace tool。它只读取当前请求上下文中的活动工作区，不接受任意路径参数。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `get_workspace_directory_tree` |
+| 参数 | `velocaignore?: string` |
+| 返回内容 | 当前工作区根路径、当前文件路径、工作区类型、压缩后的目录树、忽略规则和截断统计。 |
+| 安全边界 | 只读；只允许读取当前 active workspace root；不会读取文件内容。 |
+
+`velocaignore` 使用 `.gitignore` 风格的基础语义，用于过滤不应进入目录树上下文的目录或文件。最终忽略规则由三部分合并：
+
+- Veloca 内置默认规则。
+- 工作区根目录下的 `.velocaignore` 文件。
+- tool 调用时传入的 `velocaignore` 参数。
+
+当前基础 `.velocaignore` 重点过滤 `node_modules/`、`.git/`、`.veloca/`、构建产物、缓存、日志、环境变量文件和 SQLite 文件，避免目录树撑爆上下文或暴露不必要的本地配置。
 
 ## 后续扩展
 
-- 设计并接入真实 workspace tools，例如列目录、读取当前文件、读取邻近文件、搜索工作区内容。
+- 继续设计 workspace tools，例如读取当前文件、读取邻近文件、搜索工作区内容。
 - 为数据库工作区提供独立读取工具，避免将 `veloca-db://...` 虚拟路径误用为本地路径。
 - 根据任务类型智能注入当前文件全文、当前标题段落、文档大纲或附近上下文。
 - 为写入类工具设计权限边界和用户确认机制，避免 Agent 在未确认时直接修改用户文档。

@@ -153,6 +153,8 @@ await veloca.InvokeAgent(input, {
 
 Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. For Veloca-owned tools, define argument schemas with stable property order, or wrap the library behind an adapter that converts arguments into a named object before calling product code.
 
+Veloca currently exposes `get_workspace_directory_tree` as a backend-owned read-only tool. It returns a compact directory tree for the active workspace only, merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
+
 ## Persistence
 
 In local-file mode, `otherone-agent` writes to:

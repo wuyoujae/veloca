@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { basename, join, relative, sep } from 'node:path';
 import { veloca } from 'otherone-agent';
+import { getWorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
 
@@ -73,8 +74,35 @@ export type AgentStreamEvent =
 const defaultAgentBaseUrl = 'https://openrouter.ai/api/v1';
 const defaultAgentModel = 'google/gemini-3.1-flash-lite-preview';
 const defaultContextWindow = 128000;
+const maxDirectoryTreeCharacters = 30000;
+const maxDirectoryTreeDepth = 8;
+const maxDirectoryTreeNodes = 1200;
 const maxPromptLength = 20000;
 let envLoaded = false;
+
+const defaultVelocaIgnorePatterns = [
+  '.DS_Store',
+  '.cache/',
+  '.env',
+  '.env.*',
+  '.git/',
+  '.next/',
+  '.turbo/',
+  '.veloca/',
+  '*.log',
+  '*.sqlite',
+  '*.sqlite-*',
+  '*.tmp',
+  'build/',
+  'coverage/',
+  'dist/',
+  'node_modules/',
+  'out/',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'release/',
+  'yarn.lock'
+];
 
 interface StoredAgentSessionSummary {
   create_at?: unknown;
@@ -91,6 +119,20 @@ interface StoredAgentEntry {
 
 interface StoredAgentSessionData {
   entries?: StoredAgentEntry[];
+}
+
+interface DirectoryTreeStats {
+  directories: number;
+  files: number;
+  ignored: number;
+  maxDepth: number;
+  maxNodes: number;
+  truncated: boolean;
+  unreadable: number;
+}
+
+interface DirectoryTreeWalkState extends DirectoryTreeStats {
+  nodes: number;
 }
 
 function loadLocalEnv(): void {
@@ -196,6 +238,301 @@ function getWorkspaceType(context?: AgentRuntimeContext): AgentWorkspaceType {
   return 'none';
 }
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseVelocaIgnore(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [];
+  }
+
+  return value
+    .split(/\r?\n|,/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && !line.startsWith('!'));
+}
+
+function readWorkspaceVelocaIgnore(rootPath: string, workspaceType: AgentWorkspaceType): string[] {
+  if (workspaceType !== 'filesystem') {
+    return [];
+  }
+
+  const ignorePath = join(rootPath, '.velocaignore');
+
+  if (!existsSync(ignorePath)) {
+    return [];
+  }
+
+  try {
+    return parseVelocaIgnore(readFileSync(ignorePath, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeTreePath(value: string): string {
+  return value.split(sep).join('/').replace(/^\/+/, '');
+}
+
+function getPathSegments(relativePath: string): string[] {
+  return normalizeTreePath(relativePath).split('/').filter(Boolean);
+}
+
+function matchWildcard(pattern: string, value: string): boolean {
+  const regex = new RegExp(`^${pattern.split('*').map(escapeRegex).join('.*')}$`);
+
+  return regex.test(value);
+}
+
+function matchesVelocaIgnorePattern(pattern: string, relativePath: string, name: string, isDirectory: boolean): boolean {
+  const directoryOnly = pattern.endsWith('/');
+  const rawPattern = pattern.replace(/^\/+/, '').replace(/\/+$/, '');
+  const normalizedPath = normalizeTreePath(relativePath);
+  const normalizedPattern = normalizeTreePath(rawPattern);
+
+  if (!normalizedPattern || (directoryOnly && !isDirectory)) {
+    return false;
+  }
+
+  if (normalizedPattern.includes('/')) {
+    return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern}/`);
+  }
+
+  if (normalizedPattern.includes('*')) {
+    return matchWildcard(normalizedPattern, name);
+  }
+
+  return getPathSegments(normalizedPath).includes(normalizedPattern);
+}
+
+function shouldIgnoreTreeEntry(patterns: string[], relativePath: string, name: string, isDirectory: boolean): boolean {
+  return patterns.some((pattern) => matchesVelocaIgnorePattern(pattern, relativePath, name, isDirectory));
+}
+
+function createDirectoryTreeState(): DirectoryTreeWalkState {
+  return {
+    directories: 0,
+    files: 0,
+    ignored: 0,
+    maxDepth: maxDirectoryTreeDepth,
+    maxNodes: maxDirectoryTreeNodes,
+    nodes: 0,
+    truncated: false,
+    unreadable: 0
+  };
+}
+
+function pushDirectoryTreeLine(lines: string[], depth: number, name: string, isDirectory: boolean): void {
+  lines.push(`${'  '.repeat(depth)}- ${name}${isDirectory ? '/' : ''}`);
+}
+
+function limitDirectoryTreeText(lines: string[], state: DirectoryTreeWalkState): string {
+  const text = lines.join('\n');
+
+  if (text.length <= maxDirectoryTreeCharacters) {
+    return text;
+  }
+
+  state.truncated = true;
+  return `${text.slice(0, maxDirectoryTreeCharacters)}\n... truncated because the directory tree exceeded ${maxDirectoryTreeCharacters} characters.`;
+}
+
+function getDirectoryTreePatterns(rootPath: string, workspaceType: AgentWorkspaceType, velocaignore: string | undefined): string[] {
+  return Array.from(
+    new Set([
+      ...defaultVelocaIgnorePatterns,
+      ...readWorkspaceVelocaIgnore(rootPath, workspaceType),
+      ...parseVelocaIgnore(velocaignore)
+    ])
+  );
+}
+
+function findWorkspaceRootNode(rootPath: string | undefined, workspaceType: AgentWorkspaceType): WorkspaceTreeNode | null {
+  if (!rootPath || workspaceType === 'none') {
+    return null;
+  }
+
+  return (
+    getWorkspaceSnapshot().tree.find((node) => node.type === 'folder' && node.source === workspaceType && node.path === rootPath) ??
+    null
+  );
+}
+
+function walkFilesystemDirectory(
+  directoryPath: string,
+  rootPath: string,
+  patterns: string[],
+  lines: string[],
+  state: DirectoryTreeWalkState,
+  depth: number
+): void {
+  if (state.truncated || depth > maxDirectoryTreeDepth) {
+    state.truncated = state.truncated || depth > maxDirectoryTreeDepth;
+    return;
+  }
+
+  let entries;
+
+  try {
+    entries = readdirSync(directoryPath, { withFileTypes: true });
+  } catch {
+    state.unreadable += 1;
+    return;
+  }
+
+  entries = entries.sort((left, right) => {
+    if (left.isDirectory() !== right.isDirectory()) {
+      return left.isDirectory() ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+
+  for (const entry of entries) {
+    if (state.nodes >= maxDirectoryTreeNodes) {
+      state.truncated = true;
+      return;
+    }
+
+    if (!entry.isDirectory() && !entry.isFile()) {
+      state.ignored += 1;
+      continue;
+    }
+
+    const isDirectory = entry.isDirectory();
+    const entryPath = join(directoryPath, entry.name);
+    const relativePath = normalizeTreePath(relative(rootPath, entryPath));
+
+    if (entry.isSymbolicLink() || shouldIgnoreTreeEntry(patterns, relativePath, entry.name, isDirectory)) {
+      state.ignored += 1;
+      continue;
+    }
+
+    state.nodes += 1;
+    pushDirectoryTreeLine(lines, depth, entry.name, isDirectory);
+
+    if (isDirectory) {
+      state.directories += 1;
+      walkFilesystemDirectory(entryPath, rootPath, patterns, lines, state, depth + 1);
+    } else if (entry.isFile()) {
+      state.files += 1;
+    }
+  }
+}
+
+function walkWorkspaceTreeNode(
+  node: WorkspaceTreeNode,
+  patterns: string[],
+  lines: string[],
+  state: DirectoryTreeWalkState,
+  depth: number
+): void {
+  if (state.truncated || depth > maxDirectoryTreeDepth) {
+    state.truncated = state.truncated || depth > maxDirectoryTreeDepth;
+    return;
+  }
+
+  for (const child of node.children ?? []) {
+    if (state.nodes >= maxDirectoryTreeNodes) {
+      state.truncated = true;
+      return;
+    }
+
+    if (shouldIgnoreTreeEntry(patterns, child.relativePath, child.name, child.type === 'folder')) {
+      state.ignored += 1;
+      continue;
+    }
+
+    state.nodes += 1;
+    pushDirectoryTreeLine(lines, depth, child.name, child.type === 'folder');
+
+    if (child.type === 'folder') {
+      state.directories += 1;
+      walkWorkspaceTreeNode(child, patterns, lines, state, depth + 1);
+    } else {
+      state.files += 1;
+    }
+  }
+}
+
+function getWorkspaceDirectoryTree(context: AgentRuntimeContext | undefined, velocaignore: string | undefined) {
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const rootNode = findWorkspaceRootNode(workspaceRootPath, workspaceType);
+
+  if (!workspaceRootPath || !rootNode) {
+    return {
+      error: 'No active workspace root is available for directory tree inspection.',
+      ok: false,
+      workspaceType
+    };
+  }
+
+  const patterns = getDirectoryTreePatterns(workspaceRootPath, workspaceType, velocaignore);
+  const state = createDirectoryTreeState();
+  const rootName = rootNode.name || basename(workspaceRootPath) || workspaceRootPath;
+  const lines = [`${rootName}/`];
+
+  if (workspaceType === 'filesystem') {
+    walkFilesystemDirectory(workspaceRootPath, workspaceRootPath, patterns, lines, state, 1);
+  } else {
+    walkWorkspaceTreeNode(rootNode, patterns, lines, state, 1);
+  }
+
+  const tree = limitDirectoryTreeText(lines, state);
+  const stats: DirectoryTreeStats = {
+    directories: state.directories,
+    files: state.files,
+    ignored: state.ignored,
+    maxDepth: state.maxDepth,
+    maxNodes: state.maxNodes,
+    truncated: state.truncated,
+    unreadable: state.unreadable
+  };
+
+  return {
+    currentFilePath: getContextValue(context?.currentFilePath, 'No active file'),
+    ignoredPatterns: patterns,
+    ok: true,
+    stats,
+    tree,
+    workspaceRootPath,
+    workspaceType
+  };
+}
+
+function buildAgentTools() {
+  return [
+    {
+      type: 'function',
+      function: {
+        name: 'get_workspace_directory_tree',
+        description:
+          'Return a compact directory tree for the active Veloca workspace. Use this when the user asks about the workspace structure or when you need to discover nearby context before answering.',
+        parameters: {
+          type: 'object',
+          properties: {
+            velocaignore: {
+              type: 'string',
+              description:
+                'Optional .velocaignore-style ignore patterns separated by newlines or commas. These patterns are merged with Veloca defaults and the workspace .velocaignore file.'
+            }
+          },
+          required: []
+        }
+      }
+    }
+  ];
+}
+
+function buildAgentToolRealizers(context?: AgentRuntimeContext) {
+  return {
+    get_workspace_directory_tree: (velocaignore?: string) =>
+      getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined)
+  };
+}
+
 function buildSystemPrompt(context?: AgentRuntimeContext): string {
   const replacements = {
     CURRENTTIME: getCurrentLocalTime(),
@@ -264,6 +601,8 @@ Use information in this priority order:
 <tools-use-demo>
 
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
+- Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
+- When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
 - Use tools before making claims about project-specific structure, terminology, requirements, or prior decisions.
 - Do not claim that you searched, opened, read, or verified files unless the provided context or tools actually support that claim.
 
@@ -332,6 +671,10 @@ function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolea
       stream,
       systemPrompt: buildSystemPrompt(request.context),
       temperature: 0.4,
+      toolChoice: 'auto' as const,
+      tools: buildAgentTools(),
+      tools_realize: buildAgentToolRealizers(request.context),
+      parallelToolCalls: false,
       userPrompt: buildUserPrompt(prompt, request)
     },
     input: {

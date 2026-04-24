@@ -1,0 +1,25 @@
+# Veloca Agent workspace tree ignore rules.
+# These patterns keep directory-tree tool output compact and prevent noisy local files
+# from entering Agent context. They are merged with Veloca's built-in defaults.
+
+.DS_Store
+.cache/
+.env
+.env.*
+.git/
+.next/
+.turbo/
+.veloca/
+*.log
+*.sqlite
+*.sqlite-*
+*.tmp
+build/
+coverage/
+dist/
+node_modules/
+out/
+package-lock.json
+pnpm-lock.yaml
+release/
+yarn.lock
