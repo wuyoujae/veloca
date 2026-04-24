@@ -80,6 +80,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.agent-window-html,
+.agent-window-body,
+.agent-window-body #root {
+  background: transparent;
+  overflow: hidden;
+}
+
+.agent-window-shell {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
 button,
 select {
   font: inherit;
@@ -1104,10 +1117,6 @@ button {
   display: block;
   padding: 0;
   overflow: hidden;
-}
-
-.editor-scroll-area.has-agent-overlay:not(.is-split-view) {
-  padding-bottom: max(calc(var(--statusbar-clearance) + 8px), 340px);
 }
 
 .split-editor-grid {

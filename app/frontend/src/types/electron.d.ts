@@ -53,9 +53,20 @@ interface FileOperationResult {
   path?: string;
 }
 
+interface AgentWindowAnchor {
+  mode: 'center' | 'selection';
+  x: number;
+  y: number;
+}
+
 declare global {
   interface Window {
     veloca?: {
+      agent: {
+        open: (anchor?: AgentWindowAnchor) => Promise<void>;
+        close: () => Promise<void>;
+        onOpenRequest: (callback: () => void) => () => void;
+      };
       settings: {
         getTheme: () => Promise<'dark' | 'light'>;
         setTheme: (theme: 'dark' | 'light') => Promise<'dark' | 'light'>;

@@ -9,6 +9,17 @@ import type {
 } from '../services/workspace-service';
 
 contextBridge.exposeInMainWorld('veloca', {
+  agent: {
+    open: (anchor?: { mode: 'center' | 'selection'; x: number; y: number }) =>
+      ipcRenderer.invoke('agent:open', anchor) as Promise<void>,
+    close: () => ipcRenderer.invoke('agent:close') as Promise<void>,
+    onOpenRequest: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('agent:request-open', listener);
+
+      return () => ipcRenderer.removeListener('agent:request-open', listener);
+    }
+  },
   settings: {
     getTheme: () => ipcRenderer.invoke('settings:get-theme') as Promise<ThemeMode>,
     setTheme: (theme: ThemeMode) => ipcRenderer.invoke('settings:set-theme', theme) as Promise<ThemeMode>,

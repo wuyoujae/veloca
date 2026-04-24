@@ -64,7 +64,6 @@ import {
   type WorkspaceAssetPayload,
   type WorkspaceResolvedAsset
 } from './rich-markdown';
-import { AgentPalette, type AgentPaletteAnchor } from './agent-palette';
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
@@ -163,6 +162,18 @@ interface EditorModeOption {
   name: string;
 }
 
+interface AgentViewportAnchor {
+  left: number;
+  mode: 'center' | 'selection';
+  top: number;
+}
+
+interface AgentWindowAnchor {
+  mode: 'center' | 'selection';
+  x: number;
+  y: number;
+}
+
 const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
   { id: 'standard', name: 'Standard Markdown' },
   { id: 'agent', name: 'Agent Mode' },
@@ -211,7 +222,7 @@ function clampNumber(value: number, minimum: number, maximum: number): number {
   return Math.min(Math.max(value, minimum), maximum);
 }
 
-function getDefaultAgentPaletteAnchor(): AgentPaletteAnchor {
+function getDefaultAgentPaletteAnchor(): AgentViewportAnchor {
   if (typeof window === 'undefined') {
     return {
       left: agentPaletteWidth / 2,
@@ -265,7 +276,7 @@ function getSelectionScrollContainer(range: Range): HTMLElement | null {
   return scrollContainer instanceof HTMLElement ? scrollContainer : null;
 }
 
-function getAgentPaletteAnchor(): AgentPaletteAnchor {
+function getAgentPaletteAnchor(): AgentViewportAnchor {
   const range = getActiveEditorSelectionRange();
   const rect = range ? getLastSelectionLineRect(range) : null;
 
@@ -280,6 +291,14 @@ function getAgentPaletteAnchor(): AgentPaletteAnchor {
     left: clampNumber(rect.left + rect.width / 2, halfWidth + agentViewportGutter, window.innerWidth - halfWidth - agentViewportGutter),
     mode: 'selection',
     top: Math.max(54, rect.bottom + 12)
+  };
+}
+
+function toAgentWindowAnchor(anchor: AgentViewportAnchor): AgentWindowAnchor {
+  return {
+    mode: anchor.mode,
+    x: window.screenX + anchor.left,
+    y: window.screenY + anchor.top
   };
 }
 
@@ -324,8 +343,6 @@ export function App(): JSX.Element {
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
-  const [agentPaletteOpen, setAgentPaletteOpen] = useState(false);
-  const [agentPaletteAnchor, setAgentPaletteAnchor] = useState<AgentPaletteAnchor>(() => getDefaultAgentPaletteAnchor());
   const [saveActionStatesByPath, setSaveActionStatesByPath] = useState<Record<string, SaveActionState>>({});
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
   const [draggingGroupIndex, setDraggingGroupIndex] = useState<number | null>(null);
@@ -418,23 +435,22 @@ export function App(): JSX.Element {
     return [leftTab, rightTab] as const;
   }, [isSplitViewEnabled, openTabByPath, splitPanePaths]);
 
-  const positionAgentPalette = useCallback((allowScroll = false) => {
-    if (allowScroll && scrollSelectionIntoAgentSpace()) {
-      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor()), 180);
-      return;
-    }
-
-    setAgentPaletteAnchor(getAgentPaletteAnchor());
-  }, []);
-
-  const openAgentPalette = useCallback(() => {
-    setAgentPaletteOpen(true);
+  const openAgentWindow = useCallback((allowScroll = false) => {
     setIsModeMenuOpen(false);
     setIsHeaderMenuOpen(false);
     setContextMenu(null);
-    setAgentPaletteAnchor(getAgentPaletteAnchor());
-    window.requestAnimationFrame(() => positionAgentPalette(true));
-  }, [positionAgentPalette]);
+
+    const openWithCurrentAnchor = () => {
+      void window.veloca?.agent.open(toAgentWindowAnchor(getAgentPaletteAnchor()));
+    };
+
+    if (allowScroll && scrollSelectionIntoAgentSpace()) {
+      window.setTimeout(openWithCurrentAnchor, 180);
+      return;
+    }
+
+    openWithCurrentAnchor();
+  }, []);
 
   const setFileSaveActionState = (filePath: string, nextState: SaveActionState) => {
     const current = saveActionStatesRef.current;
@@ -621,7 +637,6 @@ export function App(): JSX.Element {
         setSettingsOpen(false);
         setIsModeMenuOpen(false);
         setIsHeaderMenuOpen(false);
-        setAgentPaletteOpen(false);
       }
     };
 
@@ -631,32 +646,23 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const openOnAgentShortcut = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
       const isFnKey = event.key === 'Fn' || event.code === 'Fn';
-      const isFallbackShortcut = (event.metaKey || event.ctrlKey) && key === 'j';
 
-      if (!isFnKey && !isFallbackShortcut) {
+      if (!isFnKey) {
         return;
       }
 
       event.preventDefault();
-      openAgentPalette();
+      openAgentWindow(true);
     };
 
     window.addEventListener('keydown', openOnAgentShortcut);
     return () => window.removeEventListener('keydown', openOnAgentShortcut);
-  }, [openAgentPalette]);
+  }, [openAgentWindow]);
 
   useEffect(() => {
-    if (!agentPaletteOpen) {
-      return;
-    }
-
-    const repositionAgentPalette = () => positionAgentPalette(false);
-
-    window.addEventListener('resize', repositionAgentPalette);
-    return () => window.removeEventListener('resize', repositionAgentPalette);
-  }, [agentPaletteOpen, positionAgentPalette]);
+    return window.veloca?.agent.onOpenRequest(() => openAgentWindow(true));
+  }, [openAgentWindow]);
 
   useEffect(() => {
     loadWorkspace();
@@ -2511,12 +2517,7 @@ export function App(): JSX.Element {
           </header>
 
           <section
-            className={[
-              splitPaneTabs ? 'editor-scroll-area is-split-view' : 'editor-scroll-area',
-              agentPaletteOpen ? 'has-agent-overlay' : ''
-            ]
-              .filter(Boolean)
-              .join(' ')}
+            className={splitPaneTabs ? 'editor-scroll-area is-split-view' : 'editor-scroll-area'}
             aria-label="Markdown editor preview"
           >
             {splitPaneTabs ? (
@@ -2574,8 +2575,6 @@ export function App(): JSX.Element {
             <span>{documentContent.length} Characters</span>
             <span>UTF-8</span>
           </footer>
-
-          <AgentPalette onToast={showToast} position={agentPaletteAnchor} visible={agentPaletteOpen} />
         </main>
       </div>
 
