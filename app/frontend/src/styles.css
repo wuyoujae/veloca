@@ -163,36 +163,28 @@ button {
 
 .sidebar-restore-rail {
   display: flex;
-  flex: 0 0 44px;
+  flex: 0 0 56px;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 10px;
+  padding: 16px 8px 0;
   border-right: 1px solid var(--border);
   background: var(--sidebar);
   animation: sidebarRailEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
-.sidebar-restore-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+.sidebar-restore-tabs {
+  width: 40px;
 }
 
-.sidebar-restore-btn:hover {
-  background: var(--accent);
-  color: var(--foreground);
+.sidebar-toggle-trigger {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 28px;
+  padding: 0;
 }
 
-.sidebar-restore-btn:active {
+.sidebar-toggle-trigger:active {
   transform: scale(0.96);
 }
 

@@ -1790,6 +1790,14 @@ export function App(): JSX.Element {
               >
                 Outline
               </button>
+              <button
+                className="tab-trigger sidebar-toggle-trigger"
+                type="button"
+                aria-label="Collapse sidebar"
+                onClick={() => setIsSidebarCollapsed(true)}
+              >
+                <PanelLeftClose size={15} />
+              </button>
             </div>
           </div>
 
@@ -1804,7 +1812,6 @@ export function App(): JSX.Element {
                 onAddFolder={addWorkspaceFolder}
                 onCancelInlineRename={cancelInlineRename}
                 onCommitInlineRename={commitInlineRename}
-                onCollapseSidebar={() => setIsSidebarCollapsed(true)}
                 onCreateDatabaseWorkspace={createDatabaseWorkspace}
                 onContextMenu={openContextMenu}
                 onEditingNodeChange={updateEditingNodeName}
@@ -1831,14 +1838,16 @@ export function App(): JSX.Element {
 
         {isSidebarCollapsed && (
           <div className="sidebar-restore-rail" aria-label="Collapsed sidebar">
-            <button
-              className="sidebar-restore-btn"
-              type="button"
-              aria-label="Expand sidebar"
-              onClick={() => setIsSidebarCollapsed(false)}
-            >
-              <PanelLeftOpen size={17} />
-            </button>
+            <div className="tabs-list sidebar-restore-tabs">
+              <button
+                className="tab-trigger sidebar-toggle-trigger active"
+                type="button"
+                aria-label="Expand sidebar"
+                onClick={() => setIsSidebarCollapsed(false)}
+              >
+                <PanelLeftOpen size={15} />
+              </button>
+            </div>
           </div>
         )}
 
@@ -2439,7 +2448,6 @@ interface FileTreeProps {
   onAddFolder: () => void;
   onCancelInlineRename: () => void;
   onCommitInlineRename: () => void;
-  onCollapseSidebar: () => void;
   onCreateDatabaseWorkspace: () => void;
   onContextMenu: (event: MouseEvent, node: WorkspaceTreeNode) => void;
   onEditingNodeChange: (value: string) => void;
@@ -2456,7 +2464,6 @@ function FileTree({
   onAddFolder,
   onCancelInlineRename,
   onCommitInlineRename,
-  onCollapseSidebar,
   onCreateDatabaseWorkspace,
   onContextMenu,
   onEditingNodeChange,
@@ -2473,9 +2480,6 @@ function FileTree({
           </button>
           <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
             <FolderPlus size={16} />
-          </button>
-          <button className="toolbar-icon-btn" type="button" aria-label="Collapse sidebar" onClick={onCollapseSidebar}>
-            <PanelLeftClose size={16} />
           </button>
         </div>
       </div>
