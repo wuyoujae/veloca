@@ -207,6 +207,14 @@ const agentPaletteWidth = 760;
 const agentPromptMinimumHeight = 188;
 const agentViewportGutter = 16;
 const agentSelectionGap = 12;
+const agentSelectionHighlightName = 'veloca-agent-selection';
+
+interface CssHighlightRegistry {
+  delete: (name: string) => boolean;
+  set: (name: string, highlight: unknown) => void;
+}
+
+type CssHighlightConstructor = new (...ranges: Range[]) => unknown;
 
 function clampNumber(value: number, minimum: number, maximum: number): number {
   if (maximum < minimum) {
@@ -228,6 +236,43 @@ function getAgentViewportRect(range?: Range | null): DOMRect | null {
     document.querySelector<HTMLElement>('.editor-container');
 
   return editorElement?.getBoundingClientRect() ?? null;
+}
+
+function getCssHighlightRegistry(): CssHighlightRegistry | null {
+  if (typeof CSS === 'undefined') {
+    return null;
+  }
+
+  return (CSS as unknown as { highlights?: CssHighlightRegistry }).highlights ?? null;
+}
+
+function getCssHighlightConstructor(): CssHighlightConstructor | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  return (window as unknown as { Highlight?: CssHighlightConstructor }).Highlight ?? null;
+}
+
+function clearAgentSelectionHighlight(): void {
+  getCssHighlightRegistry()?.delete(agentSelectionHighlightName);
+}
+
+function applyAgentSelectionHighlight(range: Range | null): void {
+  clearAgentSelectionHighlight();
+
+  if (!range) {
+    return;
+  }
+
+  const highlightRegistry = getCssHighlightRegistry();
+  const HighlightConstructor = getCssHighlightConstructor();
+
+  if (!highlightRegistry || !HighlightConstructor) {
+    return;
+  }
+
+  highlightRegistry.set(agentSelectionHighlightName, new HighlightConstructor(range.cloneRange()));
 }
 
 function getAgentPaletteWidth(editorRect: DOMRect | null): number {
@@ -314,8 +359,8 @@ function getSelectionScrollContainer(range: Range): HTMLElement | null {
   return scrollContainer instanceof HTMLElement ? scrollContainer : null;
 }
 
-function getAgentPaletteAnchor(): AgentPaletteAnchor {
-  const range = getActiveEditorSelectionRange();
+function getAgentPaletteAnchor(rangeOverride?: Range | null): AgentPaletteAnchor {
+  const range = rangeOverride === undefined ? getActiveEditorSelectionRange() : rangeOverride;
   const rect = range ? getLastSelectionLineRect(range) : null;
   const defaultAnchor = getDefaultAgentPaletteAnchor(range);
 
@@ -334,8 +379,8 @@ function getAgentPaletteAnchor(): AgentPaletteAnchor {
   };
 }
 
-function scrollSelectionIntoAgentPosition(): boolean {
-  const range = getActiveEditorSelectionRange();
+function scrollSelectionIntoAgentPosition(rangeOverride?: Range | null): boolean {
+  const range = rangeOverride === undefined ? getActiveEditorSelectionRange() : rangeOverride;
 
   if (!range) {
     return false;
@@ -412,6 +457,7 @@ export function App(): JSX.Element {
   const editorTabsRef = useRef<HTMLDivElement>(null);
   const editorTabElementByPathRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const splitEditorGridRef = useRef<HTMLDivElement>(null);
+  const agentSelectionRangeRef = useRef<Range | null>(null);
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
@@ -472,20 +518,26 @@ export function App(): JSX.Element {
   }, [isSplitViewEnabled, openTabByPath, splitPanePaths]);
 
   const positionAgentPalette = useCallback((allowScroll = false) => {
-    if (allowScroll && scrollSelectionIntoAgentPosition()) {
-      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor()), 240);
+    const selectionRange = agentSelectionRangeRef.current;
+
+    if (allowScroll && scrollSelectionIntoAgentPosition(selectionRange)) {
+      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange)), 240);
       return;
     }
 
-    setAgentPaletteAnchor(getAgentPaletteAnchor());
+    setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
   }, []);
 
   const openAgentPalette = useCallback(() => {
+    const selectionRange = getActiveEditorSelectionRange()?.cloneRange() ?? null;
+
+    agentSelectionRangeRef.current = selectionRange;
+    applyAgentSelectionHighlight(selectionRange);
     setAgentPaletteOpen(true);
     setIsModeMenuOpen(false);
     setIsHeaderMenuOpen(false);
     setContextMenu(null);
-    setAgentPaletteAnchor(getDefaultAgentPaletteAnchor(getActiveEditorSelectionRange()));
+    setAgentPaletteAnchor(getDefaultAgentPaletteAnchor(selectionRange));
     window.requestAnimationFrame(() => positionAgentPalette(true));
   }, [positionAgentPalette]);
 
@@ -667,6 +719,15 @@ export function App(): JSX.Element {
   useEffect(() => {
     documentContentRef.current = documentContent;
   }, [documentContent]);
+
+  useEffect(() => {
+    if (agentPaletteOpen) {
+      return;
+    }
+
+    agentSelectionRangeRef.current = null;
+    clearAgentSelectionHighlight();
+  }, [agentPaletteOpen]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {

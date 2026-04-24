@@ -226,8 +226,11 @@ export function AgentPalette({ onToast, position, visible }: AgentPaletteProps):
       return;
     }
 
-    const distanceToBottom = canvas.scrollHeight - canvas.scrollTop - canvas.clientHeight;
-    setShowScrollLatest(distanceToBottom > 100 && activeMessages.length > 0);
+    const papers = canvas.querySelectorAll<HTMLElement>('.agent-qa-paper');
+    const latestPaper = papers.item(papers.length - 1);
+    const isBeforeLatestPaper = latestPaper ? canvas.scrollTop < latestPaper.offsetTop - 80 : false;
+
+    setShowScrollLatest(activeMessages.length > 1 && isBeforeLatestPaper);
   };
 
   const scrollToLatest = () => {
@@ -237,10 +240,14 @@ export function AgentPalette({ onToast, position, visible }: AgentPaletteProps):
       return;
     }
 
+    const papers = canvas.querySelectorAll<HTMLElement>('.agent-qa-paper');
+    const latestPaper = papers.item(papers.length - 1);
+
     canvas.scrollTo({
       behavior: 'smooth',
-      top: canvas.scrollHeight
+      top: latestPaper?.offsetTop ?? canvas.scrollHeight
     });
+    setShowScrollLatest(false);
   };
 
   const scheduleScrollToLatest = () => {
