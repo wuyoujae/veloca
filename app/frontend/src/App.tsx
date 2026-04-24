@@ -67,6 +67,7 @@ import {
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
+type SaveActionState = 'idle' | 'saving' | 'success';
 type ToastType = 'success' | 'info';
 
 interface ToastMessage {
@@ -166,6 +167,8 @@ const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
   { id: 'prompt', name: 'Prompt Engineering' }
 ];
 
+const saveActionSuccessDurationMs = 1200;
+
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
   tree: [],
@@ -211,7 +214,7 @@ export function App(): JSX.Element {
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
-  const [saveActionState, setSaveActionState] = useState<'idle' | 'saving' | 'success'>('idle');
+  const [saveActionStatesByPath, setSaveActionStatesByPath] = useState<Record<string, SaveActionState>>({});
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
   const [draggingGroupIndex, setDraggingGroupIndex] = useState<number | null>(null);
   const [tabDropCue, setTabDropCue] = useState<TabDropCue | null>(null);
@@ -237,8 +240,10 @@ export function App(): JSX.Element {
   const activeTabRef = useRef<OpenEditorTab | null>(null);
   const documentContentRef = useRef(documentContent);
   const outlineFilePathRef = useRef<string | null>(null);
+  const openTabPathsRef = useRef<Set<string>>(new Set());
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const saveActionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveActionStatesRef = useRef<Record<string, SaveActionState>>({});
+  const saveActionTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const editorTabsRef = useRef<HTMLDivElement>(null);
   const editorTabElementByPathRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const splitEditorGridRef = useRef<HTMLDivElement>(null);
@@ -252,6 +257,7 @@ export function App(): JSX.Element {
     [activeTabPath, openTabs]
   );
   const activeFile = activeTab?.file ?? null;
+  const activeSaveActionState = activeTabPath ? saveActionStatesByPath[activeTabPath] ?? 'idle' : 'idle';
   const openTabByPath = useMemo(() => {
     return new Map(openTabs.map((tab) => [tab.file.path, tab]));
   }, [openTabs]);
@@ -300,6 +306,105 @@ export function App(): JSX.Element {
     return [leftTab, rightTab] as const;
   }, [isSplitViewEnabled, openTabByPath, splitPanePaths]);
 
+  const setFileSaveActionState = (filePath: string, nextState: SaveActionState) => {
+    const current = saveActionStatesRef.current;
+
+    if (nextState === 'idle') {
+      if (!current[filePath]) {
+        return;
+      }
+
+      const next = { ...current };
+      delete next[filePath];
+      saveActionStatesRef.current = next;
+      setSaveActionStatesByPath(next);
+      return;
+    }
+
+    if (current[filePath] === nextState) {
+      return;
+    }
+
+    const next = { ...current, [filePath]: nextState };
+    saveActionStatesRef.current = next;
+    setSaveActionStatesByPath(next);
+  };
+
+  const clearFileSaveActionTimer = (filePath: string) => {
+    const timer = saveActionTimersRef.current.get(filePath);
+
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    saveActionTimersRef.current.delete(filePath);
+  };
+
+  const clearFileSaveAction = (filePath: string) => {
+    clearFileSaveActionTimer(filePath);
+    setFileSaveActionState(filePath, 'idle');
+  };
+
+  const clearAllFileSaveActions = () => {
+    saveActionTimersRef.current.forEach((timer) => clearTimeout(timer));
+    saveActionTimersRef.current.clear();
+    saveActionStatesRef.current = {};
+    setSaveActionStatesByPath({});
+  };
+
+  const pruneFileSaveActions = (livePaths: Set<string>) => {
+    saveActionTimersRef.current.forEach((timer, filePath) => {
+      if (!livePaths.has(filePath)) {
+        clearTimeout(timer);
+        saveActionTimersRef.current.delete(filePath);
+      }
+    });
+
+    const current = saveActionStatesRef.current;
+    const next: Record<string, SaveActionState> = {};
+    let changed = false;
+
+    for (const [filePath, state] of Object.entries(current)) {
+      if (livePaths.has(filePath)) {
+        next[filePath] = state;
+      } else {
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      saveActionStatesRef.current = next;
+      setSaveActionStatesByPath(next);
+    }
+  };
+
+  const beginFileSaveAction = (filePath: string) => {
+    clearFileSaveActionTimer(filePath);
+    setFileSaveActionState(filePath, 'saving');
+  };
+
+  const completeFileSaveAction = (filePath: string) => {
+    clearFileSaveActionTimer(filePath);
+
+    if (!openTabPathsRef.current.has(filePath)) {
+      setFileSaveActionState(filePath, 'idle');
+      return;
+    }
+
+    setFileSaveActionState(filePath, 'success');
+
+    const timer = setTimeout(() => {
+      saveActionTimersRef.current.delete(filePath);
+
+      if (saveActionStatesRef.current[filePath] === 'success') {
+        setFileSaveActionState(filePath, 'idle');
+      }
+    }, saveActionSuccessDurationMs);
+
+    saveActionTimersRef.current.set(filePath, timer);
+  };
+
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
       applyTheme(storedTheme);
@@ -322,6 +427,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const livePaths = new Set(openTabs.map((tab) => tab.file.path));
+    openTabPathsRef.current = livePaths;
+    pruneFileSaveActions(livePaths);
 
     setTabGroups((current) => {
       const seenKeys = new Set<string>();
@@ -440,16 +547,10 @@ export function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
-    const clearTimers = () => {
-      if (saveActionTimerRef.current) {
-        clearTimeout(saveActionTimerRef.current);
-        saveActionTimerRef.current = null;
-      }
+    return () => {
+      saveActionTimersRef.current.forEach((timer) => clearTimeout(timer));
+      saveActionTimersRef.current.clear();
     };
-
-    clearTimers();
-
-    return clearTimers;
   }, []);
 
   useEffect(() => {
@@ -566,43 +667,58 @@ export function App(): JSX.Element {
       return true;
     }
 
+    const filePath = tab.file.path;
+
+    if (saveActionStatesRef.current[filePath] === 'saving') {
+      return false;
+    }
+
     clearSaveTimer();
-    setSaveStatus('saving');
+    beginFileSaveAction(filePath);
+
+    if (activeTabRef.current?.file.path === filePath) {
+      setSaveStatus('saving');
+    }
+
     setOpenTabs((current) =>
       current.map((currentTab) =>
-        currentTab.file.path === tab.file.path ? { ...currentTab, status: 'saving' } : currentTab
+        currentTab.file.path === filePath ? { ...currentTab, status: 'saving' } : currentTab
       )
     );
 
     try {
-      const savedFile = await window.veloca.workspace.saveMarkdown(tab.file.path, content);
-      const latestContent = documentContentRef.current;
+      const savedFile = await window.veloca.workspace.saveMarkdown(filePath, content);
 
-      if (activeTabRef.current?.file.path === savedFile.path) {
-        setOpenTabs((current) =>
-          current.map((currentTab) =>
-            currentTab.file.path === savedFile.path
-              ? {
-                  ...currentTab,
-                  file: { ...currentTab.file, ...savedFile },
-                  savedContent: content,
-                  status: latestContent === content ? 'saved' : 'unsaved'
-                }
-              : currentTab
-          )
-        );
+      setOpenTabs((current) =>
+        current.map((currentTab) =>
+          currentTab.file.path === filePath
+            ? {
+                ...currentTab,
+                file: { ...currentTab.file, ...savedFile },
+                savedContent: content,
+                status: currentTab.draftContent === content ? 'saved' : 'unsaved'
+              }
+            : currentTab
+        )
+      );
 
-        setSaveStatus(latestContent === content ? 'saved' : 'unsaved');
+      completeFileSaveAction(filePath);
+
+      if (activeTabRef.current?.file.path === filePath) {
+        setSaveStatus(documentContentRef.current === content ? 'saved' : 'unsaved');
       }
 
       return true;
     } catch {
-      if (activeTabPath === tab.file.path) {
+      clearFileSaveAction(filePath);
+
+      if (activeTabRef.current?.file.path === filePath) {
         setSaveStatus('failed');
       }
+
       setOpenTabs((current) =>
         current.map((currentTab) =>
-          currentTab.file.path === tab.file.path ? { ...currentTab, status: 'failed' } : currentTab
+          currentTab.file.path === filePath ? { ...currentTab, status: 'failed' } : currentTab
         )
       );
       showToast({
@@ -617,6 +733,10 @@ export function App(): JSX.Element {
   const updateTabDocumentContent = (filePath: string, content: string) => {
     const targetTab = openTabs.find((tab) => tab.file.path === filePath);
     const nextStatus: SaveStatus = targetTab && content === targetTab.savedContent ? 'saved' : 'unsaved';
+
+    if (nextStatus === 'unsaved' && saveActionStatesRef.current[filePath] === 'success') {
+      clearFileSaveAction(filePath);
+    }
 
     documentContentRef.current = content;
     setActiveTabPath(filePath);
@@ -667,10 +787,14 @@ export function App(): JSX.Element {
       if (nextFile) {
         await readMarkdownFile(nextFile.path);
       } else {
+        openTabPathsRef.current = new Set<string>();
+        activeTabRef.current = null;
+        documentContentRef.current = '';
         setActiveTabPath(null);
         setActiveGroupKey(null);
         setDocumentContent('');
         setSaveStatus('saved');
+        clearAllFileSaveActions();
         clearSplitView();
       }
     } catch {
@@ -764,16 +888,22 @@ export function App(): JSX.Element {
     const nextTabs = syncOpenTabsWithSnapshot(snapshot, renamedPath, selectedPath);
 
     if (nextTabs.length === 0) {
+      openTabPathsRef.current = new Set<string>();
+      activeTabRef.current = null;
+      documentContentRef.current = '';
       setOpenTabs([]);
       setTabGroups([]);
       setActiveTabPath(null);
       setActiveGroupKey(null);
       setDocumentContent('');
       setSaveStatus('saved');
+      clearAllFileSaveActions();
       clearSplitView();
       return;
     }
 
+    openTabPathsRef.current = new Set(nextTabs.map((tab) => tab.file.path));
+    pruneFileSaveActions(openTabPathsRef.current);
     setOpenTabs(nextTabs);
 
     if (selectedPath && renamedPath) {
@@ -954,6 +1084,7 @@ export function App(): JSX.Element {
         status: 'saved'
       };
 
+      openTabPathsRef.current = new Set([...openTabPathsRef.current, filePath]);
       setOpenTabs((current) => [...current, nextTab]);
       ensureTabGroup([filePath]);
       activateEditorTab(nextTab, [filePath]);
@@ -990,6 +1121,8 @@ export function App(): JSX.Element {
     const currentTabs = openTabs;
     const remainingTabs = currentTabs.filter((tab) => tab.file.path !== filePath);
 
+    openTabPathsRef.current = new Set(remainingTabs.map((tab) => tab.file.path));
+    clearFileSaveAction(filePath);
     setOpenTabs(remainingTabs);
     setTabGroups((current) =>
       current
@@ -1006,6 +1139,8 @@ export function App(): JSX.Element {
     }
 
     if (!remainingTabs.length) {
+      activeTabRef.current = null;
+      documentContentRef.current = '';
       setActiveTabPath(null);
       setDocumentContent('');
       setSaveStatus('saved');
@@ -1015,6 +1150,8 @@ export function App(): JSX.Element {
     const targetIndex = currentTabs.findIndex((tab) => tab.file.path === filePath);
     const fallbackTab = remainingTabs[targetIndex] ?? remainingTabs[targetIndex - 1] ?? remainingTabs[0];
 
+    activeTabRef.current = fallbackTab;
+    documentContentRef.current = fallbackTab.draftContent;
     setActiveTabPath(fallbackTab.file.path);
     setDocumentContent(fallbackTab.draftContent);
     setSaveStatus(fallbackTab.status);
@@ -1039,13 +1176,16 @@ export function App(): JSX.Element {
       return;
     }
 
+    openTabPathsRef.current = new Set<string>();
+    activeTabRef.current = null;
+    documentContentRef.current = '';
     setOpenTabs([]);
     setTabGroups([]);
     setActiveGroupKey(null);
     setActiveTabPath(null);
     setDocumentContent('');
     setSaveStatus('saved');
-    setSaveActionState('idle');
+    clearAllFileSaveActions();
     clearSplitView();
     setDraggingTabIndex(null);
     setDraggingGroupIndex(null);
@@ -1191,27 +1331,11 @@ export function App(): JSX.Element {
   };
 
   const handleSaveCurrentDocument = async () => {
-    if (!activeFile || saveActionState === 'saving') {
+    if (!activeFile || activeSaveActionState === 'saving') {
       return;
     }
 
-    if (saveActionTimerRef.current) {
-      clearTimeout(saveActionTimerRef.current);
-      saveActionTimerRef.current = null;
-    }
-
-    setSaveActionState('saving');
-    const hasSaved = await saveCurrentDocument();
-
-    if (!hasSaved) {
-      setSaveActionState('idle');
-      return;
-    }
-
-    setSaveActionState('success');
-    saveActionTimerRef.current = setTimeout(() => {
-      setSaveActionState((current) => (current === 'success' ? 'idle' : current));
-    }, 1200);
+    await saveCurrentDocument();
   };
 
   const reorderTabGroups = (sourceIndex: number, targetIndex: number) => {
@@ -1708,7 +1832,7 @@ export function App(): JSX.Element {
   };
 
   useEffect(() => {
-    if (!autoSave || saveStatus !== 'unsaved' || !activeTabPath) {
+    if (!autoSave || saveStatus !== 'unsaved' || !activeTabPath || activeSaveActionState === 'saving') {
       return undefined;
     }
 
@@ -1718,7 +1842,7 @@ export function App(): JSX.Element {
     }, 800);
 
     return clearSaveTimer;
-  }, [activeTabPath, autoSave, documentContent, saveStatus]);
+  }, [activeSaveActionState, activeTabPath, autoSave, documentContent, saveStatus]);
 
   useEffect(() => {
     const saveOnShortcut = (event: KeyboardEvent) => {
@@ -2077,17 +2201,21 @@ export function App(): JSX.Element {
             <div className="editor-actions">
               <button
                 className={`editor-action-btn editor-action-btn-save ${
-                  saveActionState === 'saving' ? 'is-saving' : saveActionState === 'success' ? 'is-success' : ''
+                  activeSaveActionState === 'saving'
+                    ? 'is-saving'
+                    : activeSaveActionState === 'success'
+                      ? 'is-success'
+                      : ''
                 }`}
-                disabled={!activeFile || saveActionState === 'saving'}
+                disabled={!activeFile || activeSaveActionState === 'saving'}
                 title="Save"
                 type="button"
                 onClick={() => void handleSaveCurrentDocument()}
                 aria-label={`Save (${getSaveButtonLabel(saveStatus, autoSave)})`}
               >
-                {saveActionState === 'saving' ? (
+                {activeSaveActionState === 'saving' ? (
                   <LoaderCircle className="editor-action-icon spinning" size={14} />
-                ) : saveActionState === 'success' ? (
+                ) : activeSaveActionState === 'success' ? (
                   <CheckCircle2 className="editor-action-icon is-success" size={14} />
                 ) : (
                   <Save className="editor-action-icon" size={14} />
