@@ -949,7 +949,7 @@ export const MermaidNode = Node.create({
         editButton.textContent = editing ? 'Preview' : 'Edit';
 
         if (editing) {
-          window.requestAnimationFrame(() => textarea.focus());
+          focusMermaidTextarea(textarea);
           return;
         }
 
@@ -1028,7 +1028,8 @@ export const MermaidNode = Node.create({
 
           return true;
         },
-        ignoreMutation: () => true
+        ignoreMutation: () => true,
+        stopEvent: (event) => isMermaidControlEvent(event, dom)
       };
     };
   }
@@ -1069,11 +1070,39 @@ function createMermaidInputRule({ find, type }: { find: RegExp; type: Editor['sc
             }
           ]
         )
-        .setTextSelection(blockStart + 2)
+        .setNodeSelection(blockStart)
         .run();
       return null;
     }
   });
+}
+
+function focusMermaidTextarea(textarea: HTMLTextAreaElement): void {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      if (!document.contains(textarea)) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    });
+  });
+}
+
+function isMermaidControlEvent(event: Event, dom: HTMLElement): boolean {
+  const target = event.target;
+
+  if (!(target instanceof globalThis.Node) || !dom.contains(target)) {
+    return false;
+  }
+
+  return (
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLButtonElement ||
+    (target instanceof HTMLElement &&
+      target.closest('.veloca-mermaid-editor-panel, .veloca-mermaid-button') !== null)
+  );
 }
 
 const VelocaTable = Table.extend({
