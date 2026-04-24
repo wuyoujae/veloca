@@ -205,11 +205,16 @@ marked.setOptions({
 
 const agentPaletteWidth = 760;
 const agentPromptMinimumHeight = 188;
+const agentCanvasMinimumHeight = 280;
 const agentViewportGutter = 16;
 const agentSelectionGap = 12;
 const agentSelectionHighlightName = 'veloca-agent-selection';
 const agentPromptEdgeGap = 24;
 const agentSelectionViewportGap = 24;
+
+interface AgentPaletteAnchorOptions {
+  canvasOpen?: boolean;
+}
 
 interface CssHighlightRegistry {
   delete: (name: string) => boolean;
@@ -297,18 +302,22 @@ function getAgentPaletteCenterLeft(editorRect: DOMRect | null, width: number): n
   return clampNumber(viewportLeft, editorRect.left + halfWidth, editorRect.right - halfWidth);
 }
 
-function getAgentPaletteMaxTop(editorRect: DOMRect | null): number {
+function getAgentPaletteMaxTop(editorRect: DOMRect | null, options: AgentPaletteAnchorOptions = {}): number {
   if (typeof window === 'undefined') {
     return 140;
   }
 
-  const viewportBottom = window.innerHeight - agentPromptMinimumHeight - agentPromptEdgeGap;
-  const editorBottom = editorRect ? editorRect.bottom - agentPromptMinimumHeight - agentPromptEdgeGap : viewportBottom;
+  const safetyHeight = agentPromptMinimumHeight + (options.canvasOpen ? agentCanvasMinimumHeight : 0);
+  const viewportBottom = window.innerHeight - safetyHeight - agentPromptEdgeGap;
+  const editorBottom = editorRect ? editorRect.bottom - safetyHeight - agentPromptEdgeGap : viewportBottom;
 
   return Math.min(viewportBottom, editorBottom);
 }
 
-function getDefaultAgentPaletteAnchor(range?: Range | null): AgentPaletteAnchor {
+function getDefaultAgentPaletteAnchor(
+  range?: Range | null,
+  options: AgentPaletteAnchorOptions = {}
+): AgentPaletteAnchor {
   if (typeof window === 'undefined') {
     return {
       left: agentPaletteWidth / 2,
@@ -324,7 +333,7 @@ function getDefaultAgentPaletteAnchor(range?: Range | null): AgentPaletteAnchor 
     ? editorRect.top + clampNumber(editorRect.height * 0.14, 76, 132)
     : clampNumber(window.innerHeight * 0.22, 92, 180);
   const minTop = editorRect ? editorRect.top + 54 : 54;
-  const maxTop = Math.max(minTop, getAgentPaletteMaxTop(editorRect));
+  const maxTop = Math.max(minTop, getAgentPaletteMaxTop(editorRect, options));
 
   return {
     left: getAgentPaletteCenterLeft(editorRect, width),
@@ -359,14 +368,66 @@ function getActiveEditorSelectionRange(): Range | null {
   return range;
 }
 
-function getLastSelectionLineRect(range: Range): DOMRect | null {
+function getCollapsedSelectionEndpointRect(range: Range, collapseToStart: boolean): DOMRect | null {
+  const endpointRange = range.cloneRange();
+  endpointRange.collapse(collapseToStart);
+
+  const endpointRects = Array.from(endpointRange.getClientRects())
+    .filter((rect) => rect.height > 0)
+    .sort((left, right) => left.top - right.top || left.left - right.left);
+  const endpointRect = collapseToStart ? endpointRects[0] : endpointRects.at(-1);
+
+  if (endpointRect) {
+    return endpointRect;
+  }
+
+  const boundingRect = endpointRange.getBoundingClientRect();
+
+  return boundingRect.height > 0 ? boundingRect : null;
+}
+
+function getSelectionTextLineRects(range: Range): DOMRect[] {
   const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
 
-  return rects.at(-1) ?? null;
+  if (rects.length <= 1) {
+    return rects;
+  }
+
+  const sortedHeights = rects.map((rect) => rect.height).sort((left, right) => left - right);
+  const lowerMedianHeight = sortedHeights[Math.floor((sortedHeights.length - 1) / 2)];
+  const maxTextLineHeight = Math.max(36, Math.min(84, lowerMedianHeight * 2.5));
+  const textLineRects = rects.filter((rect) => rect.height <= maxTextLineHeight);
+  const stableRects = textLineRects.length > 0 ? textLineRects : rects;
+
+  return stableRects.sort((left, right) => left.top - right.top || left.left - right.left);
+}
+
+function getLastSelectionLineRect(range: Range): DOMRect | null {
+  const endpointRect = getCollapsedSelectionEndpointRect(range, false);
+
+  if (endpointRect) {
+    return endpointRect;
+  }
+
+  const rects = getSelectionTextLineRects(range);
+
+  return rects.reduce<DOMRect | null>((current, rect) => {
+    if (!current || rect.bottom > current.bottom || (Math.abs(rect.bottom - current.bottom) < 1 && rect.right > current.right)) {
+      return rect;
+    }
+
+    return current;
+  }, null);
 }
 
 function getFirstSelectionLineRect(range: Range): DOMRect | null {
-  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+  const endpointRect = getCollapsedSelectionEndpointRect(range, true);
+
+  if (endpointRect) {
+    return endpointRect;
+  }
+
+  const rects = getSelectionTextLineRects(range);
 
   return rects[0] ?? null;
 }
@@ -378,10 +439,13 @@ function getSelectionScrollContainer(range: Range): HTMLElement | null {
   return scrollContainer instanceof HTMLElement ? scrollContainer : null;
 }
 
-function getAgentPaletteAnchor(rangeOverride?: Range | null): AgentPaletteAnchor {
+function getAgentPaletteAnchor(
+  rangeOverride?: Range | null,
+  options: AgentPaletteAnchorOptions = {}
+): AgentPaletteAnchor {
   const range = rangeOverride === undefined ? getActiveEditorSelectionRange() : rangeOverride;
   const rect = range ? getLastSelectionLineRect(range) : null;
-  const defaultAnchor = getDefaultAgentPaletteAnchor(range);
+  const defaultAnchor = getDefaultAgentPaletteAnchor(range, options);
 
   if (!rect) {
     return defaultAnchor;
@@ -389,7 +453,7 @@ function getAgentPaletteAnchor(rangeOverride?: Range | null): AgentPaletteAnchor
 
   const editorRect = getAgentViewportRect(range);
   const minTop = editorRect ? editorRect.top + 54 : 54;
-  const maxTop = Math.max(minTop, getAgentPaletteMaxTop(editorRect));
+  const maxTop = Math.max(minTop, getAgentPaletteMaxTop(editorRect, options));
 
   return {
     ...defaultAnchor,
@@ -412,7 +476,7 @@ function scrollSelectionIntoAgentPosition(rangeOverride?: Range | null): boolean
     return false;
   }
 
-  const defaultAnchor = getDefaultAgentPaletteAnchor(range);
+  const defaultAnchor = getDefaultAgentPaletteAnchor(range, { canvasOpen: true });
   const targetLastLineBottom = defaultAnchor.top - agentSelectionGap;
   const scrollDelta = rect.bottom - targetLastLineBottom;
 
@@ -421,7 +485,7 @@ function scrollSelectionIntoAgentPosition(rangeOverride?: Range | null): boolean
   }
 
   scrollContainer.scrollBy({
-    behavior: 'smooth',
+    behavior: 'auto',
     top: scrollDelta
   });
 
@@ -456,7 +520,7 @@ function relaxSelectionAfterCanvasClose(rangeOverride?: Range | null): boolean {
   }
 
   scrollContainer.scrollBy({
-    behavior: 'smooth',
+    behavior: 'auto',
     top: -scrollDownDistance
   });
 
@@ -581,18 +645,22 @@ export function App(): JSX.Element {
     const selectionRange = agentSelectionRangeRef.current;
 
     if (scrollSelectionIntoAgentPosition(selectionRange)) {
-      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange)), 240);
+      window.requestAnimationFrame(() => {
+        setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange, { canvasOpen: true }));
+      });
       return;
     }
 
-    setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
+    setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange, { canvasOpen: true }));
   }, []);
 
   const relaxAgentPaletteAfterCanvasClose = useCallback(() => {
     const selectionRange = agentSelectionRangeRef.current;
 
     if (relaxSelectionAfterCanvasClose(selectionRange)) {
-      window.setTimeout(() => setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange)), 240);
+      window.requestAnimationFrame(() => {
+        setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
+      });
       return;
     }
 
