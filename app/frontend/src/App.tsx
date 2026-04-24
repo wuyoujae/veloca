@@ -144,6 +144,7 @@ interface OpenEditorTab {
 }
 
 type SplitPanePaths = [string, string];
+type EditorTabGroup = string[];
 type EditorMode = 'standard' | 'agent' | 'prompt';
 
 interface EditorModeOption {
@@ -163,6 +164,26 @@ const emptyWorkspace: WorkspaceSnapshot = {
   totalMarkdownFiles: 0
 };
 
+const normalizeTabGroup = (paths: string[]): EditorTabGroup => Array.from(new Set(paths)).slice(0, 2);
+
+const getTabGroupKey = (paths: string[]): string => JSON.stringify([...new Set(paths)].sort());
+
+const areTabGroupsEqual = (left: EditorTabGroup[], right: EditorTabGroup[]) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((leftGroup, groupIndex) => {
+    const rightGroup = right[groupIndex];
+
+    if (!rightGroup || leftGroup.length !== rightGroup.length) {
+      return false;
+    }
+
+    return leftGroup.every((path, pathIndex) => path === rightGroup[pathIndex]);
+  });
+};
+
 marked.setOptions({
   async: false,
   breaks: false,
@@ -175,12 +196,15 @@ export function App(): JSX.Element {
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [openTabs, setOpenTabs] = useState<OpenEditorTab[]>([]);
+  const [tabGroups, setTabGroups] = useState<EditorTabGroup[]>([]);
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
+  const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [saveActionState, setSaveActionState] = useState<'idle' | 'saving' | 'success'>('idle');
   const [draggingTabIndex, setDraggingTabIndex] = useState<number | null>(null);
+  const [draggingGroupIndex, setDraggingGroupIndex] = useState<number | null>(null);
   const [tabDropTargetIndex, setTabDropTargetIndex] = useState<number | null>(null);
   const [tabSplitTargetIndex, setTabSplitTargetIndex] = useState<number | null>(null);
   const [isSplitViewEnabled, setIsSplitViewEnabled] = useState(false);
@@ -220,6 +244,14 @@ export function App(): JSX.Element {
     [activeTabPath, openTabs]
   );
   const activeFile = activeTab?.file ?? null;
+  const openTabByPath = useMemo(() => {
+    return new Map(openTabs.map((tab) => [tab.file.path, tab]));
+  }, [openTabs]);
+  const visibleTabGroups = useMemo(() => {
+    return tabGroups
+      .map((group) => normalizeTabGroup(group.filter((path) => openTabByPath.has(path))))
+      .filter((group) => group.length > 0);
+  }, [openTabByPath, tabGroups]);
   const activeEditorModeLabel = useMemo(
     () => EDITOR_MODE_OPTIONS.find((option) => option.id === activeEditorMode)?.name ?? 'Agent Mode',
     [activeEditorMode]
@@ -245,44 +277,20 @@ export function App(): JSX.Element {
     return documentContent.trim().split(/\s+/).filter(Boolean).length;
   }, [documentContent]);
 
-  const splitAfterPosition = useMemo(() => {
-    if (!isSplitViewEnabled || openTabs.length <= 1) {
-      return null;
-    }
-
-    const preferred = splitAfterIndex ?? Math.floor(openTabs.length / 2);
-    return Math.min(Math.max(preferred, 1), openTabs.length - 1);
-  }, [isSplitViewEnabled, openTabs.length, splitAfterIndex]);
-
   const splitPaneTabs = useMemo(() => {
     if (!isSplitViewEnabled || !splitPanePaths) {
       return null;
     }
 
-    const leftTab = openTabs.find((tab) => tab.file.path === splitPanePaths[0]);
-    const rightTab = openTabs.find((tab) => tab.file.path === splitPanePaths[1]);
+    const leftTab = openTabByPath.get(splitPanePaths[0]);
+    const rightTab = openTabByPath.get(splitPanePaths[1]);
 
     if (!leftTab || !rightTab || leftTab.file.path === rightTab.file.path) {
       return null;
     }
 
     return [leftTab, rightTab] as const;
-  }, [isSplitViewEnabled, openTabs, splitPanePaths]);
-
-  const splitGroupStartIndex = useMemo(() => {
-    if (!splitPaneTabs) {
-      return -1;
-    }
-
-    const leftIndex = openTabs.findIndex((tab) => tab.file.path === splitPaneTabs[0].file.path);
-    const rightIndex = openTabs.findIndex((tab) => tab.file.path === splitPaneTabs[1].file.path);
-
-    if (leftIndex < 0 || rightIndex < 0) {
-      return -1;
-    }
-
-    return Math.min(leftIndex, rightIndex);
-  }, [openTabs, splitPaneTabs]);
+  }, [isSplitViewEnabled, openTabByPath, splitPanePaths]);
 
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
@@ -303,6 +311,29 @@ export function App(): JSX.Element {
   useEffect(() => {
     activeTabRef.current = activeTab;
   }, [activeTab]);
+
+  useEffect(() => {
+    const livePaths = new Set(openTabs.map((tab) => tab.file.path));
+
+    setTabGroups((current) => {
+      const seenKeys = new Set<string>();
+      const nextGroups: EditorTabGroup[] = [];
+
+      for (const group of current) {
+        const nextGroup = normalizeTabGroup(group.filter((path) => livePaths.has(path)));
+        const nextKey = getTabGroupKey(nextGroup);
+
+        if (!nextGroup.length || seenKeys.has(nextKey)) {
+          continue;
+        }
+
+        seenKeys.add(nextKey);
+        nextGroups.push(nextGroup);
+      }
+
+      return areTabGroupsEqual(current, nextGroups) ? current : nextGroups;
+    });
+  }, [openTabs]);
 
   useEffect(() => {
     if (!splitPanePaths) {
@@ -476,7 +507,39 @@ export function App(): JSX.Element {
     setSplitPaneRatio(50);
   };
 
-  const activateEditorTab = (tab: OpenEditorTab) => {
+  const ensureTabGroup = (paths: string[], insertIndex?: number) => {
+    const nextGroup = normalizeTabGroup(paths);
+    const nextKey = getTabGroupKey(nextGroup);
+
+    setTabGroups((current) => {
+      if (!nextGroup.length || current.some((group) => getTabGroupKey(group) === nextKey)) {
+        return current;
+      }
+
+      const nextGroups = [...current];
+      const boundedIndex =
+        typeof insertIndex === 'number' ? Math.max(0, Math.min(insertIndex, nextGroups.length)) : nextGroups.length;
+      nextGroups.splice(boundedIndex, 0, nextGroup);
+      return nextGroups;
+    });
+  };
+
+  const activateEditorTab = (tab: OpenEditorTab, groupPaths: string[] = [tab.file.path]) => {
+    const nextGroup = normalizeTabGroup(groupPaths);
+    const nextGroupKey = getTabGroupKey(nextGroup);
+
+    setActiveGroupKey(nextGroupKey);
+
+    if (nextGroup.length > 1) {
+      setIsSplitViewEnabled(true);
+      setSplitPanePaths([nextGroup[0], nextGroup[1]]);
+    } else {
+      setIsSplitViewEnabled(false);
+      setSplitPanePaths(null);
+      setSplitAfterIndex(null);
+      setTabSplitTargetIndex(null);
+    }
+
     activeTabRef.current = tab;
     documentContentRef.current = tab.draftContent;
     setActiveTabPath(tab.file.path);
@@ -597,6 +660,7 @@ export function App(): JSX.Element {
         await readMarkdownFile(nextFile.path);
       } else {
         setActiveTabPath(null);
+        setActiveGroupKey(null);
         setDocumentContent('');
         setSaveStatus('saved');
         clearSplitView();
@@ -693,7 +757,9 @@ export function App(): JSX.Element {
 
     if (nextTabs.length === 0) {
       setOpenTabs([]);
+      setTabGroups([]);
       setActiveTabPath(null);
+      setActiveGroupKey(null);
       setDocumentContent('');
       setSaveStatus('saved');
       clearSplitView();
@@ -702,6 +768,27 @@ export function App(): JSX.Element {
 
     setOpenTabs(nextTabs);
 
+    if (selectedPath && renamedPath) {
+      setTabGroups((current) => {
+        const seenKeys = new Set<string>();
+        const nextGroups: EditorTabGroup[] = [];
+
+        for (const group of current) {
+          const nextGroup = normalizeTabGroup(group.map((path) => (path === renamedPath ? selectedPath : path)));
+          const nextKey = getTabGroupKey(nextGroup);
+
+          if (seenKeys.has(nextKey)) {
+            continue;
+          }
+
+          seenKeys.add(nextKey);
+          nextGroups.push(nextGroup);
+        }
+
+        return nextGroups;
+      });
+    }
+
     if (selectedPath) {
       const selectedNode = findNodeByPath(snapshot.tree, selectedPath);
 
@@ -709,9 +796,8 @@ export function App(): JSX.Element {
         const selectedTab = nextTabs.find((tab) => tab.file.path === selectedPath);
 
         if (selectedTab) {
-          setActiveTabPath(selectedPath);
-          setDocumentContent(selectedTab.draftContent);
-          setSaveStatus(selectedTab.status);
+          ensureTabGroup([selectedPath]);
+          activateEditorTab(selectedTab, [selectedPath]);
           return;
         }
 
@@ -726,9 +812,7 @@ export function App(): JSX.Element {
       if (!activeTabItem) {
         setActiveTabPath(null);
       } else {
-        setActiveTabPath(activeTabPath);
-        setDocumentContent(activeTabItem.draftContent);
-        setSaveStatus(activeTabItem.status);
+        activateEditorTab(activeTabItem, splitPanePaths?.includes(activeTabPath) ? splitPanePaths : [activeTabPath]);
       }
 
       if (activeTabItem) {
@@ -739,11 +823,11 @@ export function App(): JSX.Element {
     const nextFile = nextTabs[0];
 
     if (nextFile) {
-      setActiveTabPath(nextFile.file.path);
-      setDocumentContent(nextFile.draftContent);
-      setSaveStatus(nextFile.status);
+      ensureTabGroup([nextFile.file.path]);
+      activateEditorTab(nextFile, [nextFile.file.path]);
     } else {
       setActiveTabPath(null);
+      setActiveGroupKey(null);
       setDocumentContent('');
       setSaveStatus('saved');
     }
@@ -846,11 +930,8 @@ export function App(): JSX.Element {
     const existingTab = openTabs.find((tab) => tab.file.path === filePath);
 
     if (existingTab) {
-      if (splitPanePaths && !splitPanePaths.includes(filePath)) {
-        clearSplitView();
-      }
-
-      activateEditorTab(existingTab);
+      ensureTabGroup([filePath]);
+      activateEditorTab(existingTab, [filePath]);
       return true;
     }
 
@@ -865,12 +946,9 @@ export function App(): JSX.Element {
         status: 'saved'
       };
 
-      if (splitPanePaths && !splitPanePaths.includes(filePath)) {
-        clearSplitView();
-      }
-
       setOpenTabs((current) => [...current, nextTab]);
-      activateEditorTab(nextTab);
+      ensureTabGroup([filePath]);
+      activateEditorTab(nextTab, [filePath]);
       return true;
     } catch {
       showToast({
@@ -905,6 +983,11 @@ export function App(): JSX.Element {
     const remainingTabs = currentTabs.filter((tab) => tab.file.path !== filePath);
 
     setOpenTabs(remainingTabs);
+    setTabGroups((current) =>
+      current
+        .map((group) => normalizeTabGroup(group.filter((path) => path !== filePath)))
+        .filter((group) => group.length > 0)
+    );
 
     if (splitPanePaths?.includes(filePath)) {
       clearSplitView();
@@ -949,6 +1032,8 @@ export function App(): JSX.Element {
     }
 
     setOpenTabs([]);
+    setTabGroups([]);
+    setActiveGroupKey(null);
     setActiveTabPath(null);
     setDocumentContent('');
     setSaveStatus('saved');
@@ -1058,11 +1143,12 @@ export function App(): JSX.Element {
       return;
     }
 
+    ensureTabGroup([leftTab.file.path, rightTab.file.path]);
     setIsSplitViewEnabled(true);
     setSplitPanePaths([leftTab.file.path, rightTab.file.path]);
     setSplitAfterIndex(Math.max(1, Math.min(dividerIndex, openTabs.length - 1)));
     setSplitPaneRatio(50);
-    activateEditorTab(activePath === leftTab.file.path ? leftTab : rightTab);
+    activateEditorTab(activePath === leftTab.file.path ? leftTab : rightTab, [leftTab.file.path, rightTab.file.path]);
   };
 
   const setSplitEditorMode = () => {
@@ -1119,36 +1205,22 @@ export function App(): JSX.Element {
     }, 1200);
   };
 
-  const reorderOpenTabs = (sourceIndex: number, targetIndex: number) => {
+  const reorderTabGroups = (sourceIndex: number, targetIndex: number) => {
     if (sourceIndex === targetIndex) {
       return;
     }
 
-    const boundedTarget = Math.max(0, Math.min(targetIndex, openTabs.length));
-    const nextTabs = [...openTabs];
-    const movedTab = nextTabs.splice(sourceIndex, 1)[0];
-    const insertionIndex = sourceIndex < boundedTarget ? boundedTarget - 1 : boundedTarget;
-    nextTabs.splice(insertionIndex, 0, movedTab);
+    const boundedTarget = Math.max(0, Math.min(targetIndex, visibleTabGroups.length));
+    const nextGroups = [...visibleTabGroups];
+    const movedGroup = nextGroups.splice(sourceIndex, 1)[0];
 
-    setOpenTabs(nextTabs);
-
-    if (isSplitViewEnabled && splitAfterIndex !== null && openTabs.length > 1) {
-      setSplitAfterIndex((current) => {
-        if (current === null) {
-          return null;
-        }
-
-        let adjusted = current;
-
-        if (sourceIndex < current && targetIndex >= current) {
-          adjusted -= 1;
-        } else if (sourceIndex > current && targetIndex <= current) {
-          adjusted += 1;
-        }
-
-        return Math.min(Math.max(adjusted, 1), nextTabs.length - 1);
-      });
+    if (!movedGroup) {
+      return;
     }
+
+    const insertionIndex = sourceIndex < boundedTarget ? boundedTarget - 1 : boundedTarget;
+    nextGroups.splice(insertionIndex, 0, movedGroup);
+    setTabGroups(nextGroups);
   };
 
   const getTabDragIntent = (event: DragEvent<HTMLDivElement>): 'after' | 'before' | 'split' => {
@@ -1164,7 +1236,7 @@ export function App(): JSX.Element {
     return relativeX < rect.width / 2 ? 'before' : 'after';
   };
 
-  const splitTabsByIndex = (sourceIndex: number, targetIndex: number) => {
+  const splitTabsByIndex = (sourceIndex: number, targetIndex: number, targetGroupIndex: number) => {
     if (sourceIndex === targetIndex) {
       return;
     }
@@ -1176,16 +1248,47 @@ export function App(): JSX.Element {
       return;
     }
 
-    const reorderedTabs = openTabs.filter((_, index) => index !== sourceIndex);
-    const targetIndexAfterRemoval = reorderedTabs.findIndex((tab) => tab.file.path === targetTab.file.path);
-    const insertionIndex = targetIndexAfterRemoval + 1;
-    reorderedTabs.splice(insertionIndex, 0, sourceTab);
+    const nextGroup = normalizeTabGroup([targetTab.file.path, sourceTab.file.path]);
+    const nextGroupKey = getTabGroupKey(nextGroup);
 
-    setOpenTabs(reorderedTabs);
+    if (nextGroup.length < 2) {
+      activateEditorTab(targetTab, [targetTab.file.path]);
+      return;
+    }
+
+    setTabGroups((current) => {
+      const sourceGroup = draggingGroupIndex !== null ? current[draggingGroupIndex] : null;
+      const targetGroup = current[targetGroupIndex];
+      const existingIndex = current.findIndex((group) => getTabGroupKey(group) === nextGroupKey);
+
+      if (existingIndex >= 0) {
+        return current;
+      }
+
+      const shouldRemoveSourceGroup =
+        sourceGroup?.length === 1 && sourceGroup[0] === sourceTab.file.path;
+      const shouldRemoveTargetGroup =
+        targetGroup?.length === 1 && targetGroup[0] === targetTab.file.path;
+      const nextGroups = current.filter((_, groupIndex) => {
+        if (shouldRemoveSourceGroup && groupIndex === draggingGroupIndex) {
+          return false;
+        }
+
+        if (shouldRemoveTargetGroup && groupIndex === targetGroupIndex) {
+          return false;
+        }
+
+        return true;
+      });
+      const insertionIndex = Math.max(0, Math.min(targetGroupIndex, nextGroups.length));
+      nextGroups.splice(insertionIndex, 0, nextGroup);
+      return nextGroups;
+    });
+
     setIsSplitViewEnabled(true);
-    setSplitPanePaths([targetTab.file.path, sourceTab.file.path]);
-    setSplitAfterIndex(insertionIndex);
-    activateEditorTab(sourceTab);
+    setSplitPanePaths([nextGroup[0], nextGroup[1]]);
+    setSplitPaneRatio(50);
+    activateEditorTab(sourceTab, nextGroup);
   };
 
   const startSplitPaneResize = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -1220,14 +1323,15 @@ export function App(): JSX.Element {
     window.addEventListener('pointercancel', stopResize);
   };
 
-  const onTabDragStart = (event: DragEvent<HTMLDivElement>, index: number) => {
+  const onTabDragStart = (event: DragEvent<HTMLDivElement>, index: number, groupIndex: number) => {
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(index));
     setDraggingTabIndex(index);
-    setTabDropTargetIndex(index);
+    setDraggingGroupIndex(groupIndex);
+    setTabDropTargetIndex(groupIndex);
   };
 
-  const onTabDragOver = (event: DragEvent<HTMLDivElement>, index: number) => {
+  const onTabDragOver = (event: DragEvent<HTMLDivElement>, index: number, groupIndex: number) => {
     if (draggingTabIndex === null) {
       return;
     }
@@ -1238,16 +1342,16 @@ export function App(): JSX.Element {
     event.dataTransfer.dropEffect = intent === 'split' ? 'copy' : 'move';
 
     if (intent === 'split' && draggingTabIndex !== index) {
-      setTabSplitTargetIndex(index);
+      setTabSplitTargetIndex(groupIndex);
       setTabDropTargetIndex(null);
       return;
     }
 
     setTabSplitTargetIndex(null);
-    setTabDropTargetIndex(intent === 'after' ? index + 1 : index);
+    setTabDropTargetIndex(intent === 'after' ? groupIndex + 1 : groupIndex);
   };
 
-  const onTabDrop = (event: DragEvent<HTMLDivElement>, index: number) => {
+  const onTabDrop = (event: DragEvent<HTMLDivElement>, index: number, groupIndex: number) => {
     event.preventDefault();
 
     if (draggingTabIndex === null) {
@@ -1257,18 +1361,20 @@ export function App(): JSX.Element {
     const intent = getTabDragIntent(event);
 
     if (intent === 'split' && draggingTabIndex !== index) {
-      splitTabsByIndex(draggingTabIndex, index);
+      splitTabsByIndex(draggingTabIndex, index, groupIndex);
     } else {
-      reorderOpenTabs(draggingTabIndex, intent === 'after' ? index + 1 : index);
+      reorderTabGroups(draggingGroupIndex ?? groupIndex, intent === 'after' ? groupIndex + 1 : groupIndex);
     }
 
     setDraggingTabIndex(null);
+    setDraggingGroupIndex(null);
     setTabDropTargetIndex(null);
     setTabSplitTargetIndex(null);
   };
 
   const onTabDragEnd = () => {
     setDraggingTabIndex(null);
+    setDraggingGroupIndex(null);
     setTabDropTargetIndex(null);
     setTabSplitTargetIndex(null);
   };
@@ -1276,12 +1382,13 @@ export function App(): JSX.Element {
   const onTabsDropToEnd = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
 
-    if (draggingTabIndex === null) {
+    if (draggingTabIndex === null || draggingGroupIndex === null) {
       return;
     }
 
-    reorderOpenTabs(draggingTabIndex, openTabs.length);
+    reorderTabGroups(draggingGroupIndex, visibleTabGroups.length);
     setDraggingTabIndex(null);
+    setDraggingGroupIndex(null);
     setTabDropTargetIndex(null);
     setTabSplitTargetIndex(null);
   };
@@ -1294,7 +1401,7 @@ export function App(): JSX.Element {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     setTabSplitTargetIndex(null);
-    setTabDropTargetIndex(openTabs.length);
+    setTabDropTargetIndex(visibleTabGroups.length);
   };
 
   const openWorkspaceRoots = (tree: WorkspaceTreeNode[]) => {
@@ -1578,7 +1685,7 @@ export function App(): JSX.Element {
         key={tab.file.path}
         onMouseDown={() => {
           if (!isActivePane) {
-            activateEditorTab(tab);
+            activateEditorTab(tab, splitPanePaths ?? [tab.file.path]);
           }
         }}
       >
@@ -1686,37 +1793,35 @@ export function App(): JSX.Element {
               }}
               ref={editorTabsRef}
             >
-              {openTabs.length === 0 ? (
+              {visibleTabGroups.length === 0 ? (
                 <span className="editor-tab-empty">No markdown file opened</span>
               ) : (
-                openTabs.map((tab, index) => {
-                  const isActive = tab.file.path === activeTabPath;
-                  const isSplitTab =
-                    splitPaneTabs?.some((splitTab) => splitTab.file.path === tab.file.path) ?? false;
+                visibleTabGroups.map((groupPaths, groupIndex) => {
+                  const groupTabs = groupPaths
+                    .map((path) => openTabByPath.get(path))
+                    .filter(Boolean) as OpenEditorTab[];
+                  const groupKey = getTabGroupKey(groupPaths);
+                  const groupHasActive = activeGroupKey === groupKey;
 
-                  if (splitPaneTabs && isSplitTab) {
-                    if (index !== splitGroupStartIndex) {
-                      return null;
-                    }
+                  if (!groupTabs.length) {
+                    return null;
+                  }
 
-                    const splitTabIndexes = splitPaneTabs.map((splitTab) =>
+                  if (groupTabs.length > 1) {
+                    const splitTabIndexes = groupTabs.map((splitTab) =>
                       openTabs.findIndex((item) => item.file.path === splitTab.file.path)
                     );
-                    const isDraggingSplitGroup =
-                      draggingTabIndex !== null && splitTabIndexes.includes(draggingTabIndex);
-                    const isMergeTargetGroup =
-                      tabSplitTargetIndex !== null && splitTabIndexes.includes(tabSplitTargetIndex);
-                    const isInsertBeforeGroup =
-                      tabDropTargetIndex === splitGroupStartIndex && !isMergeTargetGroup;
-                    const isInsertAfterGroup =
-                      tabDropTargetIndex === splitGroupStartIndex + splitPaneTabs.length && !isMergeTargetGroup;
+                    const isDraggingSplitGroup = draggingGroupIndex === groupIndex;
+                    const isMergeTargetGroup = tabSplitTargetIndex === groupIndex;
+                    const isInsertBeforeGroup = tabDropTargetIndex === groupIndex && !isMergeTargetGroup;
+                    const isInsertAfterGroup = tabDropTargetIndex === groupIndex + 1 && !isMergeTargetGroup;
 
                     return (
-                      <div className="editor-tab-wrapper editor-split-tab-wrapper" key="split-editor-group">
+                      <div className="editor-tab-wrapper editor-split-tab-wrapper" key={groupKey}>
                         <div
                           className={[
                             'editor-split-tab-group',
-                            'has-active',
+                            groupHasActive ? 'has-active' : '',
                             isDraggingSplitGroup ? 'is-dragging' : '',
                             isMergeTargetGroup ? 'drag-merge' : '',
                             isInsertBeforeGroup ? 'drag-insert-left' : '',
@@ -1725,19 +1830,19 @@ export function App(): JSX.Element {
                             .filter(Boolean)
                             .join(' ')}
                           ref={(element) => {
-                            if (!element) {
-                              editorTabElementByPathRef.current.delete(splitPaneTabs[0].file.path);
-                              editorTabElementByPathRef.current.delete(splitPaneTabs[1].file.path);
-                              return;
-                            }
+                            for (const splitTab of groupTabs) {
+                              if (!element) {
+                                editorTabElementByPathRef.current.delete(splitTab.file.path);
+                                continue;
+                              }
 
-                            editorTabElementByPathRef.current.set(splitPaneTabs[0].file.path, element);
-                            editorTabElementByPathRef.current.set(splitPaneTabs[1].file.path, element);
+                              editorTabElementByPathRef.current.set(splitTab.file.path, element);
+                            }
                           }}
                         >
-                          {splitPaneTabs.map((splitTab, paneIndex) => {
-                            const tabIndex = openTabs.findIndex((item) => item.file.path === splitTab.file.path);
-                            const isActiveSplitTab = splitTab.file.path === activeTabPath;
+                          {groupTabs.map((splitTab, paneIndex) => {
+                            const tabIndex = splitTabIndexes[paneIndex];
+                            const isActiveSplitTab = splitTab.file.path === activeTabPath && groupHasActive;
 
                             return (
                               <div
@@ -1747,8 +1852,8 @@ export function App(): JSX.Element {
                                   'editor-split-tab-item',
                                   paneIndex === 0 ? 'left' : 'right',
                                   isActiveSplitTab ? 'active' : '',
-                                  draggingTabIndex === tabIndex ? 'dragging' : '',
-                                  tabSplitTargetIndex === tabIndex && draggingTabIndex !== tabIndex ? 'split-target' : ''
+                                  draggingTabIndex === tabIndex && draggingGroupIndex === groupIndex ? 'dragging' : '',
+                                  isMergeTargetGroup ? 'split-target' : ''
                                 ]
                                   .filter(Boolean)
                                   .join(' ')}
@@ -1756,18 +1861,18 @@ export function App(): JSX.Element {
                                 draggable
                                 key={splitTab.file.path}
                                 onClick={() => {
-                                  if (!isActiveSplitTab) {
-                                    activateEditorTab(splitTab);
+                                  if (!isActiveSplitTab || !isSplitViewEnabled) {
+                                    activateEditorTab(splitTab, groupPaths);
                                   }
                                 }}
                                 onDragEnd={onTabDragEnd}
-                                onDragOver={(event) => onTabDragOver(event, tabIndex)}
-                                onDragStart={(event) => onTabDragStart(event, tabIndex)}
-                                onDrop={(event) => onTabDrop(event, tabIndex)}
+                                onDragOver={(event) => onTabDragOver(event, tabIndex, groupIndex)}
+                                onDragStart={(event) => onTabDragStart(event, tabIndex, groupIndex)}
+                                onDrop={(event) => onTabDrop(event, tabIndex, groupIndex)}
                                 onKeyDown={(event) => {
                                   if (event.key === 'Enter' || event.key === ' ') {
                                     event.preventDefault();
-                                    activateEditorTab(splitTab);
+                                    activateEditorTab(splitTab, groupPaths);
                                   }
                                 }}
                                 role="button"
@@ -1803,13 +1908,13 @@ export function App(): JSX.Element {
                     );
                   }
 
-                  return (
-                    <div className="editor-tab-wrapper" key={tab.file.path}>
-                      {splitAfterPosition !== null && splitAfterPosition === index && (
-                        <span className="editor-tab-split-divider" />
-                      )}
+                  const tab = groupTabs[0];
+                  const index = openTabs.findIndex((item) => item.file.path === tab.file.path);
+                  const isActive = tab.file.path === activeTabPath;
 
-                      {tabDropTargetIndex === index && draggingTabIndex !== index && tabSplitTargetIndex === null ? (
+                  return (
+                    <div className="editor-tab-wrapper" key={groupKey}>
+                      {tabDropTargetIndex === groupIndex && draggingGroupIndex !== groupIndex && tabSplitTargetIndex === null ? (
                         <span className="editor-tab-drop-indicator" />
                       ) : null}
 
@@ -1818,9 +1923,9 @@ export function App(): JSX.Element {
                         aria-selected={isActive}
                         className={[
                           'editor-tab',
-                          isActive ? 'active' : '',
-                          draggingTabIndex === index ? 'dragging' : '',
-                          tabSplitTargetIndex === index && draggingTabIndex !== index ? 'split-target' : ''
+                          isActive && groupHasActive ? 'active' : '',
+                          draggingTabIndex === index && draggingGroupIndex === groupIndex ? 'dragging' : '',
+                          tabSplitTargetIndex === groupIndex && draggingGroupIndex !== groupIndex ? 'split-target' : ''
                         ]
                           .filter(Boolean)
                           .join(' ')}
@@ -1835,20 +1940,20 @@ export function App(): JSX.Element {
                           editorTabElementByPathRef.current.set(tab.file.path, element);
                         }}
                         onClick={() => {
-                          if (!isActive) {
-                            void readMarkdownFile(tab.file.path);
+                          if (!isActive || !groupHasActive) {
+                            activateEditorTab(tab, groupPaths);
                           }
                         }}
                         onDragEnd={onTabDragEnd}
-                        onDragOver={(event) => onTabDragOver(event, index)}
-                        onDragStart={(event) => onTabDragStart(event, index)}
-                        onDrop={(event) => onTabDrop(event, index)}
+                        onDragOver={(event) => onTabDragOver(event, index, groupIndex)}
+                        onDragStart={(event) => onTabDragStart(event, index, groupIndex)}
+                        onDrop={(event) => onTabDrop(event, index, groupIndex)}
                         onKeyDown={(event) => {
                           if (event.key === 'Enter' || event.key === ' ') {
                             event.preventDefault();
 
-                            if (!isActive) {
-                              void readMarkdownFile(tab.file.path);
+                            if (!isActive || !groupHasActive) {
+                              activateEditorTab(tab, groupPaths);
                             }
                           }
                         }}
@@ -1881,7 +1986,7 @@ export function App(): JSX.Element {
                 })
               )}
 
-              {draggingTabIndex !== null && tabDropTargetIndex === openTabs.length && tabSplitTargetIndex === null ? (
+              {draggingTabIndex !== null && tabDropTargetIndex === visibleTabGroups.length && tabSplitTargetIndex === null ? (
                 <span className="editor-tab-drop-indicator editor-tab-drop-indicator-end" />
               ) : null}
             </div>

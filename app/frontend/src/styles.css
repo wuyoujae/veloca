@@ -453,16 +453,9 @@ button {
 
 .editor-tab.split-target {
   color: var(--foreground);
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--info) 14%, transparent) 0 49%,
-      color-mix(in srgb, var(--foreground) 35%, transparent) 49% 51%,
-      color-mix(in srgb, var(--info) 14%, transparent) 51% 100%
-    ),
-    var(--accent);
-  border-color: color-mix(in srgb, var(--info) 62%, var(--border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 18%, transparent);
+  background: color-mix(in srgb, var(--info) 10%, var(--background));
+  border-color: color-mix(in srgb, var(--info) 32%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--info) 16%, transparent);
 }
 
 .editor-tab.dragging,
