@@ -229,7 +229,8 @@ const VelocaCodeBlockShiki = CodeBlock.extend({
             tabindex: '-1',
             title: 'Copy code',
             type: 'button'
-          }
+          },
+          ['span', { class: 'veloca-code-copy-status' }, '⧉']
         ]
       ],
       [
@@ -492,10 +493,31 @@ async function copyCodeBlockToClipboard(button: HTMLElement): Promise<void> {
   }
 
 function showCodeCopySuccess(button: HTMLElement): void {
-  button.dataset.copied = 'true';
-  window.setTimeout(() => {
+  const status = button.querySelector('.veloca-code-copy-status');
+  const resetTimer = window.setTimeout(() => {
     delete button.dataset.copied;
+    delete button.dataset.copyResetTimer;
+    button.setAttribute('aria-label', 'Copy code');
+    button.setAttribute('title', 'Copy code');
+
+    if (status) {
+      status.textContent = '⧉';
+    }
   }, 3000);
+  const previousResetTimer = Number(button.dataset.copyResetTimer);
+
+  if (Number.isFinite(previousResetTimer)) {
+    window.clearTimeout(previousResetTimer);
+  }
+
+  button.dataset.copied = 'true';
+  button.dataset.copyResetTimer = String(resetTimer);
+  button.setAttribute('aria-label', 'Code copied');
+  button.setAttribute('title', 'Code copied');
+
+  if (status) {
+    status.textContent = '✓';
+  }
 }
 
 function fallbackCopyText(text: string): void {

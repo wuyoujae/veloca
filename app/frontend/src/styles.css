@@ -2488,6 +2488,9 @@ button {
 .markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button,
 .veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 2.25rem;
   width: 2.25rem;
   height: 100%;
@@ -2503,17 +2506,14 @@ button {
     transform 0.18s ease;
 }
 
-.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button::before,
-.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button::before {
-  content: '⧉';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button > .veloca-code-copy-status,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button > .veloca-code-copy-status {
+  display: block;
   font-size: 0.95rem;
   font-weight: 600;
   line-height: 1;
   pointer-events: none;
+  user-select: none;
 }
 
 .markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button:hover,
@@ -2532,9 +2532,8 @@ button {
   color: #16a34a;
 }
 
-.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true']::before,
-.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true']::before {
-  content: '✓';
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true'] > .veloca-code-copy-status,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true'] > .veloca-code-copy-status {
   font-size: 1rem;
 }
 
