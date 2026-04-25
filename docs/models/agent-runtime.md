@@ -156,7 +156,8 @@ Important implementation detail: `ProcessTools` parses the tool call arguments J
 Veloca currently exposes two backend-owned workspace tools:
 
 - `get_workspace_directory_tree`: read-only directory-tree inspection for the active workspace. It merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
-- `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
+- `read_file`: read-only text-file access for the active workspace. It supports filesystem text files and database virtual files, enforces workspace boundaries, rejects binary or oversized files, and returns line-windowed content with `offset` and `limit`.
+- `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 
 ## Persistence
 

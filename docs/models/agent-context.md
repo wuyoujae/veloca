@@ -84,7 +84,10 @@ Use information in this priority order:
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
 - Use `get_workspace_directory_tree` to inspect the active workspace structure before making claims about available folders or files.
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
+- Use `read_file` to read a known text file from the active workspace. Use `offset` and `limit` when reading large files or when you only need a specific section.
+- Do not claim that you read an entire file when you only read a line window.
 - Use `run_bash_command` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
+- For `run_bash_command`, prefer the `cwd` argument over putting `cd ...` in the command. `cwd` may be workspace-relative or an absolute path inside the active workspace.
 - Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.
 - Do not run dangerous, destructive, privileged, background, or network-dependent commands. Network access is blocked in the bash sandbox.
 - Do not claim that a bash command succeeded unless the tool result reports success.
@@ -137,6 +140,7 @@ Use information in this priority order:
 - `${SELECTED_TEXT}` 不写入 system prompt，而是以 `<selected-text>` 独立块注入到本轮 user prompt 中。
 - 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
 - 后端已经暴露只读 tool `get_workspace_directory_tree`，用于获取当前活动工作区目录树。
+- 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
 - 后端已经暴露受沙箱限制的 tool `run_bash_command`，用于在当前文件系统工作区内运行前台 Bash 命令。
 
 ## Workspace Directory Tree Tool
@@ -158,6 +162,21 @@ Use information in this priority order:
 
 当前基础 `.velocaignore` 重点过滤 `node_modules/`、`.git/`、`.veloca/`、构建产物、缓存、日志、环境变量文件和 SQLite 文件，避免目录树撑爆上下文或暴露不必要的本地配置。
 
+## Read File Tool
+
+`read_file` 用于读取当前 active workspace 内的文本文件。它是只读 tool，不会修改工作区内容。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `read_file` |
+| 参数 | `path: string`、`offset?: number`、`limit?: number` |
+| 返回内容 | `type: "text"`、`file.filePath`、`file.content`、`file.numLines`、`file.startLine`、`file.totalLines`。 |
+| filesystem 路径 | 支持工作区相对路径或当前工作区内的绝对路径；真实路径解析后必须仍在 active workspace root 内。 |
+| database 路径 | 支持 `veloca-db://entry/...` 或数据库工作区内的相对路径；只读取虚拟文件，不读取 folder 或二进制资产。 |
+| 安全边界 | 最大 `10MB`；filesystem 读取前检查前 `8192` bytes 是否包含 NUL byte；拒绝二进制文件和 workspace 逃逸路径。 |
+
+`offset` 是 0-based 行偏移，`limit` 是最多读取的行数。读取超出文件尾部时返回空内容，并将 `startLine` 设置为 `totalLines + 1`。
+
 ## Bash Command Tool
 
 `run_bash_command` 用于让 Agent 在当前 `filesystem` 工作区内执行必要的前台命令。第一版不支持数据库工作区、不支持后台任务，也不会在缺少 macOS `sandbox-exec` 时降级为不安全执行。
@@ -166,7 +185,7 @@ Use information in this priority order:
 | --- | --- |
 | Tool name | `run_bash_command` |
 | 参数 | `command: string`、`cwd?: string`、`timeout?: number`、`description?: string` |
-| 默认行为 | `cwd` 相对当前工作区根目录；`timeout` 默认 `10000` ms，最大 `120000` ms。 |
+| 默认行为 | `cwd` 可为相对当前工作区根目录的路径，也可为当前工作区内的绝对路径；`timeout` 默认 `10000` ms，最大 `120000` ms。 |
 | 返回内容 | `ok`、`stdout`、`stderr`、`exitCode`、`interrupted`、`timedOut`、`blocked`、`cwd`、`durationMs`、`outputTruncated`、`sandboxStatus`、`noOutputExpected`。 |
 | 安全边界 | macOS sandbox；默认禁网；写入限制在当前工作区；输出按 stdout/stderr 各 `16384` bytes 截断。 |
 

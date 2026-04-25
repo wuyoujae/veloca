@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { veloca } from 'otherone-agent';
-import { getWorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
+import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceTreeNode } from './workspace-service';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
 
@@ -84,6 +84,8 @@ const maxDirectoryTreeCharacters = 30000;
 const maxDirectoryTreeDepth = 8;
 const maxDirectoryTreeNodes = 1200;
 const maxPromptLength = 20000;
+const maxReadFileBytes = 10 * 1024 * 1024;
+const readFileBinarySampleBytes = 8192;
 let envLoaded = false;
 
 const defaultVelocaIgnorePatterns = [
@@ -179,6 +181,23 @@ interface OutputBuffer {
   bytes: number;
   chunks: Buffer[];
   truncated: boolean;
+}
+
+interface ReadFileInput {
+  limit?: number;
+  offset?: number;
+  path: string;
+}
+
+interface ReadFileOutput {
+  file: {
+    content: string;
+    filePath: string;
+    numLines: number;
+    startLine: number;
+    totalLines: number;
+  };
+  type: 'text';
 }
 
 function loadLocalEnv(): void {
@@ -349,6 +368,32 @@ function normalizeBashInput(command: unknown, cwd: unknown, timeout: unknown, de
   };
 }
 
+function normalizeOptionalLineNumber(value: unknown, minimum: number, name: string): number | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const numberValue = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+
+  if (!Number.isInteger(numberValue) || numberValue < minimum) {
+    throw new Error(`${name} must be an integer greater than or equal to ${minimum}.`);
+  }
+
+  return numberValue;
+}
+
+function normalizeReadFileInput(path: unknown, offset: unknown, limit: unknown): ReadFileInput {
+  if (typeof path !== 'string' || !path.trim()) {
+    throw new Error('read_file path is required.');
+  }
+
+  return {
+    limit: normalizeOptionalLineNumber(limit, 1, 'read_file limit'),
+    offset: normalizeOptionalLineNumber(offset, 0, 'read_file offset'),
+    path: path.trim()
+  };
+}
+
 function isSameOrChildPath(parentPath: string, childPath: string): boolean {
   const relativePath = relative(parentPath, childPath);
 
@@ -356,12 +401,8 @@ function isSameOrChildPath(parentPath: string, childPath: string): boolean {
 }
 
 function resolveBashCwd(workspaceRootPath: string, cwd: string | undefined): string {
-  if (cwd && isAbsolute(cwd)) {
-    throw new Error('Bash cwd must be relative to the active workspace root.');
-  }
-
   const rootPath = realpathSync(workspaceRootPath);
-  const candidatePath = cwd ? resolve(rootPath, cwd) : rootPath;
+  const candidatePath = cwd ? (isAbsolute(cwd) ? cwd : resolve(rootPath, cwd)) : rootPath;
 
   if (!existsSync(candidatePath)) {
     throw new Error('Bash cwd does not exist inside the active workspace.');
@@ -381,7 +422,14 @@ function resolveBashCwd(workspaceRootPath: string, cwd: string | undefined): str
   return resolvedCwd;
 }
 
-function getBlockedBashReason(command: string): string | null {
+function getCommandForBashSafetyCheck(command: string, workspaceRootPath: string): string {
+  const workspacePathPattern = new RegExp(`${escapeRegex(workspaceRootPath)}(?=$|[\\s"';&|)]|/)`, 'g');
+
+  return command.replace(workspacePathPattern, '.');
+}
+
+function getBlockedBashReason(command: string, workspaceRootPath: string): string | null {
+  const checkedCommand = getCommandForBashSafetyCheck(command, workspaceRootPath);
   const checks: Array<[RegExp, string]> = [
     [/(^|[;&|]\s*)sudo(\s|$)/, 'sudo is not allowed in Veloca Agent bash commands.'],
     [/(^|[;&|]\s*)su(\s|$)/, 'Switching users is not allowed in Veloca Agent bash commands.'],
@@ -406,12 +454,12 @@ function getBlockedBashReason(command: string): string | null {
   ];
 
   for (const [pattern, reason] of checks) {
-    if (pattern.test(command)) {
+    if (pattern.test(checkedCommand)) {
       return reason;
     }
   }
 
-  const withoutFdRedirects = command.replace(/[<>]&\d/g, '');
+  const withoutFdRedirects = checkedCommand.replace(/[<>]&\d/g, '');
 
   if (/(^|[^&])&(\s|$)/.test(withoutFdRedirects)) {
     return 'Background commands are not supported.';
@@ -558,6 +606,168 @@ function executeSandboxedBash(command: string, cwd: string, workspaceRootPath: s
   });
 }
 
+function splitTextLines(content: string): string[] {
+  const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  if (!normalizedContent) {
+    return [];
+  }
+
+  const lines = normalizedContent.split('\n');
+
+  if (normalizedContent.endsWith('\n')) {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function createReadFileOutput(filePath: string, content: string, offset: number | undefined, limit: number | undefined): ReadFileOutput {
+  const lines = splitTextLines(content);
+  const startIndex = Math.min(offset ?? 0, lines.length);
+  const endIndex = limit === undefined ? lines.length : Math.min(startIndex + limit, lines.length);
+
+  return {
+    file: {
+      content: lines.slice(startIndex, endIndex).join('\n'),
+      filePath,
+      numLines: endIndex - startIndex,
+      startLine: startIndex + 1,
+      totalLines: lines.length
+    },
+    type: 'text'
+  };
+}
+
+function ensureReadableTextContentSize(filePath: string, byteLength: number): void {
+  if (byteLength > maxReadFileBytes) {
+    throw new Error(`file is too large (${byteLength} bytes, max ${maxReadFileBytes} bytes)`);
+  }
+
+  if (byteLength < 0) {
+    throw new Error(`Unable to read file size for ${filePath}.`);
+  }
+}
+
+function resolveFilesystemReadPath(workspaceRootPath: string, path: string): string {
+  const canonicalRoot = realpathSync(workspaceRootPath);
+  const candidatePath = isAbsolute(path) ? path : resolve(canonicalRoot, path);
+  const resolvedPath = realpathSync(candidatePath);
+  const stats = statSync(resolvedPath);
+
+  if (!isSameOrChildPath(canonicalRoot, resolvedPath)) {
+    throw new Error(`path ${resolvedPath} escapes workspace boundary ${canonicalRoot}`);
+  }
+
+  if (!stats.isFile()) {
+    throw new Error('read_file path must point to a file.');
+  }
+
+  ensureReadableTextContentSize(resolvedPath, stats.size);
+
+  return resolvedPath;
+}
+
+function readFilesystemTextFile(workspaceRootPath: string, input: ReadFileInput): ReadFileOutput {
+  const resolvedPath = resolveFilesystemReadPath(workspaceRootPath, input.path);
+  const buffer = readFileSync(resolvedPath);
+  const sample = buffer.subarray(0, readFileBinarySampleBytes);
+
+  if (sample.includes(0)) {
+    throw new Error('file appears to be binary');
+  }
+
+  return createReadFileOutput(resolvedPath, buffer.toString('utf8'), input.offset, input.limit);
+}
+
+function findWorkspaceTreeNodeByPath(node: WorkspaceTreeNode, path: string): WorkspaceTreeNode | null {
+  if (node.path === path) {
+    return node;
+  }
+
+  for (const child of node.children ?? []) {
+    const found = findWorkspaceTreeNodeByPath(child, path);
+
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function findWorkspaceTreeNodeByRelativePath(node: WorkspaceTreeNode, path: string): WorkspaceTreeNode | null {
+  const normalizedPath = normalizeTreePath(path.replace(/^\.\//, ''));
+
+  if (!normalizedPath) {
+    return node;
+  }
+
+  for (const child of node.children ?? []) {
+    if (normalizeTreePath(child.relativePath) === normalizedPath) {
+      return child;
+    }
+
+    const found = findWorkspaceTreeNodeByRelativePath(child, normalizedPath);
+
+    if (found) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+function resolveDatabaseReadNode(rootNode: WorkspaceTreeNode, path: string): WorkspaceTreeNode {
+  const node = path.startsWith('veloca-db://entry/')
+    ? findWorkspaceTreeNodeByPath(rootNode, path)
+    : findWorkspaceTreeNodeByRelativePath(rootNode, path);
+
+  if (!node) {
+    throw new Error('Database file is not inside the active workspace.');
+  }
+
+  if (node.type !== 'file') {
+    throw new Error('read_file path must point to a database file.');
+  }
+
+  return node;
+}
+
+function readDatabaseTextFile(rootNode: WorkspaceTreeNode, input: ReadFileInput): ReadFileOutput {
+  const node = resolveDatabaseReadNode(rootNode, input.path);
+  const file = readMarkdownFile(node.path);
+  const byteLength = Buffer.byteLength(file.content, 'utf8');
+
+  ensureReadableTextContentSize(file.path, byteLength);
+
+  if (file.content.includes('\0')) {
+    throw new Error('file appears to be binary');
+  }
+
+  return createReadFileOutput(file.path, file.content, input.offset, input.limit);
+}
+
+function readWorkspaceTextFile(context: AgentRuntimeContext | undefined, input: ReadFileInput): ReadFileOutput {
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  if (!workspaceRootPath || !workspaceRoot) {
+    throw new Error('No active workspace root is available for file reading.');
+  }
+
+  if (workspaceType === 'filesystem') {
+    return readFilesystemTextFile(workspaceRoot.rootPath, input);
+  }
+
+  if (workspaceType === 'database') {
+    return readDatabaseTextFile(workspaceRoot.node, input);
+  }
+
+  throw new Error('read_file requires an active workspace.');
+}
+
 async function runBashCommand(context: AgentRuntimeContext | undefined, input: BashCommandInput): Promise<BashCommandOutput> {
   const startedAt = Date.now();
   const workspaceType = getWorkspaceType(context);
@@ -588,7 +798,9 @@ async function runBashCommand(context: AgentRuntimeContext | undefined, input: B
     });
   }
 
-  if (!findWorkspaceRootNode(workspaceRootPath, workspaceType)) {
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  if (!workspaceRoot) {
     return createBashOutput({
       blocked: true,
       cwd: workspaceRootPath,
@@ -598,70 +810,72 @@ async function runBashCommand(context: AgentRuntimeContext | undefined, input: B
     });
   }
 
+  const registeredWorkspaceRootPath = workspaceRoot.rootPath;
+
   if (!existsSync(bashSandboxExecPath) || process.platform !== 'darwin') {
     return createBashOutput({
       blocked: true,
-      cwd: workspaceRootPath,
+      cwd: registeredWorkspaceRootPath,
       error: 'Bash sandbox is unavailable on this platform, so the command was not executed.',
       ok: false,
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   }
 
   if (!command) {
     return createBashOutput({
       blocked: true,
-      cwd: workspaceRootPath,
+      cwd: registeredWorkspaceRootPath,
       error: 'Bash command cannot be empty.',
       ok: false,
       sandboxStatus,
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   }
 
   if (command.length > bashMaxCommandLength) {
     return createBashOutput({
       blocked: true,
-      cwd: workspaceRootPath,
+      cwd: registeredWorkspaceRootPath,
       error: `Bash command cannot exceed ${bashMaxCommandLength} characters.`,
       ok: false,
       sandboxStatus,
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   }
 
-  const blockedReason = getBlockedBashReason(command);
+  const blockedReason = getBlockedBashReason(command, registeredWorkspaceRootPath);
 
   if (blockedReason) {
     return createBashOutput({
       blocked: true,
-      cwd: workspaceRootPath,
+      cwd: registeredWorkspaceRootPath,
       error: blockedReason,
       ok: false,
       sandboxStatus,
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   }
 
   let cwd: string;
 
   try {
-    cwd = resolveBashCwd(workspaceRootPath, input.cwd);
+    cwd = resolveBashCwd(registeredWorkspaceRootPath, input.cwd);
   } catch (error) {
     return createBashOutput({
       blocked: true,
-      cwd: workspaceRootPath,
+      cwd: registeredWorkspaceRootPath,
       error: getErrorMessage(error),
       ok: false,
       sandboxStatus,
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   }
 
   const timeoutMs = input.timeout ?? bashDefaultTimeoutMs;
 
   try {
-    const result = await executeSandboxedBash(command, cwd, realpathSync(workspaceRootPath), timeoutMs);
+    const result = await executeSandboxedBash(command, cwd, registeredWorkspaceRootPath, timeoutMs);
     const stderr = result.timedOut
       ? `${result.stderr}${result.stderr ? '\n' : ''}Command exceeded timeout of ${timeoutMs} ms`
       : result.stderr;
@@ -677,7 +891,7 @@ async function runBashCommand(context: AgentRuntimeContext | undefined, input: B
       stderr,
       stdout: result.stdout,
       timedOut: result.timedOut,
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   } catch (error) {
     return createBashOutput({
@@ -687,7 +901,7 @@ async function runBashCommand(context: AgentRuntimeContext | undefined, input: B
       ok: false,
       sandboxStatus,
       stderr: getErrorMessage(error),
-      workspaceRootPath
+      workspaceRootPath: registeredWorkspaceRootPath
     });
   }
 }
@@ -802,15 +1016,44 @@ function getDirectoryTreePatterns(rootPath: string, workspaceType: AgentWorkspac
   );
 }
 
-function findWorkspaceRootNode(rootPath: string | undefined, workspaceType: AgentWorkspaceType): WorkspaceTreeNode | null {
+function resolveWorkspaceRoot(
+  rootPath: string | undefined,
+  workspaceType: AgentWorkspaceType
+): { node: WorkspaceTreeNode; rootPath: string } | null {
   if (!rootPath || workspaceType === 'none') {
     return null;
   }
 
-  return (
-    getWorkspaceSnapshot().tree.find((node) => node.type === 'folder' && node.source === workspaceType && node.path === rootPath) ??
-    null
+  const nodes = getWorkspaceSnapshot().tree.filter(
+    (node) => node.type === 'folder' && node.source === workspaceType
   );
+
+  if (workspaceType !== 'filesystem') {
+    const node = nodes.find((candidate) => candidate.path === rootPath);
+    return node ? { node, rootPath } : null;
+  }
+
+  let requestedRootPath: string;
+
+  try {
+    requestedRootPath = realpathSync(rootPath);
+  } catch {
+    return null;
+  }
+
+  for (const node of nodes) {
+    try {
+      const registeredRootPath = realpathSync(node.path);
+
+      if (registeredRootPath === requestedRootPath) {
+        return { node, rootPath: registeredRootPath };
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 function walkFilesystemDirectory(
@@ -913,9 +1156,9 @@ function walkWorkspaceTreeNode(
 function getWorkspaceDirectoryTree(context: AgentRuntimeContext | undefined, velocaignore: string | undefined) {
   const workspaceType = getWorkspaceType(context);
   const workspaceRootPath = context?.workspaceRootPath?.trim();
-  const rootNode = findWorkspaceRootNode(workspaceRootPath, workspaceType);
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
 
-  if (!workspaceRootPath || !rootNode) {
+  if (!workspaceRootPath || !workspaceRoot) {
     return {
       error: 'No active workspace root is available for directory tree inspection.',
       ok: false,
@@ -923,13 +1166,15 @@ function getWorkspaceDirectoryTree(context: AgentRuntimeContext | undefined, vel
     };
   }
 
-  const patterns = getDirectoryTreePatterns(workspaceRootPath, workspaceType, velocaignore);
+  const registeredWorkspaceRootPath = workspaceRoot.rootPath;
+  const rootNode = workspaceRoot.node;
+  const patterns = getDirectoryTreePatterns(registeredWorkspaceRootPath, workspaceType, velocaignore);
   const state = createDirectoryTreeState();
-  const rootName = rootNode.name || basename(workspaceRootPath) || workspaceRootPath;
+  const rootName = rootNode.name || basename(registeredWorkspaceRootPath) || registeredWorkspaceRootPath;
   const lines = [`${rootName}/`];
 
   if (workspaceType === 'filesystem') {
-    walkFilesystemDirectory(workspaceRootPath, workspaceRootPath, patterns, lines, state, 1);
+    walkFilesystemDirectory(registeredWorkspaceRootPath, registeredWorkspaceRootPath, patterns, lines, state, 1);
   } else {
     walkWorkspaceTreeNode(rootNode, patterns, lines, state, 1);
   }
@@ -951,7 +1196,7 @@ function getWorkspaceDirectoryTree(context: AgentRuntimeContext | undefined, vel
     ok: true,
     stats,
     tree,
-    workspaceRootPath,
+    workspaceRootPath: registeredWorkspaceRootPath,
     workspaceType
   };
 }
@@ -980,6 +1225,36 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'read_file',
+        description:
+          'Read a text file from the active Veloca workspace. Supports filesystem text files and database workspace virtual files.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description:
+                'File path to read. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... or workspace-relative.'
+            },
+            offset: {
+              type: 'number',
+              minimum: 0,
+              description: 'Optional zero-based line offset.'
+            },
+            limit: {
+              type: 'number',
+              minimum: 1,
+              description: 'Optional maximum number of lines to read.'
+            }
+          },
+          required: ['path'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'run_bash_command',
         description:
           'Run a foreground bash command inside the active filesystem workspace. The command is sandboxed, network access is blocked, and writes are limited to the workspace.',
@@ -993,7 +1268,7 @@ function buildAgentTools() {
             cwd: {
               type: 'string',
               description:
-                'Optional working directory relative to the active workspace root. Use an empty string to run at the workspace root.'
+                'Optional working directory. May be relative to the active workspace root or an absolute path inside the active workspace. Use an empty string to run at the workspace root.'
             },
             timeout: {
               type: 'number',
@@ -1016,6 +1291,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext) {
   return {
     get_workspace_directory_tree: (velocaignore?: string) =>
       getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined),
+    read_file: (path?: unknown, offset?: unknown, limit?: unknown) =>
+      readWorkspaceTextFile(context, normalizeReadFileInput(path, offset, limit)),
     run_bash_command: (command?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
       runBashCommand(context, normalizeBashInput(command, cwd, timeout, description))
   };
@@ -1091,7 +1368,10 @@ Use information in this priority order:
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
 - Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
+- Use \`read_file\` to read a known text file from the active workspace. Use \`offset\` and \`limit\` when reading large files or when you only need a specific section.
+- Do not claim that you read an entire file when you only read a line window.
 - Use \`run_bash_command\` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
+- For \`run_bash_command\`, prefer the \`cwd\` argument over putting \`cd ...\` in the command. \`cwd\` may be workspace-relative or an absolute path inside the active workspace.
 - Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.
 - Do not run dangerous, destructive, privileged, background, or network-dependent commands. Network access is blocked in the bash sandbox.
 - Do not claim that a bash command succeeded unless the tool result reports success.
