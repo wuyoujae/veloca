@@ -272,7 +272,7 @@ export function AgentPalette({
       }
 
       try {
-        const storedSessions = await listSessions();
+        const storedSessions = await listSessions(context);
 
         if (canceled || storedSessions.length === 0) {
           return;
@@ -304,7 +304,7 @@ export function AgentPalette({
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [context.workspaceRootPath, context.workspaceType]);
 
   useEffect(() => {
     if (!visible) {
@@ -861,7 +861,7 @@ export function AgentPalette({
       return;
     }
 
-    void createStoredSession()
+    void createStoredSession(context)
       .then((storedSession) => {
         const nextSession = normalizeStoredSession(storedSession as StoredAgentSession);
 

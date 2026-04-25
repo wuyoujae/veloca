@@ -93,6 +93,8 @@ const maxPromptLength = 20000;
 const maxReadFileBytes = 10 * 1024 * 1024;
 const maxWriteFileBytes = 10 * 1024 * 1024;
 const readFileBinarySampleBytes = 8192;
+const agentStorageDirectory = join(process.cwd(), '.veloca', 'storage');
+const agentSessionWorkspaceIndexPath = join(agentStorageDirectory, 'veloca-session-workspaces.json');
 let envLoaded = false;
 
 const defaultVelocaIgnorePatterns = [
@@ -134,6 +136,21 @@ interface StoredAgentEntry {
 
 interface StoredAgentSessionData {
   entries?: StoredAgentEntry[];
+}
+
+interface AgentSessionWorkspaceScope {
+  workspaceKey: string;
+  workspaceRootPath?: string;
+  workspaceType: AgentWorkspaceType;
+}
+
+interface AgentSessionWorkspaceRecord {
+  created_at?: unknown;
+  session_id?: unknown;
+  updated_at?: unknown;
+  workspace_key?: unknown;
+  workspace_root_path?: unknown;
+  workspace_type?: unknown;
 }
 
 interface DirectoryTreeStats {
@@ -345,6 +362,117 @@ function getWorkspaceType(context?: AgentRuntimeContext): AgentWorkspaceType {
   }
 
   return 'none';
+}
+
+function getAgentSessionWorkspaceScope(context?: AgentRuntimeContext): AgentSessionWorkspaceScope {
+  const workspaceType = getWorkspaceType(context);
+  const requestedRootPath = context?.workspaceRootPath?.trim();
+
+  if (workspaceType === 'none') {
+    return {
+      workspaceKey: 'none',
+      workspaceType
+    };
+  }
+
+  if (!requestedRootPath) {
+    throw new Error('An active workspace root is required for Agent sessions.');
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot(requestedRootPath, workspaceType);
+
+  if (!workspaceRoot) {
+    throw new Error('The active workspace root is not registered in Veloca.');
+  }
+
+  return {
+    workspaceKey: workspaceType + ':' + workspaceRoot.rootPath,
+    workspaceRootPath: workspaceRoot.rootPath,
+    workspaceType
+  };
+}
+
+function getStoredWorkspaceRecordSessionId(record: AgentSessionWorkspaceRecord): string {
+  return typeof record.session_id === 'string' ? record.session_id : '';
+}
+
+function getStoredWorkspaceRecordKey(record: AgentSessionWorkspaceRecord): string {
+  return typeof record.workspace_key === 'string' ? record.workspace_key : '';
+}
+
+function readAgentSessionWorkspaceRecords(): AgentSessionWorkspaceRecord[] {
+  if (!existsSync(agentSessionWorkspaceIndexPath)) {
+    return [];
+  }
+
+  try {
+    const data = JSON.parse(readFileSync(agentSessionWorkspaceIndexPath, 'utf-8')) as {
+      sessions?: unknown;
+    };
+
+    return Array.isArray(data.sessions) ? (data.sessions as AgentSessionWorkspaceRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeAgentSessionWorkspaceRecords(records: AgentSessionWorkspaceRecord[]): void {
+  if (!existsSync(agentStorageDirectory)) {
+    mkdirSync(agentStorageDirectory, { recursive: true });
+  }
+
+  writeFileSync(
+    agentSessionWorkspaceIndexPath,
+    JSON.stringify(
+      {
+        sessions: records
+      },
+      null,
+      2
+    ),
+    'utf-8'
+  );
+}
+
+function upsertAgentSessionWorkspaceRecord(sessionId: string, scope: AgentSessionWorkspaceScope): void {
+  const records = readAgentSessionWorkspaceRecords();
+  const recordIndex = records.findIndex((record) => getStoredWorkspaceRecordSessionId(record) === sessionId);
+  const now = new Date().toISOString();
+  const nextRecord: AgentSessionWorkspaceRecord = {
+    created_at:
+      recordIndex >= 0 && typeof records[recordIndex].created_at === 'string'
+        ? records[recordIndex].created_at
+        : now,
+    session_id: sessionId,
+    updated_at: now,
+    workspace_key: scope.workspaceKey,
+    workspace_root_path: scope.workspaceRootPath,
+    workspace_type: scope.workspaceType
+  };
+
+  if (recordIndex >= 0) {
+    records[recordIndex] = nextRecord;
+  } else {
+    records.push(nextRecord);
+  }
+
+  writeAgentSessionWorkspaceRecords(records);
+}
+
+function assertAgentSessionBelongsToWorkspace(sessionId: string, scope: AgentSessionWorkspaceScope): void {
+  const storedSessions = readStoredSessionSummaries();
+
+  if (!storedSessions.some((session) => getStoredSessionId(session) === sessionId)) {
+    throw new Error('Agent session does not exist.');
+  }
+
+  const record = readAgentSessionWorkspaceRecords().find(
+    (candidate) => getStoredWorkspaceRecordSessionId(candidate) === sessionId
+  );
+
+  if (!record || getStoredWorkspaceRecordKey(record) !== scope.workspaceKey) {
+    throw new Error('Agent session does not belong to the active workspace.');
+  }
 }
 
 function createBashOutput(
@@ -2017,6 +2145,8 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
 
 function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolean, hooks?: AgentRuntimeHooks) {
   const prompt = validateRequest(request);
+  const workspaceScope = getAgentSessionWorkspaceScope(request.context);
+  assertAgentSessionBelongsToWorkspace(request.sessionId, workspaceScope);
   const apiKey = getRequiredEnv('VELOCA_AGENT_API_KEY');
   const baseUrl = getOptionalEnv('VELOCA_AGENT_BASE_URL', defaultAgentBaseUrl);
   const model = getOptionalEnv('VELOCA_AGENT_MODEL', defaultAgentModel);
@@ -2153,9 +2283,23 @@ function readStoredSessionSummaries(): StoredAgentSessionSummary[] {
   return sortStoredSessions(Array.isArray(sessions) ? sessions : []);
 }
 
-export function createAgentSession(): AgentStoredSession {
+function getSessionsForWorkspace(scope: AgentSessionWorkspaceScope): StoredAgentSessionSummary[] {
+  const workspaceSessionIds = new Set(
+    readAgentSessionWorkspaceRecords()
+      .filter((record) => getStoredWorkspaceRecordKey(record) === scope.workspaceKey)
+      .map((record) => getStoredWorkspaceRecordSessionId(record))
+      .filter(Boolean)
+  );
+
+  return readStoredSessionSummaries().filter((session) => workspaceSessionIds.has(getStoredSessionId(session)));
+}
+
+export function createAgentSession(context?: AgentRuntimeContext): AgentStoredSession {
+  const scope = getAgentSessionWorkspaceScope(context);
   const sessionId = veloca.CreateNewSession();
-  const sessions = readStoredSessionSummaries();
+  upsertAgentSessionWorkspaceRecord(sessionId, scope);
+
+  const sessions = getSessionsForWorkspace(scope);
   const sessionIndex = Math.max(
     0,
     sessions.findIndex((session) => getStoredSessionId(session) === sessionId)
@@ -2164,11 +2308,12 @@ export function createAgentSession(): AgentStoredSession {
   return readStoredSession(sessionId, sessionIndex);
 }
 
-export function listAgentSessions(): AgentStoredSession[] {
-  const sessions = readStoredSessionSummaries();
+export function listAgentSessions(context?: AgentRuntimeContext): AgentStoredSession[] {
+  const scope = getAgentSessionWorkspaceScope(context);
+  const sessions = getSessionsForWorkspace(scope);
 
   if (sessions.length === 0) {
-    return [createAgentSession()];
+    return [createAgentSession(context)];
   }
 
   return sessions.map((session, index) => readStoredSession(getStoredSessionId(session), index));

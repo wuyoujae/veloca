@@ -161,8 +161,8 @@ declare global {
         platform: NodeJS.Platform;
       };
       agent: {
-        listSessions: () => Promise<AgentStoredSession[]>;
-        createSession: () => Promise<AgentStoredSession>;
+        listSessions: (context?: AgentRuntimeContext) => Promise<AgentStoredSession[]>;
+        createSession: (context?: AgentRuntimeContext) => Promise<AgentStoredSession>;
         sendMessage: (payload: AgentSendMessageRequest) => Promise<AgentSendMessageResponse>;
         streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => () => void;
         onOpenPalette: (callback: () => void) => () => void;

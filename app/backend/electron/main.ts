@@ -23,6 +23,7 @@ import {
   listAgentSessions,
   sendAgentMessage,
   streamAgentMessage,
+  type AgentRuntimeContext,
   type AgentSendMessageRequest
 } from '../services/agent-service';
 import {
@@ -116,11 +117,11 @@ function registerIpcHandlers(): void {
       onWorkspaceChanged: broadcastWorkspaceChanged
     });
   });
-  ipcMain.handle('agent:list-sessions', () => {
-    return listAgentSessions();
+  ipcMain.handle('agent:list-sessions', (_event, context: AgentRuntimeContext | undefined) => {
+    return listAgentSessions(context);
   });
-  ipcMain.handle('agent:create-session', () => {
-    return createAgentSession();
+  ipcMain.handle('agent:create-session', (_event, context: AgentRuntimeContext | undefined) => {
+    return createAgentSession(context);
   });
   ipcMain.on('agent:send-message-stream', (event, requestId: string, request: AgentSendMessageRequest) => {
     if (!requestId || typeof requestId !== 'string') {

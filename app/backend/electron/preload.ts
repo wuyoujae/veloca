@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ThemeMode } from '../services/settings-store';
 import type {
+  AgentRuntimeContext,
   AgentSendMessageRequest,
   AgentSendMessageResponse,
   AgentStoredSession,
@@ -64,8 +65,10 @@ contextBridge.exposeInMainWorld('veloca', {
     platform: process.platform
   },
   agent: {
-    listSessions: () => ipcRenderer.invoke('agent:list-sessions') as Promise<AgentStoredSession[]>,
-    createSession: () => ipcRenderer.invoke('agent:create-session') as Promise<AgentStoredSession>,
+    listSessions: (context?: AgentRuntimeContext) =>
+      ipcRenderer.invoke('agent:list-sessions', context) as Promise<AgentStoredSession[]>,
+    createSession: (context?: AgentRuntimeContext) =>
+      ipcRenderer.invoke('agent:create-session', context) as Promise<AgentStoredSession>,
     sendMessage: (payload: AgentSendMessageRequest) =>
       ipcRenderer.invoke('agent:send-message', payload) as Promise<AgentSendMessageResponse>,
     streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => {

@@ -205,11 +205,19 @@ Those tables intentionally do not match the current Veloca SQLite stack.
 
 Veloca now exposes a small backend-owned session API over IPC:
 
-- `agent:list-sessions`: reads `otherone-agent` local-file sessions, creates one default session if the store is empty, and maps stored entries back into the Agent canvas shape.
-- `agent:create-session`: calls `veloca.CreateNewSession()` and returns the newly created local-file session.
-- `agent:send-message-stream`: sends the active session id into `veloca.InvokeAgent()`, so follow-up turns reuse the same context memory.
+- `agent:list-sessions`: receives the current Agent runtime context, scopes the request to the active workspace root, reads only sessions assigned to that workspace, creates one default session for that workspace if none exist, and maps stored entries back into the Agent canvas shape.
+- `agent:create-session`: receives the current Agent runtime context, calls `veloca.CreateNewSession()`, records the new session's workspace ownership in `.veloca/storage/veloca-session-workspaces.json`, and returns the newly created local-file session.
+- `agent:send-message-stream`: validates that the active session id belongs to the current workspace root before sending it into `veloca.InvokeAgent()`, so follow-up turns reuse the same context memory without allowing another workspace to open that session.
 
-The renderer no longer treats Agent sessions as throwaway UI-only state. On mount, the Agent palette calls `window.veloca.agent.listSessions()`, restores historical sessions, and selects the newest session by default. The session switcher uses the same `otherone-agent` session ids that are passed back to the runtime, which means switching to an older session and sending a new message continues that session's saved context.
+The renderer no longer treats Agent sessions as throwaway UI-only state. On mount and whenever the active workspace root changes, the Agent palette calls `window.veloca.agent.listSessions(context)`, restores historical sessions for that workspace, and selects the newest session by default. The session switcher uses the same `otherone-agent` session ids that are passed back to the runtime, which means switching to an older session and sending a new message continues that session's saved context inside the same workspace.
+
+Session content still stays in the third-party local-file store, but Veloca owns the workspace boundary through a small sidecar index:
+
+```text
+.veloca/storage/veloca-session-workspaces.json
+```
+
+The sidecar maps `session_id` to a normalized workspace key. Filesystem workspaces use the registered real path; database workspaces use the registered `veloca-db://root/{workspaceId}` root. Sessions without a matching sidecar record are not listed for any workspace and cannot be sent through the Veloca IPC API.
 
 `otherone-agent` does not currently store Veloca UI metadata such as the selected Lite / Pro / Ultra badge, upload attachment UI state, or Web Search toggle separately. Persisted history therefore restores the durable user/assistant text from local memory and treats attachment chips as per-turn runtime context until a dedicated metadata layer is added.
 
