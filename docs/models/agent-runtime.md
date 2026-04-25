@@ -160,6 +160,8 @@ Veloca currently exposes four backend-owned workspace tools:
 - `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
 - `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 
+For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` for safe commands. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same bash tool call after the first tool result instead of producing the final answer.
+
 ### `write_file` Tool
 
 `write_file` writes complete text content to a single file in the current active workspace. It is intentionally scoped to the workspace passed through the Agent runtime context and does not accept an arbitrary root path.

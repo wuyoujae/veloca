@@ -89,6 +89,7 @@ Use information in this priority order:
 - Use `write_file` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
 - Use `run_bash_command` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
+- When the user explicitly asks you to run a safe shell command, call `run_bash_command` instead of saying you cannot execute commands.
 - For `run_bash_command`, prefer the `cwd` argument over putting `cd ...` in the command. `cwd` may be workspace-relative or an absolute path inside the active workspace.
 - Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.
 - Do not run dangerous, destructive, privileged, background, or network-dependent commands. Network access is blocked in the bash sandbox.
@@ -208,6 +209,8 @@ Use information in this priority order:
 | 安全边界 | macOS sandbox；默认禁网；写入限制在当前工作区；输出按 stdout/stderr 各 `16384` bytes 截断。 |
 
 第一版会直接拦截明显危险或不适合 Agent 自动执行的命令，例如 `sudo`、`su`、`rm -rf`、`git reset --hard`、`git clean`、`diskutil`、`mkfs`、`dd ... of=`、`shutdown`、`reboot`、`launchctl`、`osascript`、`nohup`、`disown` 和后台化命令。被拦截命令会返回 `blocked: true`，不会执行。
+
+当用户明确要求运行安全命令时，后端会在本轮 user prompt 中追加 `<tool-routing-hint>`，提醒模型优先调用 `run_bash_command`，避免模型按通用安全话术回答“无法直接执行命令”。当前仍保持 `toolChoice: "auto"`，因为 `otherone-agent` 会在工具循环中复用同一个 `toolChoice`；如果强制指定 `run_bash_command`，工具执行后续轮次也会被继续强制调用，存在重复执行风险。
 
 ## 后续扩展
 

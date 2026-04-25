@@ -1772,6 +1772,7 @@ Use information in this priority order:
 - Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
 - Use \`run_bash_command\` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
+- When the user explicitly asks you to run a safe shell command, call \`run_bash_command\` instead of saying you cannot execute commands.
 - For \`run_bash_command\`, prefer the \`cwd\` argument over putting \`cd ...\` in the command. \`cwd\` may be workspace-relative or an absolute path inside the active workspace.
 - Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.
 - Do not run dangerous, destructive, privileged, background, or network-dependent commands. Network access is blocked in the bash sandbox.
@@ -1788,6 +1789,19 @@ Use information in this priority order:
 - When giving revisions, prefer ready-to-use text over abstract advice.
 - When explaining, separate conclusions from assumptions.
 - If the user asks for a rewrite, provide the rewritten result first, then brief notes only when helpful.`;
+}
+
+function isDirectBashCommandRequest(prompt: string): boolean {
+  const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
+
+  if (!normalizedPrompt) {
+    return false;
+  }
+
+  return (
+    /(?:^|[\s,，。；;：:]|请|请你|帮我|帮忙|麻烦你?)(?:运行|执行|跑一下|跑下)\s*(?:一下|下)?\s*(?:命令)?\s*[:：`"']?\s*[\w./~-]+/i.test(normalizedPrompt) ||
+    /(?:^|[\s,，。；;：:])(?:run|execute)\s+(?:the\s+)?(?:command\s+)?[`"']?[\w./~-]+/i.test(normalizedPrompt)
+  );
 }
 
 function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): string {
@@ -1819,6 +1833,19 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
 
   if (request.webSearch) {
     metadata.push('用户开启了 Web Search 开关，但当前 Veloca 版本尚未接入实时网页搜索工具；不要声称已经联网搜索。');
+  }
+
+  if (isDirectBashCommandRequest(prompt)) {
+    metadata.push(
+      [
+        '<tool-routing-hint>',
+        '- The user is explicitly asking you to run a shell command.',
+        '- If the command is safe and the active workspace is a filesystem workspace, call `run_bash_command` for this request.',
+        '- Do not say that you cannot execute commands before trying the tool for a safe command.',
+        '- If the tool is unavailable, blocked, or returns an error, report that tool result clearly.',
+        '</tool-routing-hint>'
+      ].join('\n')
+    );
   }
 
   if (!metadata.length) {
