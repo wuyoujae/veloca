@@ -20,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clipboard,
+  Code2,
   Copy,
   ExternalLink,
   FileText,
@@ -41,6 +42,7 @@ import {
   Settings,
   Scissors,
   Sun,
+  Table2,
   Trash2,
   X
 } from 'lucide-react';
@@ -3364,7 +3366,7 @@ type TableGridHoverState = {
 type SlashCommandItem = {
   command: string;
   description: string;
-  id: 'mermaid';
+  id: 'codeBlock' | 'mermaid' | 'table';
   Icon: typeof GitBranch;
   label: string;
 };
@@ -3394,6 +3396,20 @@ const SLASH_COMMAND_ITEMS: SlashCommandItem[] = [
     id: 'mermaid',
     Icon: GitBranch,
     label: 'Mermaid Diagram'
+  },
+  {
+    command: '/table',
+    description: 'Insert an empty 2 × 2 table',
+    id: 'table',
+    Icon: Table2,
+    label: 'Table'
+  },
+  {
+    command: '/code',
+    description: 'Code block command is coming soon',
+    id: 'codeBlock',
+    Icon: Code2,
+    label: 'Code Block'
   }
 ];
 
@@ -3471,6 +3487,49 @@ function getSlashCommandMenuPosition(
   };
 }
 
+function buildEmptyTableContent(): Record<string, unknown> {
+  return {
+    type: 'table',
+    content: Array.from({ length: 2 }, () => ({
+      type: 'tableRow',
+      content: Array.from({ length: 2 }, () => ({
+        type: 'tableCell',
+        content: [{ type: 'paragraph' }]
+      }))
+    }))
+  };
+}
+
+function insertSlashCommandBlock(
+  editor: TiptapEditor,
+  menu: SlashCommandMenuState,
+  blockContent: Record<string, unknown>
+): boolean {
+  const { empty, $from, $to } = editor.state.selection;
+  const paragraphNodeType = editor.state.schema.nodes.paragraph;
+
+  if (!empty || !$from.sameParent($to) || $from.depth !== 1 || $from.parent.type !== paragraphNodeType) {
+    return false;
+  }
+
+  const paragraphStart = $from.before();
+  const paragraphEnd = $from.after();
+  const slashOffset = menu.range.from - $from.start();
+  const prefixText = $from.parent.textBetween(0, Math.max(0, slashOffset), undefined, '\ufffc').trimEnd();
+  const nextContent = prefixText
+    ? [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: prefixText }]
+        },
+        blockContent,
+        { type: 'paragraph' }
+      ]
+    : [blockContent, { type: 'paragraph' }];
+
+  return editor.chain().focus().insertContentAt({ from: paragraphStart, to: paragraphEnd }, nextContent).run();
+}
+
 function MarkdownEditor({
   content,
   filePath,
@@ -3515,6 +3574,18 @@ function MarkdownEditor({
           .setTextSelection(menu.range.from + item.command.length)
           .run();
         insertMermaidBlockFromCommand(currentEditor);
+      }
+
+      if (item.id === 'table') {
+        insertSlashCommandBlock(currentEditor, menu, buildEmptyTableContent());
+      }
+
+      if (item.id === 'codeBlock') {
+        onToastRef.current({
+          type: 'info',
+          title: 'Command Not Ready',
+          description: 'Code block insertion will be added in a later step.'
+        });
       }
 
       updateSlashCommandMenu(null);

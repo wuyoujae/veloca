@@ -44,6 +44,9 @@
   - 在根级段落输入 `/mermaid` 并按 `Enter` 时，当前段落会替换为 Mermaid 图表块；
   - 在已有正文末尾输入 ` /mermaid` 并按 `Enter` 时，正文会保留，Mermaid 图表块会插入到下一行；
   - `正文/mermaid`、`/mermaid extra` 或命令后继续输入其他字符时都保留为普通内容。
+- 同一指令弹层现在包含 `Table` 和 `Code Block`：
+  - 选择 `Table` 或输入 `/table` 后会创建一个空的 `2 × 2` 表格，正文后缀命令会保留正文并将表格插入到下一行；
+  - `Code Block` 先仅作为指令集条目展示，具体代码块插入行为后续实现。
 - 保存后的 Markdown 仍使用标准 fenced code block 形式的 Mermaid 图表：
 
 ````markdown
