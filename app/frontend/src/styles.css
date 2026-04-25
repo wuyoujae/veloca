@@ -2532,6 +2532,12 @@ button {
   color: #16a34a;
 }
 
+.markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true']::before,
+.veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true']::before {
+  content: '✓';
+  font-size: 1rem;
+}
+
 .markdown-body hr {
   height: 1px;
   margin: 3em 0;

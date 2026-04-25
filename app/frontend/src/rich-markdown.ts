@@ -484,17 +484,18 @@ async function copyCodeBlockToClipboard(button: HTMLElement): Promise<void> {
       fallbackCopyText(text);
     }
 
-    button.dataset.copied = 'true';
-    window.setTimeout(() => {
-      delete button.dataset.copied;
-    }, 1600);
-  } catch {
-    fallbackCopyText(text);
-    button.dataset.copied = 'true';
-    window.setTimeout(() => {
-      delete button.dataset.copied;
-    }, 1600);
+      showCodeCopySuccess(button);
+    } catch {
+      fallbackCopyText(text);
+      showCodeCopySuccess(button);
+    }
   }
+
+function showCodeCopySuccess(button: HTMLElement): void {
+  button.dataset.copied = 'true';
+  window.setTimeout(() => {
+    delete button.dataset.copied;
+  }, 3000);
 }
 
 function fallbackCopyText(text: string): void {
