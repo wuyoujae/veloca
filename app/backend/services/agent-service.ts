@@ -228,6 +228,25 @@ interface ReadFileOutput {
   type: 'text';
 }
 
+interface EditFileInput {
+  newString: string;
+  oldString: string;
+  path: string;
+  replaceAll: boolean;
+}
+
+interface EditFileOutput {
+  filePath: string;
+  gitDiff: null;
+  newString: string;
+  oldString: string;
+  originalFile: string;
+  replaceAll: boolean;
+  structuredPatch: StructuredPatchHunk[];
+  userModified: false;
+  workspaceType: 'database' | 'filesystem';
+}
+
 interface StructuredPatchHunk {
   lines: string[];
   newLines: number;
@@ -697,6 +716,65 @@ function normalizeWriteFileToolInput(first: unknown, second: unknown): WriteFile
   return normalizeWriteFileInput(first, second);
 }
 
+function normalizeEditFileInput(path: unknown, oldString: unknown, newString: unknown, replaceAll: unknown): EditFileInput {
+  if (typeof path !== 'string' || !path.trim()) {
+    throw new Error('edit_file path is required.');
+  }
+
+  if (typeof oldString !== 'string') {
+    throw new Error('edit_file old_string is required.');
+  }
+
+  if (typeof newString !== 'string') {
+    throw new Error('edit_file new_string is required.');
+  }
+
+  const normalizedPath = path.trim();
+
+  if (normalizedPath.includes('\0')) {
+    throw new Error('edit_file path cannot contain NUL bytes.');
+  }
+
+  if (oldString.length === 0) {
+    throw new Error('edit_file old_string cannot be empty.');
+  }
+
+  if (oldString === newString) {
+    throw new Error('old_string and new_string must differ');
+  }
+
+  if (replaceAll !== undefined && replaceAll !== null && typeof replaceAll !== 'boolean') {
+    throw new Error('edit_file replace_all must be a boolean.');
+  }
+
+  return {
+    newString,
+    oldString,
+    path: normalizedPath,
+    replaceAll: replaceAll === true
+  };
+}
+
+function normalizeEditFileToolInput(
+  first: unknown,
+  second: unknown,
+  third: unknown,
+  fourth: unknown
+): EditFileInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeEditFileInput(
+      input.path,
+      input.old_string ?? input.oldString,
+      input.new_string ?? input.newString,
+      input.replace_all ?? input.replaceAll
+    );
+  }
+
+  return normalizeEditFileInput(first, second, third, fourth);
+}
+
 function ensureWritableTextContentSize(content: string): void {
   const byteLength = Buffer.byteLength(content, 'utf8');
 
@@ -982,7 +1060,7 @@ function ensureReadableTextContentSize(filePath: string, byteLength: number): vo
   }
 }
 
-function resolveFilesystemReadPath(workspaceRootPath: string, path: string): string {
+function resolveFilesystemExistingFilePath(workspaceRootPath: string, path: string, toolName: string): string {
   const canonicalRoot = realpathSync(workspaceRootPath);
   const candidatePath = isAbsolute(path) ? path : resolve(canonicalRoot, path);
   const resolvedPath = realpathSync(candidatePath);
@@ -993,7 +1071,7 @@ function resolveFilesystemReadPath(workspaceRootPath: string, path: string): str
   }
 
   if (!stats.isFile()) {
-    throw new Error('read_file path must point to a file.');
+    throw new Error(`${toolName} path must point to a file.`);
   }
 
   ensureReadableTextContentSize(resolvedPath, stats.size);
@@ -1001,16 +1079,29 @@ function resolveFilesystemReadPath(workspaceRootPath: string, path: string): str
   return resolvedPath;
 }
 
-function readFilesystemTextFile(workspaceRootPath: string, input: ReadFileInput): ReadFileOutput {
-  const resolvedPath = resolveFilesystemReadPath(workspaceRootPath, input.path);
-  const buffer = readFileSync(resolvedPath);
+function resolveFilesystemReadPath(workspaceRootPath: string, path: string): string {
+  return resolveFilesystemExistingFilePath(workspaceRootPath, path, 'read_file');
+}
+
+function resolveFilesystemEditPath(workspaceRootPath: string, path: string): string {
+  return resolveFilesystemExistingFilePath(workspaceRootPath, path, 'edit_file');
+}
+
+function readResolvedFilesystemTextContent(filePath: string): string {
+  const buffer = readFileSync(filePath);
   const sample = buffer.subarray(0, readFileBinarySampleBytes);
 
   if (sample.includes(0)) {
     throw new Error('file appears to be binary');
   }
 
-  return createReadFileOutput(resolvedPath, buffer.toString('utf8'), input.offset, input.limit);
+  return buffer.toString('utf8');
+}
+
+function readFilesystemTextFile(workspaceRootPath: string, input: ReadFileInput): ReadFileOutput {
+  const resolvedPath = resolveFilesystemReadPath(workspaceRootPath, input.path);
+
+  return createReadFileOutput(resolvedPath, readResolvedFilesystemTextContent(resolvedPath), input.offset, input.limit);
 }
 
 function findWorkspaceTreeNodeByPath(node: WorkspaceTreeNode, path: string): WorkspaceTreeNode | null {
@@ -1051,7 +1142,7 @@ function findWorkspaceTreeNodeByRelativePath(node: WorkspaceTreeNode, path: stri
   return null;
 }
 
-function resolveDatabaseReadNode(rootNode: WorkspaceTreeNode, path: string): WorkspaceTreeNode {
+function resolveDatabaseExistingFileNode(rootNode: WorkspaceTreeNode, path: string, toolName: string): WorkspaceTreeNode {
   const node = path.startsWith('veloca-db://entry/')
     ? findWorkspaceTreeNodeByPath(rootNode, path)
     : findWorkspaceTreeNodeByRelativePath(rootNode, path);
@@ -1061,10 +1152,18 @@ function resolveDatabaseReadNode(rootNode: WorkspaceTreeNode, path: string): Wor
   }
 
   if (node.type !== 'file') {
-    throw new Error('read_file path must point to a database file.');
+    throw new Error(`${toolName} path must point to a database file.`);
   }
 
   return node;
+}
+
+function resolveDatabaseReadNode(rootNode: WorkspaceTreeNode, path: string): WorkspaceTreeNode {
+  return resolveDatabaseExistingFileNode(rootNode, path, 'read_file');
+}
+
+function resolveDatabaseEditNode(rootNode: WorkspaceTreeNode, path: string): WorkspaceTreeNode {
+  return resolveDatabaseExistingFileNode(rootNode, path, 'edit_file');
 }
 
 function readDatabaseTextFile(rootNode: WorkspaceTreeNode, input: ReadFileInput): ReadFileOutput {
@@ -1363,6 +1462,122 @@ function writeDatabaseTextFile(rootNode: WorkspaceTreeNode, input: WriteFileInpu
   }
 
   return writeDatabaseRelativeFile(rootNode, input.path, input.content);
+}
+
+function createEditFileOutput(
+  filePath: string,
+  oldString: string,
+  newString: string,
+  originalFile: string,
+  updatedFile: string,
+  replaceAll: boolean,
+  workspaceType: 'database' | 'filesystem'
+): EditFileOutput {
+  return {
+    filePath,
+    gitDiff: null,
+    newString,
+    oldString,
+    originalFile,
+    replaceAll,
+    structuredPatch: createStructuredPatch(originalFile, updatedFile),
+    userModified: false,
+    workspaceType
+  };
+}
+
+function editTextContent(
+  filePath: string,
+  originalFile: string,
+  input: EditFileInput,
+  workspaceType: 'database' | 'filesystem'
+): { output: EditFileOutput; updatedFile: string } {
+  if (!originalFile.includes(input.oldString)) {
+    throw new Error('old_string not found in file');
+  }
+
+  const updatedFile = input.replaceAll
+    ? originalFile.split(input.oldString).join(input.newString)
+    : originalFile.replace(input.oldString, input.newString);
+
+  ensureWritableTextContentSize(updatedFile);
+
+  return {
+    output: createEditFileOutput(
+      filePath,
+      input.oldString,
+      input.newString,
+      originalFile,
+      updatedFile,
+      input.replaceAll,
+      workspaceType
+    ),
+    updatedFile
+  };
+}
+
+function editFilesystemTextFile(workspaceRootPath: string, input: EditFileInput): EditFileOutput {
+  const filePath = resolveFilesystemEditPath(workspaceRootPath, input.path);
+  const originalFile = readResolvedFilesystemTextContent(filePath);
+  const { output, updatedFile } = editTextContent(filePath, originalFile, input, 'filesystem');
+
+  writeFileSync(filePath, updatedFile, 'utf8');
+
+  return output;
+}
+
+function editDatabaseTextFile(rootNode: WorkspaceTreeNode, input: EditFileInput): EditFileOutput {
+  const node = resolveDatabaseEditNode(rootNode, input.path);
+  const entry = getAgentDatabaseEntry(getDatabaseEntryId(node.path));
+
+  if (entry.workspace_id !== rootNode.workspaceFolderId) {
+    throw new Error('Database file is not inside the active workspace.');
+  }
+
+  if (entry.entry_type !== 1) {
+    throw new Error('edit_file path must point to a database file.');
+  }
+
+  const originalFile = entry.content;
+  const byteLength = Buffer.byteLength(originalFile, 'utf8');
+
+  ensureReadableTextContentSize(node.path, byteLength);
+
+  if (originalFile.includes('\0')) {
+    throw new Error('file appears to be binary');
+  }
+
+  const { output, updatedFile } = editTextContent(getDatabaseEntryPath(entry.id), originalFile, input, 'database');
+  updateAgentDatabaseFile(entry.id, updatedFile);
+
+  return output;
+}
+
+function editWorkspaceTextFile(
+  context: AgentRuntimeContext | undefined,
+  input: EditFileInput,
+  hooks?: AgentRuntimeHooks
+): EditFileOutput {
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+  let output: EditFileOutput;
+
+  if (!workspaceRootPath || !workspaceRoot) {
+    throw new Error('No active workspace root is available for file editing.');
+  }
+
+  if (workspaceType === 'filesystem') {
+    output = editFilesystemTextFile(workspaceRoot.rootPath, input);
+  } else if (workspaceType === 'database') {
+    output = editDatabaseTextFile(workspaceRoot.node, input);
+  } else {
+    throw new Error('edit_file requires an active workspace.');
+  }
+
+  hooks?.onWorkspaceChanged?.(getWorkspaceSnapshot());
+
+  return output;
 }
 
 function writeWorkspaceTextFile(
@@ -1898,6 +2113,48 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'edit_file',
+        description:
+          'Replace exact text in an existing text file inside the active Veloca workspace. Supports filesystem files and database workspace virtual files. Use for targeted edits after reading enough context.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                path: {
+                  type: 'string',
+                  description:
+                    'Existing file path to edit. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... or workspace-relative.'
+                },
+                old_string: {
+                  type: 'string',
+                  description:
+                    'Exact text to replace. It must appear in the current file content and cannot be empty.'
+                },
+                new_string: {
+                  type: 'string',
+                  description: 'Replacement text.'
+                },
+                replace_all: {
+                  type: 'boolean',
+                  description:
+                    'Optional. Defaults to false. When true, every occurrence of old_string is replaced.'
+                }
+              },
+              required: ['path', 'old_string', 'new_string'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'write_file',
         description:
           'Write a text file in the active Veloca workspace. Supports filesystem files and database workspace virtual files. Use only when the user clearly wants to create or replace a file.',
@@ -1977,6 +2234,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
       getWorkspaceDirectoryTree(context, normalizeDirectoryTreeToolInput(input)),
     read_file: (inputOrPath?: unknown, offset?: unknown, limit?: unknown) =>
       readWorkspaceTextFile(context, normalizeReadFileToolInput(inputOrPath, offset, limit)),
+    edit_file: (inputOrPath?: unknown, oldString?: unknown, newString?: unknown, replaceAll?: unknown) =>
+      editWorkspaceTextFile(context, normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll), hooks),
     write_file: (inputOrPath?: unknown, content?: unknown) =>
       writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
     run_bash_command: (inputOrCommand?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
@@ -2057,8 +2316,9 @@ Use information in this priority order:
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
 - Use \`read_file\` to read a known text file from the active workspace. Use \`offset\` and \`limit\` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
+- Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
-- Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Prefer \`edit_file\` over \`write_file\` for targeted changes. Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
 - Use \`run_bash_command\` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
 - When the user explicitly asks you to run a safe shell command, call \`run_bash_command\` instead of saying you cannot execute commands.
 - For \`run_bash_command\`, prefer the \`cwd\` argument over putting \`cd ...\` in the command. \`cwd\` may be workspace-relative or an absolute path inside the active workspace.

@@ -6,8 +6,8 @@
 
 - 建立稳定的 Agent 上下文边界，让模型明确自己正在为 Veloca 编辑器中的某一个文件和工作区工作。
 - 将用户 prompt、选中文本、当前文件元数据、工作区元数据和 session 记忆区分清楚，避免把所有信息混成一段不可维护的 prompt。
-- 先完成 system prompt 与上下文注入设计，不在本阶段接入真实 tools，也不改变现有 Agent 请求接口。
-- 为后续 workspace tools、数据库工作区读取、智能上下文检索和写入确认机制预留清晰的设计入口。
+- 持续维护 system prompt、上下文注入和 workspace tools 的边界，避免 Agent 请求接口和业务数据耦合。
+- 为后续智能上下文检索、数据库工作区增强读取和写入确认机制预留清晰的设计入口。
 
 ## 上下文来源
 
@@ -87,8 +87,9 @@ Use information in this priority order:
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
 - Use `read_file` to read a known text file from the active workspace. Use `offset` and `limit` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
+- Use `edit_file` for precise replacements in existing text files. Provide an exact `old_string`, use `replace_all` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use `write_file` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
-- Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Prefer `edit_file` over `write_file` for targeted changes. Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
 - Use `run_bash_command` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
 - When the user explicitly asks you to run a safe shell command, call `run_bash_command` instead of saying you cannot execute commands.
 - For `run_bash_command`, prefer the `cwd` argument over putting `cd ...` in the command. `cwd` may be workspace-relative or an absolute path inside the active workspace.
@@ -145,6 +146,7 @@ Use information in this priority order:
 - 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
 - 后端已经暴露只读 tool `get_workspace_directory_tree`，用于获取当前活动工作区目录树。
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
+- 后端已经暴露写入 tool `edit_file`，用于在当前活动工作区内精确替换已有文本文件内容。
 - 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
 - 后端已经暴露受沙箱限制的 tool `run_bash_command`，用于在当前文件系统工作区内运行前台 Bash 命令。
 
@@ -181,6 +183,21 @@ Use information in this priority order:
 | 安全边界 | 最大 `10MB`；filesystem 读取前检查前 `8192` bytes 是否包含 NUL byte；拒绝二进制文件和 workspace 逃逸路径。 |
 
 `offset` 是 0-based 行偏移，`limit` 是最多读取的行数。读取超出文件尾部时返回空内容，并将 `startLine` 设置为 `totalLines + 1`。
+
+## Edit File Tool
+
+`edit_file` 用于在当前 active workspace 内对已有文本文件执行精确字符串替换。它适合局部修改，不负责创建文件，也不适合整文件覆盖。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `edit_file` |
+| 参数 | `input: { path: string, old_string: string, new_string: string, replace_all?: boolean }` |
+| 返回内容 | `filePath`、`oldString`、`newString`、`originalFile`、`structuredPatch`、`userModified: false`、`replaceAll`、`gitDiff: null`、`workspaceType`。 |
+| filesystem 路径 | 支持工作区相对路径或当前工作区内的绝对路径；真实路径解析后必须仍在 active workspace root 内，目标必须是已有文件。 |
+| database 路径 | 支持 `veloca-db://entry/...` 或数据库工作区内的相对路径；只编辑已有虚拟文件，不编辑 folder，也不创建新 entry。 |
+| 安全边界 | 最大 `10MB`；filesystem 读取前检查前 `8192` bytes 是否包含 NUL byte；拒绝二进制文件、workspace 逃逸路径、空 `old_string` 和无意义的相同替换。 |
+
+默认只替换第一个匹配到的 `old_string`。只有当用户明确希望所有匹配项都修改时，才应设置 `replace_all: true`。如果不确定文件当前内容，应先调用 `read_file` 获取足够上下文，再调用 `edit_file`。
 
 ## Write File Tool
 
