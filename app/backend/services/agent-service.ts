@@ -86,6 +86,9 @@ const bashMaxCommandLength = 2000;
 const bashMaxOutputBytes = 16384;
 const bashMaxTimeoutMs = 120000;
 const bashSandboxExecPath = '/usr/bin/sandbox-exec';
+const maxGlobPatternExpansions = 64;
+const maxGlobPatternLength = 1000;
+const maxGlobSearchResults = 100;
 const maxDirectoryTreeCharacters = 30000;
 const maxDirectoryTreeDepth = 8;
 const maxDirectoryTreeNodes = 1200;
@@ -208,6 +211,23 @@ interface CapturedOutput {
 interface OutputBuffer {
   bytes: number;
   chunks: Buffer[];
+  truncated: boolean;
+}
+
+interface GlobSearchInput {
+  path?: string;
+  pattern: string;
+}
+
+interface GlobSearchMatch {
+  filename: string;
+  sortTime: number;
+}
+
+interface GlobSearchOutput {
+  durationMs: number;
+  filenames: string[];
+  numFiles: number;
   truncated: boolean;
 }
 
@@ -647,6 +667,49 @@ function normalizeDirectoryTreeToolInput(first: unknown): string | undefined {
   const velocaignore = isRecord(input) ? input.velocaignore : input;
 
   return typeof velocaignore === 'string' ? velocaignore : undefined;
+}
+
+function normalizeGlobSearchInput(pattern: unknown, path: unknown): GlobSearchInput {
+  if (typeof pattern !== 'string' || !pattern.trim()) {
+    throw new Error('glob_search pattern is required.');
+  }
+
+  const normalizedPattern = pattern.trim();
+
+  if (normalizedPattern.length > maxGlobPatternLength) {
+    throw new Error(`glob_search pattern cannot exceed ${maxGlobPatternLength} characters.`);
+  }
+
+  if (normalizedPattern.includes('\0')) {
+    throw new Error('glob_search pattern cannot contain NUL bytes.');
+  }
+
+  if (typeof path !== 'string' || !path.trim()) {
+    return {
+      pattern: normalizedPattern
+    };
+  }
+
+  const normalizedPath = path.trim();
+
+  if (normalizedPath.includes('\0')) {
+    throw new Error('glob_search path cannot contain NUL bytes.');
+  }
+
+  return {
+    path: normalizedPath,
+    pattern: normalizedPattern
+  };
+}
+
+function normalizeGlobSearchToolInput(first: unknown, second: unknown): GlobSearchInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeGlobSearchInput(input.pattern, input.path);
+  }
+
+  return normalizeGlobSearchInput(first, second);
 }
 
 function normalizeOptionalLineNumber(value: unknown, minimum: number, name: string): number | undefined {
@@ -1857,6 +1920,370 @@ function getDirectoryTreePatterns(rootPath: string, workspaceType: AgentWorkspac
   );
 }
 
+function hasParentPathSegment(path: string): boolean {
+  return normalizeTreePath(path).split('/').includes('..');
+}
+
+function expandGlobBraces(pattern: string): string[] {
+  const openIndex = pattern.indexOf('{');
+
+  if (openIndex < 0) {
+    return [pattern];
+  }
+
+  const closeIndex = pattern.indexOf('}', openIndex + 1);
+
+  if (closeIndex < 0) {
+    return [pattern];
+  }
+
+  const prefix = pattern.slice(0, openIndex);
+  const suffix = pattern.slice(closeIndex + 1);
+  const alternatives = pattern.slice(openIndex + 1, closeIndex).split(',');
+  const expanded = alternatives.flatMap((alternative) => expandGlobBraces(`${prefix}${alternative}${suffix}`));
+
+  if (expanded.length > maxGlobPatternExpansions) {
+    throw new Error(`glob_search brace expansion cannot exceed ${maxGlobPatternExpansions} patterns.`);
+  }
+
+  return expanded;
+}
+
+function splitGlobPath(value: string): string[] {
+  return normalizeTreePath(value.replace(/^\.\//, '')).split('/').filter(Boolean);
+}
+
+function globSegmentToRegex(segment: string): RegExp {
+  let regex = '^';
+
+  for (let index = 0; index < segment.length; index += 1) {
+    const character = segment[index];
+
+    if (character === '*') {
+      regex += '[^/]*';
+      continue;
+    }
+
+    if (character === '?') {
+      regex += '[^/]';
+      continue;
+    }
+
+    if (character === '[') {
+      const closeIndex = segment.indexOf(']', index + 1);
+
+      if (closeIndex > index + 1) {
+        regex += segment.slice(index, closeIndex + 1);
+        index = closeIndex;
+        continue;
+      }
+    }
+
+    regex += escapeRegex(character);
+  }
+
+  regex += '$';
+
+  return new RegExp(regex);
+}
+
+function globSegmentsMatch(patternSegments: string[], pathSegments: string[]): boolean {
+  if (patternSegments.length === 0) {
+    return pathSegments.length === 0;
+  }
+
+  const [currentPattern, ...remainingPatterns] = patternSegments;
+
+  if (currentPattern === '**') {
+    if (globSegmentsMatch(remainingPatterns, pathSegments)) {
+      return true;
+    }
+
+    return pathSegments.length > 0 && globSegmentsMatch(patternSegments, pathSegments.slice(1));
+  }
+
+  return (
+    pathSegments.length > 0 &&
+    globSegmentToRegex(currentPattern).test(pathSegments[0]) &&
+    globSegmentsMatch(remainingPatterns, pathSegments.slice(1))
+  );
+}
+
+function matchesAnyGlobPattern(patterns: string[][], relativePath: string): boolean {
+  const pathSegments = splitGlobPath(relativePath);
+
+  return patterns.some((patternSegments) => globSegmentsMatch(patternSegments, pathSegments));
+}
+
+function createGlobSearchOutput(startedAt: number, matches: GlobSearchMatch[], truncated: boolean): GlobSearchOutput {
+  const sortedMatches = matches.sort((left, right) => right.sortTime - left.sortTime || left.filename.localeCompare(right.filename));
+  const filenames = sortedMatches.slice(0, maxGlobSearchResults).map((match) => match.filename);
+
+  return {
+    durationMs: Date.now() - startedAt,
+    filenames,
+    numFiles: filenames.length,
+    truncated: truncated || sortedMatches.length > maxGlobSearchResults
+  };
+}
+
+function resolveFilesystemGlobBasePath(workspaceRootPath: string, path: string | undefined): string {
+  const canonicalRoot = realpathSync(workspaceRootPath);
+
+  if (!path) {
+    return canonicalRoot;
+  }
+
+  if (hasParentPathSegment(path)) {
+    throw new Error('glob_search path cannot contain parent-directory traversal.');
+  }
+
+  const candidatePath = isAbsolute(path) ? path : resolve(canonicalRoot, path);
+
+  if (!existsSync(candidatePath)) {
+    throw new Error('glob_search path does not exist inside the active workspace.');
+  }
+
+  const resolvedPath = realpathSync(candidatePath);
+  const stats = statSync(resolvedPath);
+
+  if (!isSameOrChildPath(canonicalRoot, resolvedPath)) {
+    throw new Error(`path ${resolvedPath} escapes workspace boundary ${canonicalRoot}`);
+  }
+
+  if (!stats.isDirectory()) {
+    throw new Error('glob_search path must point to a directory.');
+  }
+
+  return resolvedPath;
+}
+
+function getFilesystemGlobPatternSegments(
+  workspaceRootPath: string,
+  basePath: string,
+  pattern: string
+): { patternSegments: string[][]; searchRootPath: string } {
+  const canonicalRoot = realpathSync(workspaceRootPath);
+
+  if (isAbsolute(pattern)) {
+    const absolutePattern = resolve(pattern);
+
+    if (!isSameOrChildPath(canonicalRoot, absolutePattern)) {
+      throw new Error('glob_search absolute pattern must stay inside the active workspace root.');
+    }
+
+    return {
+      patternSegments: expandGlobBraces(normalizeTreePath(relative(canonicalRoot, absolutePattern))).map(splitGlobPath),
+      searchRootPath: canonicalRoot
+    };
+  }
+
+  if (hasParentPathSegment(pattern)) {
+    throw new Error('glob_search pattern cannot contain parent-directory traversal.');
+  }
+
+  return {
+    patternSegments: expandGlobBraces(pattern).map(splitGlobPath),
+    searchRootPath: basePath
+  };
+}
+
+function walkFilesystemGlobSearch(
+  directoryPath: string,
+  rootPath: string,
+  searchRootPath: string,
+  ignorePatterns: string[],
+  globPatterns: string[][],
+  seen: Set<string>,
+  matches: GlobSearchMatch[]
+): void {
+  let entries;
+
+  try {
+    entries = readdirSync(directoryPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isFile()) {
+      continue;
+    }
+
+    const entryPath = join(directoryPath, entry.name);
+    const relativeToRoot = normalizeTreePath(relative(rootPath, entryPath));
+    const isDirectory = entry.isDirectory();
+
+    if (entry.isSymbolicLink() || shouldIgnoreTreeEntry(ignorePatterns, relativeToRoot, entry.name, isDirectory)) {
+      continue;
+    }
+
+    if (isDirectory) {
+      walkFilesystemGlobSearch(entryPath, rootPath, searchRootPath, ignorePatterns, globPatterns, seen, matches);
+      continue;
+    }
+
+    const relativeToSearchRoot = normalizeTreePath(relative(searchRootPath, entryPath));
+
+    if (!matchesAnyGlobPattern(globPatterns, relativeToSearchRoot) || seen.has(entryPath)) {
+      continue;
+    }
+
+    let sortTime = 0;
+
+    try {
+      sortTime = statSync(entryPath).mtimeMs;
+    } catch {
+      sortTime = 0;
+    }
+
+    seen.add(entryPath);
+    matches.push({
+      filename: entryPath,
+      sortTime
+    });
+  }
+}
+
+function globSearchFilesystem(workspaceRootPath: string, input: GlobSearchInput): GlobSearchOutput {
+  const startedAt = Date.now();
+  const searchRootPath = resolveFilesystemGlobBasePath(workspaceRootPath, input.path);
+  const { patternSegments, searchRootPath: resolvedSearchRootPath } = getFilesystemGlobPatternSegments(
+    workspaceRootPath,
+    searchRootPath,
+    input.pattern
+  );
+  const ignorePatterns = getDirectoryTreePatterns(workspaceRootPath, 'filesystem', undefined);
+  const matches: GlobSearchMatch[] = [];
+
+  walkFilesystemGlobSearch(
+    resolvedSearchRootPath,
+    realpathSync(workspaceRootPath),
+    resolvedSearchRootPath,
+    ignorePatterns,
+    patternSegments,
+    new Set(),
+    matches
+  );
+
+  return createGlobSearchOutput(startedAt, matches, false);
+}
+
+function resolveDatabaseGlobBaseNode(rootNode: WorkspaceTreeNode, path: string | undefined): WorkspaceTreeNode {
+  if (!path) {
+    return rootNode;
+  }
+
+  if (hasParentPathSegment(path)) {
+    throw new Error('glob_search path cannot contain parent-directory traversal.');
+  }
+
+  const node = path.startsWith('veloca-db://entry/')
+    ? findWorkspaceTreeNodeByPath(rootNode, path)
+    : findWorkspaceTreeNodeByRelativePath(rootNode, path);
+
+  if (!node) {
+    throw new Error('Database glob_search path is not inside the active workspace.');
+  }
+
+  if (node.type !== 'folder') {
+    throw new Error('glob_search path must point to a database folder.');
+  }
+
+  return node;
+}
+
+function getDatabaseNodeRelativeToBase(baseNode: WorkspaceTreeNode, node: WorkspaceTreeNode): string {
+  const basePath = normalizeTreePath(baseNode.relativePath);
+  const nodePath = normalizeTreePath(node.relativePath);
+
+  if (!basePath) {
+    return nodePath;
+  }
+
+  return nodePath === basePath ? '' : nodePath.replace(`${basePath}/`, '');
+}
+
+function getDatabaseEntrySortTime(filePath: string): number {
+  try {
+    return getAgentDatabaseEntry(getDatabaseEntryId(filePath)).created_at;
+  } catch {
+    return 0;
+  }
+}
+
+function walkDatabaseGlobSearch(
+  node: WorkspaceTreeNode,
+  baseNode: WorkspaceTreeNode,
+  ignorePatterns: string[],
+  globPatterns: string[][],
+  seen: Set<string>,
+  matches: GlobSearchMatch[]
+): void {
+  for (const child of node.children ?? []) {
+    if (shouldIgnoreTreeEntry(ignorePatterns, child.relativePath, child.name, child.type === 'folder')) {
+      continue;
+    }
+
+    if (child.type === 'folder') {
+      walkDatabaseGlobSearch(child, baseNode, ignorePatterns, globPatterns, seen, matches);
+      continue;
+    }
+
+    const relativeToBase = getDatabaseNodeRelativeToBase(baseNode, child);
+
+    if (!matchesAnyGlobPattern(globPatterns, relativeToBase) || seen.has(child.path)) {
+      continue;
+    }
+
+    seen.add(child.path);
+    matches.push({
+      filename: child.path,
+      sortTime: getDatabaseEntrySortTime(child.path)
+    });
+  }
+}
+
+function globSearchDatabase(rootNode: WorkspaceTreeNode, input: GlobSearchInput): GlobSearchOutput {
+  if (isAbsolute(input.pattern) || input.pattern.startsWith('veloca-db://')) {
+    throw new Error('glob_search database patterns must be workspace-relative glob patterns.');
+  }
+
+  if (hasParentPathSegment(input.pattern)) {
+    throw new Error('glob_search pattern cannot contain parent-directory traversal.');
+  }
+
+  const startedAt = Date.now();
+  const baseNode = resolveDatabaseGlobBaseNode(rootNode, input.path);
+  const ignorePatterns = getDirectoryTreePatterns(rootNode.path, 'database', undefined);
+  const patternSegments = expandGlobBraces(input.pattern).map(splitGlobPath);
+  const matches: GlobSearchMatch[] = [];
+
+  walkDatabaseGlobSearch(baseNode, baseNode, ignorePatterns, patternSegments, new Set(), matches);
+
+  return createGlobSearchOutput(startedAt, matches, false);
+}
+
+function globSearchWorkspace(context: AgentRuntimeContext | undefined, input: GlobSearchInput): GlobSearchOutput {
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  if (!workspaceRootPath || !workspaceRoot) {
+    throw new Error('No active workspace root is available for glob search.');
+  }
+
+  if (workspaceType === 'filesystem') {
+    return globSearchFilesystem(workspaceRoot.rootPath, input);
+  }
+
+  if (workspaceType === 'database') {
+    return globSearchDatabase(workspaceRoot.node, input);
+  }
+
+  throw new Error('glob_search requires an active workspace.');
+}
+
 function resolveWorkspaceRoot(
   rootPath: string | undefined,
   workspaceType: AgentWorkspaceType
@@ -2075,6 +2502,39 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'glob_search',
+        description:
+          'Find files in the active Veloca workspace by glob pattern. Supports brace expansion such as **/*.{ts,tsx,md}. Returns at most the 100 most recently modified matching files.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                pattern: {
+                  type: 'string',
+                  description:
+                    'Glob pattern to match files. Use workspace-relative patterns such as **/*.md or **/*.{ts,tsx}. Filesystem workspaces also allow absolute patterns inside the active workspace.'
+                },
+                path: {
+                  type: 'string',
+                  description:
+                    'Optional search base folder. May be workspace-relative or absolute inside a filesystem workspace, and workspace-relative or veloca-db://entry/... for a database folder.'
+                }
+              },
+              required: ['pattern'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'read_file',
         description:
           'Read a text file from the active Veloca workspace. Supports filesystem text files and database workspace virtual files.',
@@ -2232,6 +2692,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
   return {
     get_workspace_directory_tree: (input?: unknown) =>
       getWorkspaceDirectoryTree(context, normalizeDirectoryTreeToolInput(input)),
+    glob_search: (inputOrPattern?: unknown, path?: unknown) =>
+      globSearchWorkspace(context, normalizeGlobSearchToolInput(inputOrPattern, path)),
     read_file: (inputOrPath?: unknown, offset?: unknown, limit?: unknown) =>
       readWorkspaceTextFile(context, normalizeReadFileToolInput(inputOrPath, offset, limit)),
     edit_file: (inputOrPath?: unknown, oldString?: unknown, newString?: unknown, replaceAll?: unknown) =>
@@ -2314,6 +2776,7 @@ Use information in this priority order:
 - When calling Veloca workspace tools, pass arguments inside the required \`input\` object.
 - Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
+- Use \`glob_search\` to find files by name or extension before reading them. It supports patterns like \`**/*.md\` and \`**/*.{ts,tsx}\`, honors Veloca ignore rules, and returns at most 100 file paths.
 - Use \`read_file\` to read a known text file from the active workspace. Use \`offset\` and \`limit\` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
 - Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.

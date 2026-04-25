@@ -85,6 +85,7 @@ Use information in this priority order:
 - When calling Veloca workspace tools, pass arguments inside the required `input` object.
 - Use `get_workspace_directory_tree` to inspect the active workspace structure before making claims about available folders or files.
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
+- Use `glob_search` to find files by name or extension before reading them. It supports patterns like `**/*.md` and `**/*.{ts,tsx}`, honors Veloca ignore rules, and returns at most 100 file paths.
 - Use `read_file` to read a known text file from the active workspace. Use `offset` and `limit` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
 - Use `edit_file` for precise replacements in existing text files. Provide an exact `old_string`, use `replace_all` only when every occurrence should change, and read the file first when you are unsure of the current content.
@@ -145,6 +146,7 @@ Use information in this priority order:
 - `${SELECTED_TEXT}` 不写入 system prompt，而是以 `<selected-text>` 独立块注入到本轮 user prompt 中。
 - 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
 - 后端已经暴露只读 tool `get_workspace_directory_tree`，用于获取当前活动工作区目录树。
+- 后端已经暴露只读 tool `glob_search`，用于在当前活动工作区内按 glob pattern 查找文件。
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
 - 后端已经暴露写入 tool `edit_file`，用于在当前活动工作区内精确替换已有文本文件内容。
 - 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
@@ -168,6 +170,23 @@ Use information in this priority order:
 - tool 调用时传入的 `velocaignore` 参数。
 
 当前基础 `.velocaignore` 重点过滤 `node_modules/`、`.git/`、`.veloca/`、构建产物、缓存、日志、环境变量文件和 SQLite 文件，避免目录树撑爆上下文或暴露不必要的本地配置。
+
+## Glob Search Tool
+
+`glob_search` 用于在当前 active workspace 内按 glob pattern 查找文件。它是只读 tool，不读取文件内容，也不修改工作区。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `glob_search` |
+| 参数 | `input: { pattern: string, path?: string }` |
+| 返回内容 | `durationMs`、`numFiles`、`filenames`、`truncated`。 |
+| filesystem 路径 | `pattern` 支持工作区相对 glob，也支持 active workspace 内的绝对 glob；`path` 是可选搜索基准目录，必须在 active workspace root 内。 |
+| database 路径 | `pattern` 必须是工作区相对 glob；`path` 可为数据库工作区内的相对 folder 或 `veloca-db://entry/...` folder。 |
+| 安全边界 | 只搜索当前 active workspace；拒绝 `..` 逃逸、NUL byte、超长 pattern、workspace 外路径和非 folder 搜索基准。 |
+
+`glob_search` 支持 shell 风格 brace expansion，例如 `**/*.{ts,tsx,md}` 会展开为多个 glob pattern。结果会去重，按 filesystem 修改时间倒序返回；database workspace 使用虚拟 entry 的可用时间戳排序。最多返回 100 个文件路径，超出时 `truncated: true`。
+
+它会复用 Veloca 默认忽略规则和工作区 `.velocaignore`，避免把 `node_modules/`、构建产物、缓存、日志和本地配置文件带入 Agent 上下文。
 
 ## Read File Tool
 
