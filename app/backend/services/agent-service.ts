@@ -89,6 +89,8 @@ const bashSandboxExecPath = '/usr/bin/sandbox-exec';
 const maxGlobPatternExpansions = 64;
 const maxGlobPatternLength = 1000;
 const maxGlobSearchResults = 100;
+const defaultGrepSearchLimit = 250;
+const maxGrepPatternLength = 1000;
 const maxDirectoryTreeCharacters = 30000;
 const maxDirectoryTreeDepth = 8;
 const maxDirectoryTreeNodes = 1200;
@@ -229,6 +231,45 @@ interface GlobSearchOutput {
   filenames: string[];
   numFiles: number;
   truncated: boolean;
+}
+
+type GrepSearchOutputMode = 'content' | 'count' | 'files_with_matches';
+
+interface GrepSearchInput {
+  after?: number;
+  before?: number;
+  caseInsensitive: boolean;
+  context?: number;
+  contextShort?: number;
+  fileType?: string;
+  glob?: string;
+  headLimit?: number;
+  lineNumbers: boolean;
+  multiline: boolean;
+  offset?: number;
+  outputMode: GrepSearchOutputMode;
+  path?: string;
+  pattern: string;
+}
+
+interface GrepSearchFile {
+  baseRelativePath: string;
+  content?: string;
+  filePath: string;
+  name: string;
+  relativePath: string;
+  sortTime: number;
+}
+
+interface GrepSearchOutput {
+  appliedLimit: number | null;
+  appliedOffset: number | null;
+  content: string | null;
+  filenames: string[];
+  mode: GrepSearchOutputMode;
+  numFiles: number;
+  numLines: number | null;
+  numMatches: number | null;
 }
 
 interface ReadFileInput {
@@ -712,6 +753,18 @@ function normalizeGlobSearchToolInput(first: unknown, second: unknown): GlobSear
   return normalizeGlobSearchInput(first, second);
 }
 
+function normalizeGrepOutputMode(value: unknown): GrepSearchOutputMode {
+  if (value === undefined || value === null || value === '') {
+    return 'files_with_matches';
+  }
+
+  if (value === 'files_with_matches' || value === 'content' || value === 'count') {
+    return value;
+  }
+
+  throw new Error('grep_search output_mode must be files_with_matches, content, or count.');
+}
+
 function normalizeOptionalLineNumber(value: unknown, minimum: number, name: string): number | undefined {
   if (value === undefined || value === null || value === '') {
     return undefined;
@@ -724,6 +777,75 @@ function normalizeOptionalLineNumber(value: unknown, minimum: number, name: stri
   }
 
   return numberValue;
+}
+
+function normalizeOptionalBoolean(value: unknown, fallback: boolean, name: string): boolean {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (typeof value !== 'boolean') {
+    throw new Error(`${name} must be a boolean.`);
+  }
+
+  return value;
+}
+
+function normalizeGrepSearchInput(input: Record<string, unknown>): GrepSearchInput {
+  const pattern = input.pattern;
+
+  if (typeof pattern !== 'string' || !pattern.trim()) {
+    throw new Error('grep_search pattern is required.');
+  }
+
+  const normalizedPattern = pattern.trim();
+
+  if (normalizedPattern.length > maxGrepPatternLength) {
+    throw new Error(`grep_search pattern cannot exceed ${maxGrepPatternLength} characters.`);
+  }
+
+  if (normalizedPattern.includes('\0')) {
+    throw new Error('grep_search pattern cannot contain NUL bytes.');
+  }
+
+  const normalizedPath = typeof input.path === 'string' && input.path.trim() ? input.path.trim() : undefined;
+  const normalizedGlob = typeof input.glob === 'string' && input.glob.trim() ? input.glob.trim() : undefined;
+  const fileType = input.type ?? input.file_type ?? input.fileType;
+
+  if (normalizedPath?.includes('\0')) {
+    throw new Error('grep_search path cannot contain NUL bytes.');
+  }
+
+  if (normalizedGlob?.includes('\0')) {
+    throw new Error('grep_search glob cannot contain NUL bytes.');
+  }
+
+  return {
+    after: normalizeOptionalLineNumber(input['-A'] ?? input.after, 0, 'grep_search -A'),
+    before: normalizeOptionalLineNumber(input['-B'] ?? input.before, 0, 'grep_search -B'),
+    caseInsensitive: normalizeOptionalBoolean(input['-i'] ?? input.case_insensitive ?? input.caseInsensitive, false, 'grep_search -i'),
+    context: normalizeOptionalLineNumber(input.context, 0, 'grep_search context'),
+    contextShort: normalizeOptionalLineNumber(input['-C'] ?? input.context_short ?? input.contextShort, 0, 'grep_search -C'),
+    fileType: typeof fileType === 'string' && fileType.trim() ? fileType.trim() : undefined,
+    glob: normalizedGlob,
+    headLimit: normalizeOptionalLineNumber(input.head_limit ?? input.headLimit, 1, 'grep_search head_limit'),
+    lineNumbers: normalizeOptionalBoolean(input['-n'] ?? input.line_numbers ?? input.lineNumbers, true, 'grep_search -n'),
+    multiline: normalizeOptionalBoolean(input.multiline, false, 'grep_search multiline'),
+    offset: normalizeOptionalLineNumber(input.offset, 0, 'grep_search offset'),
+    outputMode: normalizeGrepOutputMode(input.output_mode ?? input.outputMode),
+    path: normalizedPath,
+    pattern: normalizedPattern
+  };
+}
+
+function normalizeGrepSearchToolInput(first: unknown): GrepSearchInput {
+  const input = unwrapToolInput(first);
+
+  if (!isRecord(input)) {
+    throw new Error('grep_search input object is required.');
+  }
+
+  return normalizeGrepSearchInput(input);
 }
 
 function normalizeReadFileInput(path: unknown, offset: unknown, limit: unknown): ReadFileInput {
@@ -2284,6 +2406,493 @@ function globSearchWorkspace(context: AgentRuntimeContext | undefined, input: Gl
   throw new Error('glob_search requires an active workspace.');
 }
 
+function getFileExtension(fileName: string): string {
+  const extensionIndex = fileName.lastIndexOf('.');
+
+  return extensionIndex >= 0 ? fileName.slice(extensionIndex + 1).toLowerCase() : '';
+}
+
+function getGrepFileTypeExtensions(fileType: string | undefined): Set<string> | null {
+  if (!fileType) {
+    return null;
+  }
+
+  const normalizedType = fileType.trim().toLowerCase().replace(/^\./, '');
+  const mappedTypes: Record<string, string[]> = {
+    javascript: ['cjs', 'js', 'jsx', 'mjs'],
+    markdown: ['md', 'markdown', 'mdx'],
+    typescript: ['ts', 'tsx']
+  };
+
+  return new Set(mappedTypes[normalizedType] ?? [normalizedType]);
+}
+
+function compileGrepRegex(input: GrepSearchInput, global: boolean): RegExp {
+  try {
+    return new RegExp(input.pattern, `${input.caseInsensitive ? 'i' : ''}${input.multiline ? 's' : ''}${global ? 'g' : ''}`);
+  } catch (error) {
+    throw new Error(`Invalid grep_search regex pattern: ${getErrorMessage(error)}`);
+  }
+}
+
+function countRegexMatches(regex: RegExp, content: string): number {
+  let count = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(content)) !== null) {
+    count += 1;
+
+    if (match[0].length === 0) {
+      regex.lastIndex += 1;
+    }
+  }
+
+  return count;
+}
+
+function applyGrepLimit<T>(
+  items: T[],
+  headLimit: number | undefined,
+  offset: number | undefined
+): { appliedLimit: number | null; appliedOffset: number | null; items: T[] } {
+  const offsetValue = offset ?? 0;
+  const explicitLimit = headLimit ?? defaultGrepSearchLimit;
+  const offsetItems = items.slice(offsetValue);
+  const truncated = offsetItems.length > explicitLimit;
+
+  return {
+    appliedLimit: truncated ? explicitLimit : null,
+    appliedOffset: offsetValue > 0 ? offsetValue : null,
+    items: offsetItems.slice(0, explicitLimit)
+  };
+}
+
+function compileGrepGlobFilters(
+  glob: string | undefined,
+  workspaceRootPath: string,
+  workspaceType: AgentWorkspaceType
+): Array<{ basenameOnly: boolean; segments: string[] }> | null {
+  if (!glob) {
+    return null;
+  }
+
+  if (hasParentPathSegment(glob)) {
+    throw new Error('grep_search glob cannot contain parent-directory traversal.');
+  }
+
+  let normalizedGlob = glob;
+
+  if (isAbsolute(glob)) {
+    if (workspaceType !== 'filesystem') {
+      throw new Error('grep_search database glob must be workspace-relative.');
+    }
+
+    const canonicalRoot = realpathSync(workspaceRootPath);
+    const absoluteGlob = resolve(glob);
+
+    if (!isSameOrChildPath(canonicalRoot, absoluteGlob)) {
+      throw new Error('grep_search absolute glob must stay inside the active workspace root.');
+    }
+
+    normalizedGlob = normalizeTreePath(relative(canonicalRoot, absoluteGlob));
+  }
+
+  return expandGlobBraces(normalizedGlob).map((expandedPattern) => ({
+    basenameOnly: !normalizeTreePath(expandedPattern).includes('/'),
+    segments: splitGlobPath(expandedPattern)
+  }));
+}
+
+function matchesGrepGlobFilter(
+  filters: Array<{ basenameOnly: boolean; segments: string[] }> | null,
+  file: GrepSearchFile
+): boolean {
+  if (!filters) {
+    return true;
+  }
+
+  return filters.some((filter) => {
+    if (filter.basenameOnly && globSegmentToRegex(filter.segments[0] ?? '').test(file.name)) {
+      return true;
+    }
+
+    return (
+      globSegmentsMatch(filter.segments, splitGlobPath(file.baseRelativePath)) ||
+      globSegmentsMatch(filter.segments, splitGlobPath(file.relativePath))
+    );
+  });
+}
+
+function shouldSearchGrepFile(
+  file: GrepSearchFile,
+  filters: Array<{ basenameOnly: boolean; segments: string[] }> | null,
+  fileTypeExtensions: Set<string> | null
+): boolean {
+  if (fileTypeExtensions && !fileTypeExtensions.has(getFileExtension(file.name))) {
+    return false;
+  }
+
+  return matchesGrepGlobFilter(filters, file);
+}
+
+function createFilesystemGrepFile(filePath: string, rootPath: string, basePath: string): GrepSearchFile {
+  const stats = statSync(filePath);
+  const baseRelativePath = normalizeTreePath(relative(basePath, filePath)) || basename(filePath);
+
+  return {
+    baseRelativePath,
+    filePath,
+    name: basename(filePath),
+    relativePath: normalizeTreePath(relative(rootPath, filePath)),
+    sortTime: stats.mtimeMs
+  };
+}
+
+function resolveFilesystemGrepTarget(
+  workspaceRootPath: string,
+  path: string | undefined
+): { basePath: string; isFile: boolean; targetPath: string } {
+  const canonicalRoot = realpathSync(workspaceRootPath);
+
+  if (!path) {
+    return {
+      basePath: canonicalRoot,
+      isFile: false,
+      targetPath: canonicalRoot
+    };
+  }
+
+  if (hasParentPathSegment(path)) {
+    throw new Error('grep_search path cannot contain parent-directory traversal.');
+  }
+
+  const candidatePath = isAbsolute(path) ? path : resolve(canonicalRoot, path);
+
+  if (!existsSync(candidatePath)) {
+    throw new Error('grep_search path does not exist inside the active workspace.');
+  }
+
+  const resolvedPath = realpathSync(candidatePath);
+  const stats = statSync(resolvedPath);
+
+  if (!isSameOrChildPath(canonicalRoot, resolvedPath)) {
+    throw new Error(`path ${resolvedPath} escapes workspace boundary ${canonicalRoot}`);
+  }
+
+  if (!stats.isDirectory() && !stats.isFile()) {
+    throw new Error('grep_search path must point to a file or directory.');
+  }
+
+  return {
+    basePath: stats.isFile() ? dirname(resolvedPath) : resolvedPath,
+    isFile: stats.isFile(),
+    targetPath: resolvedPath
+  };
+}
+
+function collectFilesystemGrepFiles(
+  directoryPath: string,
+  rootPath: string,
+  basePath: string,
+  ignorePatterns: string[],
+  files: GrepSearchFile[]
+): void {
+  let entries;
+
+  try {
+    entries = readdirSync(directoryPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  entries = entries.sort((left, right) => {
+    if (left.isDirectory() !== right.isDirectory()) {
+      return left.isDirectory() ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isFile()) {
+      continue;
+    }
+
+    const entryPath = join(directoryPath, entry.name);
+    const relativeToRoot = normalizeTreePath(relative(rootPath, entryPath));
+    const isDirectory = entry.isDirectory();
+
+    if (entry.isSymbolicLink() || shouldIgnoreTreeEntry(ignorePatterns, relativeToRoot, entry.name, isDirectory)) {
+      continue;
+    }
+
+    if (isDirectory) {
+      collectFilesystemGrepFiles(entryPath, rootPath, basePath, ignorePatterns, files);
+    } else {
+      files.push(createFilesystemGrepFile(entryPath, rootPath, basePath));
+    }
+  }
+}
+
+function readFilesystemGrepContent(filePath: string): string | null {
+  try {
+    const stats = statSync(filePath);
+
+    ensureReadableTextContentSize(filePath, stats.size);
+
+    return readResolvedFilesystemTextContent(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function collectDatabaseGrepFiles(
+  node: WorkspaceTreeNode,
+  baseNode: WorkspaceTreeNode,
+  ignorePatterns: string[],
+  files: GrepSearchFile[]
+): void {
+  for (const child of node.children ?? []) {
+    if (shouldIgnoreTreeEntry(ignorePatterns, child.relativePath, child.name, child.type === 'folder')) {
+      continue;
+    }
+
+    if (child.type === 'folder') {
+      collectDatabaseGrepFiles(child, baseNode, ignorePatterns, files);
+      continue;
+    }
+
+    let entry: AgentDatabaseEntryRow;
+
+    try {
+      entry = getAgentDatabaseEntry(getDatabaseEntryId(child.path));
+    } catch {
+      continue;
+    }
+
+    const baseRelativePath = getDatabaseNodeRelativeToBase(baseNode, child) || child.name;
+
+    files.push({
+      baseRelativePath,
+      content: entry.content,
+      filePath: child.path,
+      name: child.name,
+      relativePath: normalizeTreePath(child.relativePath),
+      sortTime: entry.created_at
+    });
+  }
+}
+
+function resolveDatabaseGrepNode(rootNode: WorkspaceTreeNode, path: string | undefined): WorkspaceTreeNode {
+  if (!path) {
+    return rootNode;
+  }
+
+  if (hasParentPathSegment(path)) {
+    throw new Error('grep_search path cannot contain parent-directory traversal.');
+  }
+
+  const node = path.startsWith('veloca-db://entry/')
+    ? findWorkspaceTreeNodeByPath(rootNode, path)
+    : findWorkspaceTreeNodeByRelativePath(rootNode, path);
+
+  if (!node) {
+    throw new Error('Database grep_search path is not inside the active workspace.');
+  }
+
+  return node;
+}
+
+function readDatabaseGrepContent(file: GrepSearchFile): string | null {
+  const content = file.content ?? '';
+  const byteLength = Buffer.byteLength(content, 'utf8');
+
+  try {
+    ensureReadableTextContentSize(file.filePath, byteLength);
+  } catch {
+    return null;
+  }
+
+  if (content.includes('\0')) {
+    return null;
+  }
+
+  return content;
+}
+
+function runGrepSearch(files: GrepSearchFile[], input: GrepSearchInput): GrepSearchOutput {
+  const regex = compileGrepRegex(input, false);
+  const countRegex = input.outputMode === 'count' ? compileGrepRegex(input, true) : null;
+  const filenames: string[] = [];
+  const contentLines: string[] = [];
+  let totalMatches = 0;
+  const contextLineCount = input.context ?? input.contextShort ?? 0;
+  const before = input.before ?? contextLineCount;
+  const after = input.after ?? contextLineCount;
+
+  for (const file of files) {
+    const fileContents = file.content === undefined ? readFilesystemGrepContent(file.filePath) : readDatabaseGrepContent(file);
+
+    if (fileContents === null) {
+      continue;
+    }
+
+    if (input.outputMode === 'count' && countRegex) {
+      countRegex.lastIndex = 0;
+      const count = countRegexMatches(countRegex, fileContents);
+
+      if (count > 0) {
+        filenames.push(file.filePath);
+        totalMatches += count;
+      }
+
+      continue;
+    }
+
+    const lines = splitTextLines(fileContents);
+    const matchedLines: number[] = [];
+
+    for (const [index, line] of lines.entries()) {
+      if (regex.test(line)) {
+        totalMatches += 1;
+        matchedLines.push(index);
+      }
+    }
+
+    if (matchedLines.length === 0) {
+      continue;
+    }
+
+    filenames.push(file.filePath);
+
+    if (input.outputMode === 'content') {
+      for (const index of matchedLines) {
+        const start = Math.max(index - before, 0);
+        const end = Math.min(index + after + 1, lines.length);
+
+        for (let current = start; current < end; current += 1) {
+          const prefix = input.lineNumbers ? `${file.filePath}:${current + 1}:` : `${file.filePath}:`;
+          contentLines.push(`${prefix}${lines[current]}`);
+        }
+      }
+    }
+  }
+
+  const limitedFilenames = applyGrepLimit(filenames, input.headLimit, input.offset);
+
+  if (input.outputMode === 'content') {
+    const limitedContent = applyGrepLimit(contentLines, input.headLimit, input.offset);
+
+    return {
+      appliedLimit: limitedContent.appliedLimit,
+      appliedOffset: limitedContent.appliedOffset,
+      content: limitedContent.items.join('\n'),
+      filenames: limitedFilenames.items,
+      mode: input.outputMode,
+      numFiles: limitedFilenames.items.length,
+      numLines: limitedContent.items.length,
+      numMatches: null
+    };
+  }
+
+  return {
+    appliedLimit: limitedFilenames.appliedLimit,
+    appliedOffset: limitedFilenames.appliedOffset,
+    content: null,
+    filenames: limitedFilenames.items,
+    mode: input.outputMode,
+    numFiles: limitedFilenames.items.length,
+    numLines: null,
+    numMatches: input.outputMode === 'count' ? totalMatches : null
+  };
+}
+
+function grepSearchFilesystem(workspaceRootPath: string, input: GrepSearchInput): GrepSearchOutput {
+  const target = resolveFilesystemGrepTarget(workspaceRootPath, input.path);
+  const rootPath = realpathSync(workspaceRootPath);
+  const ignorePatterns = getDirectoryTreePatterns(rootPath, 'filesystem', undefined);
+  const filters = compileGrepGlobFilters(input.glob, rootPath, 'filesystem');
+  const fileTypeExtensions = getGrepFileTypeExtensions(input.fileType);
+  const files: GrepSearchFile[] = [];
+
+  if (target.isFile) {
+    const file = createFilesystemGrepFile(target.targetPath, rootPath, target.basePath);
+
+    if (!shouldIgnoreTreeEntry(ignorePatterns, file.relativePath, file.name, false)) {
+      files.push(file);
+    }
+  } else {
+    collectFilesystemGrepFiles(target.targetPath, rootPath, target.basePath, ignorePatterns, files);
+  }
+
+  return runGrepSearch(
+    files.filter((file) => shouldSearchGrepFile(file, filters, fileTypeExtensions)),
+    input
+  );
+}
+
+function grepSearchDatabase(rootNode: WorkspaceTreeNode, input: GrepSearchInput): GrepSearchOutput {
+  const baseNode = resolveDatabaseGrepNode(rootNode, input.path);
+  const ignorePatterns = getDirectoryTreePatterns(rootNode.path, 'database', undefined);
+  const filters = compileGrepGlobFilters(input.glob, rootNode.path, 'database');
+  const fileTypeExtensions = getGrepFileTypeExtensions(input.fileType);
+  const files: GrepSearchFile[] = [];
+
+  if (baseNode.type === 'file') {
+    let entry: AgentDatabaseEntryRow;
+
+    try {
+      entry = getAgentDatabaseEntry(getDatabaseEntryId(baseNode.path));
+    } catch {
+      entry = {
+        content: '',
+        created_at: 0,
+        entry_type: 1,
+        id: '',
+        name: baseNode.name,
+        parent_id: null,
+        workspace_id: baseNode.workspaceFolderId
+      };
+    }
+
+    files.push({
+      baseRelativePath: baseNode.name,
+      content: entry.content,
+      filePath: baseNode.path,
+      name: baseNode.name,
+      relativePath: normalizeTreePath(baseNode.relativePath),
+      sortTime: entry.created_at
+    });
+  } else {
+    collectDatabaseGrepFiles(baseNode, baseNode, ignorePatterns, files);
+  }
+
+  return runGrepSearch(
+    files.filter((file) => shouldSearchGrepFile(file, filters, fileTypeExtensions)),
+    input
+  );
+}
+
+function grepSearchWorkspace(context: AgentRuntimeContext | undefined, input: GrepSearchInput): GrepSearchOutput {
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  if (!workspaceRootPath || !workspaceRoot) {
+    throw new Error('No active workspace root is available for grep search.');
+  }
+
+  if (workspaceType === 'filesystem') {
+    return grepSearchFilesystem(workspaceRoot.rootPath, input);
+  }
+
+  if (workspaceType === 'database') {
+    return grepSearchDatabase(workspaceRoot.node, input);
+  }
+
+  throw new Error('grep_search requires an active workspace.');
+}
+
 function resolveWorkspaceRoot(
   rootPath: string | undefined,
   workspaceType: AgentWorkspaceType
@@ -2535,6 +3144,95 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'grep_search',
+        description:
+          'Search text file contents in the active Veloca workspace with a regular expression. Supports filename glob filters, content output, count output, context lines, pagination, and case-insensitive search.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                pattern: {
+                  type: 'string',
+                  description: 'Regular expression pattern to search for.'
+                },
+                path: {
+                  type: 'string',
+                  description:
+                    'Optional file or directory to search. Must be inside the active workspace. Database paths may be workspace-relative or veloca-db://entry/....'
+                },
+                glob: {
+                  type: 'string',
+                  description:
+                    'Optional filename glob filter such as **/*.md or **/*.{ts,tsx}. It filters files before reading content.'
+                },
+                output_mode: {
+                  type: 'string',
+                  enum: ['files_with_matches', 'content', 'count'],
+                  description:
+                    'Optional output mode. Defaults to files_with_matches. Use content for matching lines, count for total regex matches.'
+                },
+                '-B': {
+                  type: 'number',
+                  minimum: 0,
+                  description: 'Optional number of lines to include before each matching line in content mode.'
+                },
+                '-A': {
+                  type: 'number',
+                  minimum: 0,
+                  description: 'Optional number of lines to include after each matching line in content mode.'
+                },
+                '-C': {
+                  type: 'number',
+                  minimum: 0,
+                  description: 'Optional number of context lines before and after each match.'
+                },
+                context: {
+                  type: 'number',
+                  minimum: 0,
+                  description: 'Optional context lines before and after each match.'
+                },
+                '-n': {
+                  type: 'boolean',
+                  description: 'Optional. Defaults to true. Include line numbers in content mode.'
+                },
+                '-i': {
+                  type: 'boolean',
+                  description: 'Optional. Defaults to false. Search case-insensitively.'
+                },
+                type: {
+                  type: 'string',
+                  description: 'Optional file extension filter such as md, ts, json, or markdown.'
+                },
+                head_limit: {
+                  type: 'number',
+                  minimum: 1,
+                  description: 'Optional maximum number of returned files or content lines.'
+                },
+                offset: {
+                  type: 'number',
+                  minimum: 0,
+                  description: 'Optional number of returned files or content lines to skip.'
+                },
+                multiline: {
+                  type: 'boolean',
+                  description: 'Optional. Defaults to false. Allows dot in the regex to match newlines for count mode.'
+                }
+              },
+              required: ['pattern'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'read_file',
         description:
           'Read a text file from the active Veloca workspace. Supports filesystem text files and database workspace virtual files.',
@@ -2694,6 +3392,7 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
       getWorkspaceDirectoryTree(context, normalizeDirectoryTreeToolInput(input)),
     glob_search: (inputOrPattern?: unknown, path?: unknown) =>
       globSearchWorkspace(context, normalizeGlobSearchToolInput(inputOrPattern, path)),
+    grep_search: (input?: unknown) => grepSearchWorkspace(context, normalizeGrepSearchToolInput(input)),
     read_file: (inputOrPath?: unknown, offset?: unknown, limit?: unknown) =>
       readWorkspaceTextFile(context, normalizeReadFileToolInput(inputOrPath, offset, limit)),
     edit_file: (inputOrPath?: unknown, oldString?: unknown, newString?: unknown, replaceAll?: unknown) =>
@@ -2777,6 +3476,7 @@ Use information in this priority order:
 - Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
 - Use \`glob_search\` to find files by name or extension before reading them. It supports patterns like \`**/*.md\` and \`**/*.{ts,tsx}\`, honors Veloca ignore rules, and returns at most 100 file paths.
+- Use \`grep_search\` to search text contents across workspace files. Use \`glob\`, \`path\`, or \`type\` to narrow the search before reading content, and use \`output_mode: "content"\` when matching lines are needed.
 - Use \`read_file\` to read a known text file from the active workspace. Use \`offset\` and \`limit\` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
 - Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.

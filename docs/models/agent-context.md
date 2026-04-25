@@ -86,6 +86,7 @@ Use information in this priority order:
 - Use `get_workspace_directory_tree` to inspect the active workspace structure before making claims about available folders or files.
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
 - Use `glob_search` to find files by name or extension before reading them. It supports patterns like `**/*.md` and `**/*.{ts,tsx}`, honors Veloca ignore rules, and returns at most 100 file paths.
+- Use `grep_search` to search text contents across workspace files. Use `glob`, `path`, or `type` to narrow the search before reading content, and use `output_mode: "content"` when matching lines are needed.
 - Use `read_file` to read a known text file from the active workspace. Use `offset` and `limit` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
 - Use `edit_file` for precise replacements in existing text files. Provide an exact `old_string`, use `replace_all` only when every occurrence should change, and read the file first when you are unsure of the current content.
@@ -147,6 +148,7 @@ Use information in this priority order:
 - 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
 - 后端已经暴露只读 tool `get_workspace_directory_tree`，用于获取当前活动工作区目录树。
 - 后端已经暴露只读 tool `glob_search`，用于在当前活动工作区内按 glob pattern 查找文件。
+- 后端已经暴露只读 tool `grep_search`，用于在当前活动工作区内按正则表达式搜索文本内容。
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
 - 后端已经暴露写入 tool `edit_file`，用于在当前活动工作区内精确替换已有文本文件内容。
 - 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
@@ -187,6 +189,22 @@ Use information in this priority order:
 `glob_search` 支持 shell 风格 brace expansion，例如 `**/*.{ts,tsx,md}` 会展开为多个 glob pattern。结果会去重，按 filesystem 修改时间倒序返回；database workspace 使用虚拟 entry 的可用时间戳排序。最多返回 100 个文件路径，超出时 `truncated: true`。
 
 它会复用 Veloca 默认忽略规则和工作区 `.velocaignore`，避免把 `node_modules/`、构建产物、缓存、日志和本地配置文件带入 Agent 上下文。
+
+## Grep Search Tool
+
+`grep_search` 用于在当前 active workspace 内按正则表达式搜索文本内容。它是只读 tool，不修改文件，也不读取二进制资产。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `grep_search` |
+| 参数 | `input: { pattern: string, path?: string, glob?: string, output_mode?: string, "-B"?: number, "-A"?: number, "-C"?: number, context?: number, "-n"?: boolean, "-i"?: boolean, type?: string, head_limit?: number, offset?: number, multiline?: boolean }` |
+| 返回内容 | `mode`、`numFiles`、`filenames`、`content`、`numLines`、`numMatches`、`appliedLimit`、`appliedOffset`。 |
+| 输出模式 | `files_with_matches` 返回匹配文件；`content` 返回匹配行和上下文；`count` 返回匹配文件和总匹配次数。 |
+| filesystem 路径 | `path` 可为 active workspace 内的文件或目录；搜索会跳过忽略目录、二进制文件和超过 `10MB` 的文件。 |
+| database 路径 | `path` 可为数据库工作区内的相对路径或 `veloca-db://entry/...`；只搜索虚拟文本文件。 |
+| 安全边界 | 只搜索当前 active workspace；拒绝 `..` 逃逸、NUL byte、workspace 外路径和无效正则表达式。 |
+
+`glob` 支持与 `glob_search` 相同的 brace expansion，例如 `**/*.{ts,tsx}`。`type` 是扩展名过滤，例如 `md`、`json`、`typescript`。`head_limit` 和 `offset` 用于分页，默认最多返回 250 个文件或内容行。
 
 ## Read File Tool
 

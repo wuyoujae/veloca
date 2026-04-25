@@ -153,10 +153,11 @@ await veloca.InvokeAgent(input, {
 
 Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. Veloca-owned workspace tools therefore expose a single top-level `input` object and unwrap that object inside the backend adapter. This avoids bugs where the model emits valid JSON with fields in a different order, such as `{"description":"...","command":"pwd"}`, which would otherwise be passed as positional arguments incorrectly.
 
-Veloca currently exposes six backend-owned workspace tools:
+Veloca currently exposes seven backend-owned workspace tools:
 
 - `get_workspace_directory_tree`: read-only directory-tree inspection for the active workspace. It merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
 - `glob_search`: read-only filename search for the active workspace. It supports brace expansion, honors Veloca ignore rules, scopes searches to the active workspace, deduplicates results, sorts recent files first, and returns at most 100 file paths.
+- `grep_search`: read-only text-content search for the active workspace. It supports regex patterns, glob and file-type filters, content/count/file-list output modes, context lines, case-insensitive search, and pagination.
 - `read_file`: read-only text-file access for the active workspace. It supports filesystem text files and database virtual files, enforces workspace boundaries, rejects binary or oversized files, and returns line-windowed content with `offset` and `limit`.
 - `edit_file`: targeted text replacement for existing files in the active workspace. It supports filesystem files and database virtual files, enforces workspace boundaries, requires an exact non-empty `old_string`, and returns the original file plus a structured patch.
 - `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
@@ -182,6 +183,28 @@ For filesystem workspaces, `pattern` may be workspace-relative or absolute under
 For database workspaces, `pattern` must be workspace-relative. `path` may be a workspace-relative virtual folder or a `veloca-db://entry/...` folder. The tool searches virtual files only and does not read binary assets.
 
 Search traversal honors Veloca default ignore rules and the workspace `.velocaignore` file, so dependency folders, build output, caches, logs, SQLite files, and local environment files do not enter Agent search results.
+
+### `grep_search` Tool
+
+`grep_search` searches text file contents by regular expression inside the current active workspace. It is read-only and is intended for finding definitions, repeated terms, headings, configuration keys, or project-specific decisions before reading full files.
+
+| Field | Description |
+| --- | --- |
+| Tool name | `grep_search` |
+| Parameters | `input: { pattern: string, path?: string, glob?: string, output_mode?: "files_with_matches" | "content" | "count", "-B"?: number, "-A"?: number, "-C"?: number, context?: number, "-n"?: boolean, "-i"?: boolean, type?: string, head_limit?: number, offset?: number, multiline?: boolean }` |
+| Return value | `mode`, `numFiles`, `filenames`, `content`, `numLines`, `numMatches`, `appliedLimit`, `appliedOffset` |
+| Default output mode | `files_with_matches` |
+| Default result limit | 250 files or content lines |
+
+The `content` mode returns matching lines and optional context. `-B` controls lines before a match, `-A` controls lines after a match, and `-C` or `context` applies both directions. Line numbers are included by default and can be disabled with `"-n": false`.
+
+The `count` mode counts regex matches across readable text files and returns `numMatches`. The `files_with_matches` mode returns only filenames. Both filesystem and database workspaces support the same output envelope.
+
+For filesystem workspaces, `path` may be a file or directory under the active workspace root. Traversal honors Veloca ignore rules, rejects workspace escapes, skips binary files, and skips files over `10MB`.
+
+For database workspaces, `path` may be a virtual file or folder. The tool searches SQLite-backed virtual document content and does not inspect binary assets.
+
+Use `glob`, `path`, or `type` to narrow searches before reading content. `glob` supports brace expansion, and `type` accepts extension-style filters such as `md`, `json`, `typescript`, and `markdown`.
 
 ### `edit_file` Tool
 
