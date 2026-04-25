@@ -156,7 +156,7 @@ Manual acceptance checks:
 15. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
 16. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
 17. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
-18. Type `/mermaid` in an empty root paragraph and press `Enter`, confirm it creates a Mermaid diagram card in place; then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
+18. Type `/` or `/m` in a root paragraph and confirm the command menu filters to Mermaid; press `Enter` and confirm it creates a Mermaid diagram card. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
 19. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
 20. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
 21. Click `Settings` in the sidebar.
@@ -168,7 +168,7 @@ Automated unit and integration tests should be added around file IO, save failur
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams can be inserted from the editor by typing `/mermaid` as its own paragraph, or by ending a paragraph with ` /mermaid` to insert the diagram below existing text; saved files still use the standard Markdown `mermaid` fenced code block format.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams can be inserted from the editor slash command menu by typing `/` or `/m`, or by ending a paragraph with ` /mermaid` to insert the diagram below existing text; saved files still use the standard Markdown `mermaid` fenced code block format.
 
 ## Roadmap
 

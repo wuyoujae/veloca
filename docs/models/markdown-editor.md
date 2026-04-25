@@ -40,6 +40,7 @@
 ## Mermaid 图表渲染
 
 - 编辑器内新增 Mermaid 图表块使用 slash command：
+  - 在根级段落输入 `/` 时会打开指令选择弹层，继续输入 `/m` 会筛选出 Mermaid 指令；弹层支持鼠标点击、方向键、`Enter` 和 `Tab` 选择；
   - 在根级段落输入 `/mermaid` 并按 `Enter` 时，当前段落会替换为 Mermaid 图表块；
   - 在已有正文末尾输入 ` /mermaid` 并按 `Enter` 时，正文会保留，Mermaid 图表块会插入到下一行；
   - `正文/mermaid`、`/mermaid extra` 或命令后继续输入其他字符时都保留为普通内容。

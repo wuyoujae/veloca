@@ -1072,7 +1072,7 @@ function isMermaidControlEvent(event: Event, dom: HTMLElement): boolean {
   );
 }
 
-function insertMermaidBlockFromCommand(editor: Editor): boolean {
+export function insertMermaidBlockFromCommand(editor: Editor): boolean {
   const { empty, $from, $to } = editor.state.selection;
   const mermaidNodeType = editor.state.schema.nodes.velocaMermaid;
   const paragraphNodeType = editor.state.schema.nodes.paragraph;

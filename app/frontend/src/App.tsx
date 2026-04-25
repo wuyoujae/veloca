@@ -26,6 +26,7 @@ import {
   FilePlus,
   Folder,
   FolderPlus,
+  GitBranch,
   Grid3X3,
   Info,
   LoaderCircle,
@@ -55,6 +56,7 @@ import {
   hydrateDocumentAssets,
   insertActiveTableColumn,
   insertActiveTableRow,
+  insertMermaidBlockFromCommand,
   isAudioUrl,
   isImageUrl,
   isVideoUrl,
@@ -3359,10 +3361,115 @@ type TableGridHoverState = {
   rowCount: number;
 };
 
+type SlashCommandItem = {
+  command: string;
+  description: string;
+  id: 'mermaid';
+  Icon: typeof GitBranch;
+  label: string;
+};
+
+type SlashCommandMenuState = {
+  items: SlashCommandItem[];
+  left: number;
+  query: string;
+  range: {
+    from: number;
+    to: number;
+  };
+  selectedIndex: number;
+  top: number;
+};
+
 const TABLE_GRID_MAX_COLUMNS = 10;
 const TABLE_GRID_MAX_ROWS = 5;
 const TABLE_CONTROL_LEFT_OFFSET = 36;
 const TABLE_CONTROL_MIN_VIEWPORT_LEFT = 8;
+const SLASH_COMMAND_MENU_WIDTH = 296;
+const SLASH_COMMAND_MENU_MARGIN = 12;
+const SLASH_COMMAND_ITEMS: SlashCommandItem[] = [
+  {
+    command: '/mermaid',
+    description: 'Insert a Mermaid diagram block',
+    id: 'mermaid',
+    Icon: GitBranch,
+    label: 'Mermaid Diagram'
+  }
+];
+
+function clampSlashMenuIndex(index: number, itemCount: number): number {
+  if (itemCount <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(index, itemCount - 1));
+}
+
+function getSlashCommandContext(editor: TiptapEditor):
+  | {
+      items: SlashCommandItem[];
+      query: string;
+      range: {
+        from: number;
+        to: number;
+      };
+    }
+  | null {
+  const { empty, $from, $to } = editor.state.selection;
+  const paragraphNodeType = editor.state.schema.nodes.paragraph;
+
+  if (
+    !empty ||
+    !$from.sameParent($to) ||
+    $from.depth !== 1 ||
+    $from.parent.type !== paragraphNodeType ||
+    $from.parentOffset !== $from.parent.content.size
+  ) {
+    return null;
+  }
+
+  const textBeforeCursor = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc');
+  const match = /(^|\s)\/([a-z]*)$/i.exec(textBeforeCursor);
+
+  if (!match) {
+    return null;
+  }
+
+  const query = match[2].toLowerCase();
+  const slashIndex = textBeforeCursor.length - query.length - 1;
+  const items = SLASH_COMMAND_ITEMS.filter((item) => {
+    const normalizedCommand = item.command.slice(1).toLowerCase();
+    return normalizedCommand.startsWith(query) || item.label.toLowerCase().includes(query);
+  });
+
+  if (!items.length) {
+    return null;
+  }
+
+  return {
+    items,
+    query,
+    range: {
+      from: $from.start() + slashIndex,
+      to: $from.pos
+    }
+  };
+}
+
+function getSlashCommandMenuPosition(
+  editor: TiptapEditor,
+  range: SlashCommandMenuState['range'],
+  shell: HTMLElement
+): Pick<SlashCommandMenuState, 'left' | 'top'> {
+  const commandRect = editor.view.coordsAtPos(range.from);
+  const shellRect = shell.getBoundingClientRect();
+  const maxLeft = Math.max(SLASH_COMMAND_MENU_MARGIN, shellRect.width - SLASH_COMMAND_MENU_WIDTH - SLASH_COMMAND_MENU_MARGIN);
+
+  return {
+    left: Math.min(Math.max(commandRect.left - shellRect.left, SLASH_COMMAND_MENU_MARGIN), maxLeft),
+    top: Math.max(commandRect.bottom - shellRect.top + 8, SLASH_COMMAND_MENU_MARGIN)
+  };
+}
 
 function MarkdownEditor({
   content,
@@ -3384,6 +3491,72 @@ function MarkdownEditor({
   const [tableGridOpen, setTableGridOpen] = useState(false);
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [tableGridHover, setTableGridHover] = useState<TableGridHoverState | null>(null);
+  const [slashCommandMenu, setSlashCommandMenu] = useState<SlashCommandMenuState | null>(null);
+  const slashCommandMenuRef = useRef<SlashCommandMenuState | null>(null);
+
+  const updateSlashCommandMenu = useCallback((nextMenu: SlashCommandMenuState | null) => {
+    slashCommandMenuRef.current = nextMenu;
+    setSlashCommandMenu(nextMenu);
+  }, []);
+
+  const runSlashCommand = useCallback(
+    (item: SlashCommandItem, menu: SlashCommandMenuState | null = slashCommandMenuRef.current) => {
+      const currentEditor = editorInstanceRef.current;
+
+      if (!currentEditor || !menu) {
+        return;
+      }
+
+      if (item.id === 'mermaid') {
+        currentEditor
+          .chain()
+          .focus()
+          .insertContentAt(menu.range, item.command)
+          .setTextSelection(menu.range.from + item.command.length)
+          .run();
+        insertMermaidBlockFromCommand(currentEditor);
+      }
+
+      updateSlashCommandMenu(null);
+    },
+    [updateSlashCommandMenu]
+  );
+
+  const handleSlashCommandKeyDown = useCallback(
+    (event: KeyboardEvent): boolean => {
+      const menu = slashCommandMenuRef.current;
+
+      if (!menu) {
+        return false;
+      }
+
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const direction = event.key === 'ArrowDown' ? 1 : -1;
+        const nextIndex = (menu.selectedIndex + direction + menu.items.length) % menu.items.length;
+        updateSlashCommandMenu({
+          ...menu,
+          selectedIndex: nextIndex
+        });
+        return true;
+      }
+
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        runSlashCommand(menu.items[clampSlashMenuIndex(menu.selectedIndex, menu.items.length)], menu);
+        return true;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        updateSlashCommandMenu(null);
+        return true;
+      }
+
+      return false;
+    },
+    [runSlashCommand, updateSlashCommandMenu]
+  );
 
   useEffect(() => {
     contentRef.current = content;
@@ -3548,6 +3721,7 @@ function MarkdownEditor({
             return true;
           }
         },
+        handleKeyDown: (_view, event) => handleSlashCommandKeyDown(event),
         handlePaste: (view, event) => {
           const clipboard = event.clipboardData;
 
@@ -3602,7 +3776,7 @@ function MarkdownEditor({
         void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
       }
     },
-    [filePath]
+    [filePath, handleSlashCommandKeyDown]
   );
 
   useEffect(() => {
@@ -3641,7 +3815,9 @@ function MarkdownEditor({
 
     editor.setOptions({
       editorProps: {
+        ...editor.options.editorProps,
         attributes: {
+          ...(editor.options.editorProps.attributes ?? {}),
           class: theme === 'dark' ? 'veloca-prosemirror theme-dark' : 'veloca-prosemirror theme-light'
         }
       }
@@ -3651,6 +3827,63 @@ function MarkdownEditor({
   useEffect(() => {
     editorInstanceRef.current = editor;
   }, [editor]);
+
+  useEffect(() => {
+    if (!editor) {
+      updateSlashCommandMenu(null);
+      return;
+    }
+
+    let frameId = 0;
+    const scrollContainer = editorShellRef.current?.closest('.editor-pane-scroll, .editor-scroll-area');
+
+    const syncSlashCommandMenu = () => {
+      const shell = editorShellRef.current;
+      const context = getSlashCommandContext(editor);
+
+      if (!shell || !context) {
+        updateSlashCommandMenu(null);
+        return;
+      }
+
+      const position = getSlashCommandMenuPosition(editor, context.range, shell);
+      const previousMenu = slashCommandMenuRef.current;
+      const selectedIndex =
+        previousMenu?.query === context.query
+          ? clampSlashMenuIndex(previousMenu.selectedIndex, context.items.length)
+          : 0;
+
+      updateSlashCommandMenu({
+        ...context,
+        ...position,
+        selectedIndex
+      });
+    };
+
+    const queueSlashCommandMenuSync = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(syncSlashCommandMenu);
+    };
+    const hideSlashCommandMenu = () => updateSlashCommandMenu(null);
+
+    queueSlashCommandMenuSync();
+    editor.on('focus', queueSlashCommandMenuSync);
+    editor.on('selectionUpdate', queueSlashCommandMenuSync);
+    editor.on('update', queueSlashCommandMenuSync);
+    editor.on('blur', hideSlashCommandMenu);
+    scrollContainer?.addEventListener('scroll', queueSlashCommandMenuSync, { passive: true });
+    window.addEventListener('resize', queueSlashCommandMenuSync);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      editor.off('focus', queueSlashCommandMenuSync);
+      editor.off('selectionUpdate', queueSlashCommandMenuSync);
+      editor.off('update', queueSlashCommandMenuSync);
+      editor.off('blur', hideSlashCommandMenu);
+      scrollContainer?.removeEventListener('scroll', queueSlashCommandMenuSync);
+      window.removeEventListener('resize', queueSlashCommandMenuSync);
+    };
+  }, [editor, updateSlashCommandMenu]);
 
   const getActiveTableWrapperElement = (currentEditor: TiptapEditor) => {
     const activeTableInfo = getActiveTableInfo(currentEditor);
@@ -3992,9 +4225,53 @@ function MarkdownEditor({
         )
       : null;
 
+  const slashCommandMenuPanel = slashCommandMenu ? (
+    <div
+      className="slash-command-menu"
+      role="listbox"
+      style={{
+        left: `${slashCommandMenu.left}px`,
+        top: `${slashCommandMenu.top}px`
+      }}
+      onMouseDown={(event) => event.preventDefault()}
+    >
+      {slashCommandMenu.items.map((item, index) => {
+        const Icon = item.Icon;
+        const isSelected = index === slashCommandMenu.selectedIndex;
+
+        return (
+          <button
+            aria-selected={isSelected}
+            className={`slash-command-item${isSelected ? ' selected' : ''}`}
+            key={item.id}
+            role="option"
+            type="button"
+            onClick={() => runSlashCommand(item, slashCommandMenu)}
+            onMouseEnter={() =>
+              updateSlashCommandMenu({
+                ...slashCommandMenu,
+                selectedIndex: index
+              })
+            }
+          >
+            <span className="slash-command-icon" aria-hidden="true">
+              <Icon size={16} />
+            </span>
+            <span className="slash-command-copy">
+              <span className="slash-command-label">{item.label}</span>
+              <span className="slash-command-description">{item.description}</span>
+            </span>
+            <span className="slash-command-token">{item.command}</span>
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
   return (
     <div className="veloca-editor" data-file-path={filePath} ref={editorShellRef}>
       {tableControlsPortal}
+      {slashCommandMenuPanel}
       <EditorContent editor={editor} />
     </div>
   );
