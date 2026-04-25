@@ -51,7 +51,14 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('workspace:remove-folder', workspaceFolderId) as Promise<WorkspaceSnapshot>,
     reveal: (filePath: string) => ipcRenderer.invoke('workspace:reveal', filePath) as Promise<void>,
     openPath: (filePath: string) => ipcRenderer.invoke('workspace:open-path', filePath) as Promise<string>,
-    copyPath: (filePath: string) => ipcRenderer.invoke('workspace:copy-path', filePath) as Promise<void>
+    copyPath: (filePath: string) => ipcRenderer.invoke('workspace:copy-path', filePath) as Promise<void>,
+    onChanged: (callback: (snapshot: WorkspaceSnapshot) => void) => {
+      const listener = (_event: IpcRendererEvent, snapshot: WorkspaceSnapshot) => callback(snapshot);
+
+      ipcRenderer.on('workspace:changed', listener);
+
+      return () => ipcRenderer.removeListener('workspace:changed', listener);
+    }
   },
   app: {
     platform: process.platform

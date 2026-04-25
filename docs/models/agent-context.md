@@ -196,6 +196,8 @@ Use information in this priority order:
 
 `write_file` 会完整替换目标文件内容，不是局部 patch 工具。更新已有文件前应优先使用 `read_file` 读取相关内容，避免覆盖用户未纳入上下文的编辑。返回的 `structuredPatch` 是用于审计或 UI 展示的全文件 patch envelope；当前不生成真实 `gitDiff`。
 
+写入成功后，后端会通过 `workspace:changed` IPC 事件广播最新 workspace snapshot。前端通过 `window.veloca.workspace.onChanged(...)` 订阅该事件并刷新文件树，因此 Agent 新建 filesystem 文件或 database 虚拟文件后，左侧 Workspace 会自动更新。
+
 ## Bash Command Tool
 
 `run_bash_command` 用于让 Agent 在当前 `filesystem` 工作区内执行必要的前台命令。第一版不支持数据库工作区、不支持后台任务，也不会在缺少 macOS `sandbox-exec` 时降级为不安全执行。

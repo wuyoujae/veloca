@@ -41,7 +41,8 @@ import {
   resolveWorkspaceAsset,
   saveMarkdownFile,
   saveWorkspaceAsset,
-  validateWorkspacePath
+  validateWorkspacePath,
+  type WorkspaceSnapshot
 } from '../services/workspace-service';
 
 function createMainWindow(): void {
@@ -87,6 +88,17 @@ function createMainWindow(): void {
 }
 
 function registerIpcHandlers(): void {
+  const broadcastWorkspaceChanged = (snapshot: WorkspaceSnapshot) => {
+
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) {
+        window.webContents.send('workspace:changed', snapshot);
+      }
+    }
+
+    return snapshot;
+  };
+
   ipcMain.handle('settings:get-theme', () => getTheme());
   ipcMain.handle('settings:set-theme', (_event, theme: ThemeMode) => {
     if (theme !== 'dark' && theme !== 'light') {
@@ -100,7 +112,9 @@ function registerIpcHandlers(): void {
     return setAutoSave(Boolean(enabled));
   });
   ipcMain.handle('agent:send-message', (_event, request: AgentSendMessageRequest) => {
-    return sendAgentMessage(request);
+    return sendAgentMessage(request, {
+      onWorkspaceChanged: broadcastWorkspaceChanged
+    });
   });
   ipcMain.handle('agent:list-sessions', () => {
     return listAgentSessions();
@@ -115,16 +129,22 @@ function registerIpcHandlers(): void {
 
     const sender = event.sender;
 
-    void streamAgentMessage(request, (message) => {
-      if (sender.isDestroyed()) {
-        return;
-      }
+    void streamAgentMessage(
+      request,
+      (message) => {
+        if (sender.isDestroyed()) {
+          return;
+        }
 
-      sender.send('agent:message-event', {
-        ...message,
-        requestId
-      });
-    });
+        sender.send('agent:message-event', {
+          ...message,
+          requestId
+        });
+      },
+      {
+        onWorkspaceChanged: broadcastWorkspaceChanged
+      }
+    );
   });
   ipcMain.handle('workspace:get', () => getWorkspaceSnapshot());
   ipcMain.handle('workspace:add-folder', async (event) => {

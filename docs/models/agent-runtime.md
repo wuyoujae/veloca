@@ -179,6 +179,8 @@ For database workspaces, `path` may be an existing `veloca-db://entry/...` file 
 
 The tool returns `type: "create"` when no previous file existed and `type: "update"` when existing content was replaced. `originalFile` is `null` for creates and the prior file content for updates. `structuredPatch` is a compact full-file patch envelope for UI or audit display; `gitDiff` is reserved and currently `null`.
 
+After a successful `write_file`, the backend emits a `workspace:changed` IPC event with a fresh workspace snapshot. The renderer subscribes through `window.veloca.workspace.onChanged(...)` and refreshes the file tree from that snapshot, so Agent-created filesystem files and database virtual files appear without requiring a manual reload.
+
 ## Persistence
 
 In local-file mode, `otherone-agent` writes to:

@@ -155,6 +155,7 @@ declare global {
         reveal: (filePath: string) => Promise<void>;
         openPath: (filePath: string) => Promise<string>;
         copyPath: (filePath: string) => Promise<void>;
+        onChanged: (callback: (snapshot: WorkspaceSnapshot) => void) => () => void;
       };
       app: {
         platform: NodeJS.Platform;

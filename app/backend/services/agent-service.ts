@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSyn
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { veloca } from 'otherone-agent';
 import { getDatabase } from '../database/connection';
-import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceTreeNode } from './workspace-service';
+import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
 
@@ -36,6 +36,10 @@ export interface AgentSendMessageResponse {
   answer: string;
   model: string;
   sessionId: string;
+}
+
+export interface AgentRuntimeHooks {
+  onWorkspaceChanged?: (snapshot: WorkspaceSnapshot) => void;
 }
 
 export interface AgentStoredConversation {
@@ -151,6 +155,10 @@ interface BashCommandInput {
   cwd?: string;
   description?: string;
   timeout?: number;
+}
+
+interface AgentToolEnvelopeInput {
+  input?: unknown;
 }
 
 interface BashCommandOutput {
@@ -402,6 +410,67 @@ function normalizeBashInput(command: unknown, cwd: unknown, timeout: unknown, de
     description: normalizedDescription,
     timeout: normalizedTimeout
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function unwrapToolInput(value: unknown): unknown {
+  return isRecord(value) && 'input' in value ? (value as AgentToolEnvelopeInput).input : value;
+}
+
+function isLikelyShellCommand(value: string): boolean {
+  const commandName = value.trim().split(/\s+/)[0] ?? '';
+
+  if (!commandName) {
+    return false;
+  }
+
+  return (
+    commandName.includes('/') ||
+    [
+      'cat',
+      'find',
+      'git',
+      'grep',
+      'head',
+      'ls',
+      'node',
+      'npm',
+      'pnpm',
+      'pwd',
+      'rg',
+      'sed',
+      'tail',
+      'test',
+      'tsc',
+      'yarn'
+    ].includes(commandName)
+  );
+}
+
+function normalizeBashToolInput(first: unknown, second: unknown, third: unknown, fourth: unknown): BashCommandInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeBashInput(input.command, input.cwd, input.timeout, input.description);
+  }
+
+  if (typeof first === 'number') {
+    return normalizeBashInput(second, undefined, first, third);
+  }
+
+  if (typeof first === 'string' && typeof second === 'string') {
+    const commandFirst = normalizeBashInput(first, second, third, fourth);
+    const commandSecond = normalizeBashInput(second, undefined, third, first);
+
+    if ((!commandFirst.command && commandSecond.command) || (!isLikelyShellCommand(first) && isLikelyShellCommand(second))) {
+      return commandSecond;
+    }
+  }
+
+  return normalizeBashInput(first, second, third, fourth);
 }
 
 function normalizeOptionalLineNumber(value: unknown, minimum: number, name: string): number | undefined {
@@ -1119,10 +1188,15 @@ function writeDatabaseTextFile(rootNode: WorkspaceTreeNode, input: WriteFileInpu
   return writeDatabaseRelativeFile(rootNode, input.path, input.content);
 }
 
-function writeWorkspaceTextFile(context: AgentRuntimeContext | undefined, input: WriteFileInput): WriteFileOutput {
+function writeWorkspaceTextFile(
+  context: AgentRuntimeContext | undefined,
+  input: WriteFileInput,
+  hooks?: AgentRuntimeHooks
+): WriteFileOutput {
   const workspaceType = getWorkspaceType(context);
   const workspaceRootPath = context?.workspaceRootPath?.trim();
   const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+  let output: WriteFileOutput;
 
   ensureWritableTextContentSize(input.content);
 
@@ -1131,14 +1205,16 @@ function writeWorkspaceTextFile(context: AgentRuntimeContext | undefined, input:
   }
 
   if (workspaceType === 'filesystem') {
-    return writeFilesystemTextFile(workspaceRoot.rootPath, input);
+    output = writeFilesystemTextFile(workspaceRoot.rootPath, input);
+  } else if (workspaceType === 'database') {
+    output = writeDatabaseTextFile(workspaceRoot.node, input);
+  } else {
+    throw new Error('write_file requires an active workspace.');
   }
 
-  if (workspaceType === 'database') {
-    return writeDatabaseTextFile(workspaceRoot.node, input);
-  }
+  hooks?.onWorkspaceChanged?.(getWorkspaceSnapshot());
 
-  throw new Error('write_file requires an active workspace.');
+  return output;
 }
 
 async function runBashCommand(context: AgentRuntimeContext | undefined, input: BashCommandInput): Promise<BashCommandOutput> {
@@ -1684,14 +1760,14 @@ function buildAgentTools() {
   ];
 }
 
-function buildAgentToolRealizers(context?: AgentRuntimeContext) {
+function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRuntimeHooks) {
   return {
     get_workspace_directory_tree: (velocaignore?: string) =>
       getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined),
     read_file: (path?: unknown, offset?: unknown, limit?: unknown) =>
       readWorkspaceTextFile(context, normalizeReadFileInput(path, offset, limit)),
     write_file: (path?: unknown, content?: unknown) =>
-      writeWorkspaceTextFile(context, normalizeWriteFileInput(path, content)),
+      writeWorkspaceTextFile(context, normalizeWriteFileInput(path, content), hooks),
     run_bash_command: (command?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
       runBashCommand(context, normalizeBashInput(command, cwd, timeout, description))
   };
@@ -1855,7 +1931,7 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
   return `${metadata.join('\n\n')}\n\n用户问题：\n${prompt}`;
 }
 
-function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolean) {
+function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolean, hooks?: AgentRuntimeHooks) {
   const prompt = validateRequest(request);
   const apiKey = getRequiredEnv('VELOCA_AGENT_API_KEY');
   const baseUrl = getOptionalEnv('VELOCA_AGENT_BASE_URL', defaultAgentBaseUrl);
@@ -1873,7 +1949,7 @@ function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolea
       temperature: 0.4,
       toolChoice: 'auto' as const,
       tools: buildAgentTools(),
-      tools_realize: buildAgentToolRealizers(request.context),
+      tools_realize: buildAgentToolRealizers(request.context, hooks),
       parallelToolCalls: false,
       userPrompt: buildUserPrompt(prompt, request)
     },
@@ -2014,8 +2090,11 @@ export function listAgentSessions(): AgentStoredSession[] {
   return sessions.map((session, index) => readStoredSession(getStoredSessionId(session), index));
 }
 
-export async function sendAgentMessage(request: AgentSendMessageRequest): Promise<AgentSendMessageResponse> {
-  const { ai, input, model } = getAgentRuntimeOptions(request, false);
+export async function sendAgentMessage(
+  request: AgentSendMessageRequest,
+  hooks?: AgentRuntimeHooks
+): Promise<AgentSendMessageResponse> {
+  const { ai, input, model } = getAgentRuntimeOptions(request, false, hooks);
 
   const response = await veloca.InvokeAgent(input, ai);
 
@@ -2028,12 +2107,13 @@ export async function sendAgentMessage(request: AgentSendMessageRequest): Promis
 
 export async function streamAgentMessage(
   request: AgentSendMessageRequest,
-  emit: (event: AgentStreamEvent) => void
+  emit: (event: AgentStreamEvent) => void,
+  hooks?: AgentRuntimeHooks
 ): Promise<void> {
   let model = defaultAgentModel;
 
   try {
-    const options = getAgentRuntimeOptions(request, true);
+    const options = getAgentRuntimeOptions(request, true, hooks);
     model = options.model;
 
     const stream = await veloca.InvokeAgent(options.input, options.ai);

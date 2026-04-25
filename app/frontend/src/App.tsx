@@ -636,6 +636,7 @@ export function App(): JSX.Element {
   const editorTabElementByPathRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const splitEditorGridRef = useRef<HTMLDivElement>(null);
   const agentSelectionRangeRef = useRef<Range | null>(null);
+  const workspaceChangedHandlerRef = useRef<(snapshot: WorkspaceSnapshot) => void>(() => {});
   const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
   const modeMenuRef = useRef<HTMLDivElement>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
@@ -1448,6 +1449,18 @@ export function App(): JSX.Element {
       setSaveStatus('saved');
     }
   };
+
+  workspaceChangedHandlerRef.current = (snapshot) => {
+    void refreshWorkspaceAfterOperation(snapshot);
+  };
+
+  useEffect(() => {
+    const unsubscribe = window.veloca?.workspace.onChanged((snapshot) => {
+      workspaceChangedHandlerRef.current(snapshot);
+    });
+
+    return () => unsubscribe?.();
+  }, []);
 
   const syncOpenTabsWithSnapshot = (
     snapshot: WorkspaceSnapshot,
