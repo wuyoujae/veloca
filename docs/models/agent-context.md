@@ -82,6 +82,7 @@ Use information in this priority order:
 <tools-use-demo>
 
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
+- When calling Veloca workspace tools, pass arguments inside the required `input` object.
 - Use `get_workspace_directory_tree` to inspect the active workspace structure before making claims about available folders or files.
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
 - Use `read_file` to read a known text file from the active workspace. Use `offset` and `limit` when reading large files or when you only need a specific section.
@@ -154,7 +155,7 @@ Use information in this priority order:
 | Field | Description |
 | --- | --- |
 | Tool name | `get_workspace_directory_tree` |
-| 参数 | `velocaignore?: string` |
+| 参数 | `input: { velocaignore?: string }` |
 | 返回内容 | 当前工作区根路径、当前文件路径、工作区类型、压缩后的目录树、忽略规则和截断统计。 |
 | 安全边界 | 只读；只允许读取当前 active workspace root；不会读取文件内容。 |
 
@@ -173,7 +174,7 @@ Use information in this priority order:
 | Field | Description |
 | --- | --- |
 | Tool name | `read_file` |
-| 参数 | `path: string`、`offset?: number`、`limit?: number` |
+| 参数 | `input: { path: string, offset?: number, limit?: number }` |
 | 返回内容 | `type: "text"`、`file.filePath`、`file.content`、`file.numLines`、`file.startLine`、`file.totalLines`。 |
 | filesystem 路径 | 支持工作区相对路径或当前工作区内的绝对路径；真实路径解析后必须仍在 active workspace root 内。 |
 | database 路径 | 支持 `veloca-db://entry/...` 或数据库工作区内的相对路径；只读取虚拟文件，不读取 folder 或二进制资产。 |
@@ -188,7 +189,7 @@ Use information in this priority order:
 | Field | Description |
 | --- | --- |
 | Tool name | `write_file` |
-| 参数 | `path: string`、`content: string` |
+| 参数 | `input: { path: string, content: string }` |
 | 返回内容 | `type: "create" | "update"`、`filePath`、`content`、`structuredPatch`、`originalFile`、`gitDiff: null`、`workspaceType`。 |
 | filesystem 路径 | 支持工作区相对路径或当前工作区内的绝对路径；缺失父目录会自动创建；真实路径解析后必须仍在 active workspace root 内。 |
 | database 路径 | 支持已有 `veloca-db://entry/...` 文件路径或数据库工作区内的相对路径；相对路径会创建缺失虚拟 folder，并创建或更新最终文件 entry。 |
@@ -205,7 +206,7 @@ Use information in this priority order:
 | Field | Description |
 | --- | --- |
 | Tool name | `run_bash_command` |
-| 参数 | `command: string`、`cwd?: string`、`timeout?: number`、`description?: string` |
+| 参数 | `input: { command: string, cwd?: string, timeout?: number, description?: string }` |
 | 默认行为 | `cwd` 可为相对当前工作区根目录的路径，也可为当前工作区内的绝对路径；`timeout` 默认 `10000` ms，最大 `120000` ms。 |
 | 返回内容 | `ok`、`stdout`、`stderr`、`exitCode`、`interrupted`、`timedOut`、`blocked`、`cwd`、`durationMs`、`outputTruncated`、`sandboxStatus`、`noOutputExpected`。 |
 | 安全边界 | macOS sandbox；默认禁网；写入限制在当前工作区；输出按 stdout/stderr 各 `16384` bytes 截断。 |
@@ -213,6 +214,8 @@ Use information in this priority order:
 第一版会直接拦截明显危险或不适合 Agent 自动执行的命令，例如 `sudo`、`su`、`rm -rf`、`git reset --hard`、`git clean`、`diskutil`、`mkfs`、`dd ... of=`、`shutdown`、`reboot`、`launchctl`、`osascript`、`nohup`、`disown` 和后台化命令。被拦截命令会返回 `blocked: true`，不会执行。
 
 当用户明确要求运行安全命令时，后端会在本轮 user prompt 中追加 `<tool-routing-hint>`，提醒模型优先调用 `run_bash_command`，避免模型按通用安全话术回答“无法直接执行命令”。当前仍保持 `toolChoice: "auto"`，因为 `otherone-agent` 会在工具循环中复用同一个 `toolChoice`；如果强制指定 `run_bash_command`，工具执行后续轮次也会被继续强制调用，存在重复执行风险。
+
+`otherone-agent` 当前会通过 `fn(...Object.values(args))` 调用 tool 实现，直接暴露多个顶层参数会受到模型输出 JSON 字段顺序影响。Veloca workspace tools 因此统一使用单个 `input` 对象作为顶层参数，并在后端保留旧顶层参数格式的兼容解析。
 
 ## 后续扩展
 

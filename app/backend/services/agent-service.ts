@@ -431,6 +431,7 @@ function isLikelyShellCommand(value: string): boolean {
     commandName.includes('/') ||
     [
       'cat',
+      'echo',
       'find',
       'git',
       'grep',
@@ -438,15 +439,32 @@ function isLikelyShellCommand(value: string): boolean {
       'ls',
       'node',
       'npm',
+      'npx',
       'pnpm',
       'pwd',
+      'python',
+      'python3',
       'rg',
       'sed',
+      'sh',
       'tail',
       'test',
       'tsc',
       'yarn'
     ].includes(commandName)
+  );
+}
+
+function isLikelyBashCwd(value: string): boolean {
+  const trimmedValue = value.trim();
+
+  return (
+    trimmedValue === '' ||
+    trimmedValue === '.' ||
+    trimmedValue.startsWith('./') ||
+    trimmedValue.startsWith('/') ||
+    trimmedValue.includes('/') ||
+    /^[A-Za-z0-9._-]+$/.test(trimmedValue)
   );
 }
 
@@ -468,9 +486,20 @@ function normalizeBashToolInput(first: unknown, second: unknown, third: unknown,
     if ((!commandFirst.command && commandSecond.command) || (!isLikelyShellCommand(first) && isLikelyShellCommand(second))) {
       return commandSecond;
     }
+
+    if (isLikelyShellCommand(first) && !isLikelyBashCwd(second)) {
+      return normalizeBashInput(first, undefined, third, second);
+    }
   }
 
   return normalizeBashInput(first, second, third, fourth);
+}
+
+function normalizeDirectoryTreeToolInput(first: unknown): string | undefined {
+  const input = unwrapToolInput(first);
+  const velocaignore = isRecord(input) ? input.velocaignore : input;
+
+  return typeof velocaignore === 'string' ? velocaignore : undefined;
 }
 
 function normalizeOptionalLineNumber(value: unknown, minimum: number, name: string): number | undefined {
@@ -499,6 +528,16 @@ function normalizeReadFileInput(path: unknown, offset: unknown, limit: unknown):
   };
 }
 
+function normalizeReadFileToolInput(first: unknown, second: unknown, third: unknown): ReadFileInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeReadFileInput(input.path, input.offset, input.limit);
+  }
+
+  return normalizeReadFileInput(first, second, third);
+}
+
 function normalizeWriteFileInput(path: unknown, content: unknown): WriteFileInput {
   if (typeof path !== 'string' || !path.trim()) {
     throw new Error('write_file path is required.');
@@ -518,6 +557,16 @@ function normalizeWriteFileInput(path: unknown, content: unknown): WriteFileInpu
     content,
     path: normalizedPath
   };
+}
+
+function normalizeWriteFileToolInput(first: unknown, second: unknown): WriteFileInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeWriteFileInput(input.path, input.content);
+  }
+
+  return normalizeWriteFileInput(first, second);
 }
 
 function ensureWritableTextContentSize(content: string): void {
@@ -1661,13 +1710,22 @@ function buildAgentTools() {
         parameters: {
           type: 'object',
           properties: {
-            velocaignore: {
-              type: 'string',
-              description:
-                'Optional .velocaignore-style ignore patterns separated by newlines or commas. These patterns are merged with Veloca defaults and the workspace .velocaignore file.'
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                velocaignore: {
+                  type: 'string',
+                  description:
+                    'Optional .velocaignore-style ignore patterns separated by newlines or commas. These patterns are merged with Veloca defaults and the workspace .velocaignore file.'
+                }
+              },
+              required: [],
+              additionalProperties: false
             }
           },
-          required: []
+          required: ['input'],
+          additionalProperties: false
         }
       }
     },
@@ -1680,23 +1738,31 @@ function buildAgentTools() {
         parameters: {
           type: 'object',
           properties: {
-            path: {
-              type: 'string',
-              description:
-                'File path to read. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... or workspace-relative.'
-            },
-            offset: {
-              type: 'number',
-              minimum: 0,
-              description: 'Optional zero-based line offset.'
-            },
-            limit: {
-              type: 'number',
-              minimum: 1,
-              description: 'Optional maximum number of lines to read.'
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                path: {
+                  type: 'string',
+                  description:
+                    'File path to read. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... or workspace-relative.'
+                },
+                offset: {
+                  type: 'number',
+                  minimum: 0,
+                  description: 'Optional zero-based line offset.'
+                },
+                limit: {
+                  type: 'number',
+                  minimum: 1,
+                  description: 'Optional maximum number of lines to read.'
+                }
+              },
+              required: ['path'],
+              additionalProperties: false
             }
           },
-          required: ['path'],
+          required: ['input'],
           additionalProperties: false
         }
       }
@@ -1710,17 +1776,25 @@ function buildAgentTools() {
         parameters: {
           type: 'object',
           properties: {
-            path: {
-              type: 'string',
-              description:
-                'File path to write. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... for existing files or workspace-relative for create/update.'
-            },
-            content: {
-              type: 'string',
-              description: 'Complete text content to write to the file. The full file will be replaced.'
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                path: {
+                  type: 'string',
+                  description:
+                    'File path to write. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... for existing files or workspace-relative for create/update.'
+                },
+                content: {
+                  type: 'string',
+                  description: 'Complete text content to write to the file. The full file will be replaced.'
+                }
+              },
+              required: ['path', 'content'],
+              additionalProperties: false
             }
           },
-          required: ['path', 'content'],
+          required: ['input'],
           additionalProperties: false
         }
       }
@@ -1734,26 +1808,35 @@ function buildAgentTools() {
         parameters: {
           type: 'object',
           properties: {
-            command: {
-              type: 'string',
-              description: 'The bash command to run. Keep it short and explain the purpose before using it.'
-            },
-            cwd: {
-              type: 'string',
-              description:
-                'Optional working directory. May be relative to the active workspace root or an absolute path inside the active workspace. Use an empty string to run at the workspace root.'
-            },
-            timeout: {
-              type: 'number',
-              description:
-                'Optional timeout in milliseconds. Defaults to 10000 and cannot exceed 120000.'
-            },
-            description: {
-              type: 'string',
-              description: 'Optional short description of why this command is needed.'
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                command: {
+                  type: 'string',
+                  description: 'The bash command to run. Keep it short and explain the purpose before using it.'
+                },
+                cwd: {
+                  type: 'string',
+                  description:
+                    'Optional working directory. May be relative to the active workspace root or an absolute path inside the active workspace. Use an empty string to run at the workspace root.'
+                },
+                timeout: {
+                  type: 'number',
+                  description:
+                    'Optional timeout in milliseconds. Defaults to 10000 and cannot exceed 120000.'
+                },
+                description: {
+                  type: 'string',
+                  description: 'Optional short description of why this command is needed.'
+                }
+              },
+              required: ['command'],
+              additionalProperties: false
             }
           },
-          required: ['command']
+          required: ['input'],
+          additionalProperties: false
         }
       }
     }
@@ -1762,14 +1845,14 @@ function buildAgentTools() {
 
 function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRuntimeHooks) {
   return {
-    get_workspace_directory_tree: (velocaignore?: string) =>
-      getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined),
-    read_file: (path?: unknown, offset?: unknown, limit?: unknown) =>
-      readWorkspaceTextFile(context, normalizeReadFileInput(path, offset, limit)),
-    write_file: (path?: unknown, content?: unknown) =>
-      writeWorkspaceTextFile(context, normalizeWriteFileInput(path, content), hooks),
-    run_bash_command: (command?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
-      runBashCommand(context, normalizeBashInput(command, cwd, timeout, description))
+    get_workspace_directory_tree: (input?: unknown) =>
+      getWorkspaceDirectoryTree(context, normalizeDirectoryTreeToolInput(input)),
+    read_file: (inputOrPath?: unknown, offset?: unknown, limit?: unknown) =>
+      readWorkspaceTextFile(context, normalizeReadFileToolInput(inputOrPath, offset, limit)),
+    write_file: (inputOrPath?: unknown, content?: unknown) =>
+      writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
+    run_bash_command: (inputOrCommand?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
+      runBashCommand(context, normalizeBashToolInput(inputOrCommand, cwd, timeout, description))
   };
 }
 
@@ -1841,6 +1924,7 @@ Use information in this priority order:
 <tools-use-demo>
 
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
+- When calling Veloca workspace tools, pass arguments inside the required \`input\` object.
 - Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
 - Use \`read_file\` to read a known text file from the active workspace. Use \`offset\` and \`limit\` when reading large files or when you only need a specific section.
@@ -1916,7 +2000,7 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
       [
         '<tool-routing-hint>',
         '- The user is explicitly asking you to run a shell command.',
-        '- If the command is safe and the active workspace is a filesystem workspace, call `run_bash_command` for this request.',
+        '- If the command is safe and the active workspace is a filesystem workspace, call `run_bash_command` with arguments inside the required `input` object.',
         '- Do not say that you cannot execute commands before trying the tool for a safe command.',
         '- If the tool is unavailable, blocked, or returns an error, report that tool result clearly.',
         '</tool-routing-hint>'

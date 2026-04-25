@@ -151,7 +151,7 @@ await veloca.InvokeAgent(input, {
 });
 ```
 
-Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. For Veloca-owned tools, define argument schemas with stable property order, or wrap the library behind an adapter that converts arguments into a named object before calling product code.
+Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. Veloca-owned workspace tools therefore expose a single top-level `input` object and unwrap that object inside the backend adapter. This avoids bugs where the model emits valid JSON with fields in a different order, such as `{"description":"...","command":"pwd"}`, which would otherwise be passed as positional arguments incorrectly.
 
 Veloca currently exposes four backend-owned workspace tools:
 
@@ -160,7 +160,7 @@ Veloca currently exposes four backend-owned workspace tools:
 - `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
 - `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 
-For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` for safe commands. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same bash tool call after the first tool result instead of producing the final answer.
+For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same bash tool call after the first tool result instead of producing the final answer.
 
 ### `write_file` Tool
 
@@ -169,7 +169,7 @@ For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-me
 | Field | Description |
 | --- | --- |
 | Tool name | `write_file` |
-| Parameters | `path: string`, `content: string` |
+| Parameters | `input: { path: string, content: string }` |
 | Return value | `type`, `filePath`, `content`, `structuredPatch`, `originalFile`, `gitDiff`, `workspaceType` |
 | Size limit | `10MB` by UTF-8 byte length |
 
