@@ -92,6 +92,11 @@ const powerShellMaxTimeoutMs = 120000;
 const replDefaultTimeoutMs = 10000;
 const replMaxCodeLength = 20000;
 const replMaxTimeoutMs = 120000;
+const webSearchDefaultBaseUrl = 'https://html.duckduckgo.com/html/';
+const webSearchMaxDomainFilters = 20;
+const webSearchMaxQueryLength = 500;
+const webSearchMaxResults = 8;
+const webSearchTimeoutMs = 20000;
 const maxGlobPatternExpansions = 64;
 const maxGlobPatternLength = 1000;
 const maxGlobSearchResults = 100;
@@ -199,6 +204,12 @@ interface ReplInput {
   timeoutMs?: number;
 }
 
+interface WebSearchInput {
+  allowedDomains?: string[];
+  blockedDomains?: string[];
+  query: string;
+}
+
 interface AgentToolEnvelopeInput {
   input?: unknown;
 }
@@ -281,6 +292,24 @@ interface ReplRuntime {
   args: string[];
   language: string;
   program: string;
+}
+
+interface SearchHit {
+  title: string;
+  url: string;
+}
+
+type WebSearchResultItem =
+  | string
+  | {
+      content: SearchHit[];
+      tool_use_id: string;
+    };
+
+interface WebSearchOutput {
+  durationSeconds: number;
+  query: string;
+  results: WebSearchResultItem[];
 }
 
 interface OutputBuffer {
@@ -845,6 +874,62 @@ function normalizeReplToolInput(first: unknown, second: unknown, third: unknown)
   }
 
   return normalizeReplInput(first, second, third);
+}
+
+function normalizeOptionalStringList(value: unknown, name: string): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array of strings.`);
+  }
+
+  if (value.length > webSearchMaxDomainFilters) {
+    throw new Error(`${name} cannot contain more than ${webSearchMaxDomainFilters} domains.`);
+  }
+
+  return value
+    .map((item) => {
+      if (typeof item !== 'string') {
+        throw new Error(`${name} must contain only strings.`);
+      }
+
+      return item.trim();
+    })
+    .filter(Boolean);
+}
+
+function normalizeWebSearchInput(query: unknown, allowedDomains: unknown, blockedDomains: unknown): WebSearchInput {
+  if (typeof query !== 'string' || query.trim().length < 2) {
+    throw new Error('WebSearch query must be at least 2 characters.');
+  }
+
+  const normalizedQuery = query.trim();
+
+  if (normalizedQuery.length > webSearchMaxQueryLength) {
+    throw new Error(`WebSearch query cannot exceed ${webSearchMaxQueryLength} characters.`);
+  }
+
+  return {
+    allowedDomains: normalizeOptionalStringList(allowedDomains, 'WebSearch allowed_domains'),
+    blockedDomains: normalizeOptionalStringList(blockedDomains, 'WebSearch blocked_domains'),
+    query: normalizedQuery
+  };
+}
+
+function normalizeWebSearchToolInput(first: unknown, second: unknown, third: unknown): WebSearchInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeWebSearchInput(
+      input.query,
+      input.allowed_domains ?? input.allowedDomains,
+      input.blocked_domains ?? input.blockedDomains
+    );
+  }
+
+  return normalizeWebSearchInput(first, second, third);
 }
 
 function normalizeDirectoryTreeToolInput(first: unknown): string | undefined {
@@ -1732,6 +1817,343 @@ function executeSandboxedRepl(
       });
     });
   });
+}
+
+function getWebSearchBaseUrl(): string {
+  loadLocalEnv();
+
+  return (
+    process.env.VELOCA_WEB_SEARCH_BASE_URL?.trim() ||
+    process.env.CLAWD_WEB_SEARCH_BASE_URL?.trim() ||
+    webSearchDefaultBaseUrl
+  );
+}
+
+function buildWebSearchUrl(query: string): URL {
+  const url = new URL(getWebSearchBaseUrl());
+  url.searchParams.append('q', query);
+
+  return url;
+}
+
+async function fetchWebSearchHtml(url: URL): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), webSearchTimeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Veloca-Agent-WebSearch/0.1'
+      },
+      redirect: 'follow',
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`WebSearch request failed with HTTP ${response.status}.`);
+    }
+
+    return await response.text();
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`WebSearch request exceeded timeout of ${webSearchTimeoutMs} ms.`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function collapseWhitespace(input: string): string {
+  return input.split(/\s+/).filter(Boolean).join(' ');
+}
+
+function decodeNumericHtmlEntity(value: string, radix: number): string {
+  const codePoint = Number.parseInt(value, radix);
+
+  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return '';
+  }
+
+  return String.fromCodePoint(codePoint);
+}
+
+function decodeHtmlEntities(input: string): string {
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    apos: "'",
+    gt: '>',
+    lt: '<',
+    nbsp: ' ',
+    quot: '"'
+  };
+
+  return input
+    .replace(/&#x([0-9a-f]+);/gi, (_, value: string) => decodeNumericHtmlEntity(value, 16))
+    .replace(/&#(\d+);/g, (_, value: string) => decodeNumericHtmlEntity(value, 10))
+    .replace(/&([a-z]+);/gi, (entity, name: string) => namedEntities[name.toLowerCase()] ?? entity);
+}
+
+function htmlToText(html: string): string {
+  return collapseWhitespace(
+    decodeHtmlEntities(
+      html
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+    )
+  );
+}
+
+function extractQuotedValue(input: string): { rest: string; value: string } | null {
+  const quote = input[0];
+
+  if (quote !== '"' && quote !== "'") {
+    return null;
+  }
+
+  const end = input.indexOf(quote, 1);
+
+  if (end < 0) {
+    return null;
+  }
+
+  return {
+    rest: input.slice(end + 1),
+    value: input.slice(1, end)
+  };
+}
+
+function htmlEntityDecodeUrl(url: string): string {
+  return decodeHtmlEntities(url);
+}
+
+function decodeDuckDuckGoRedirect(url: string): string | null {
+  const decodedUrl = htmlEntityDecodeUrl(url);
+  const joined = decodedUrl.startsWith('//')
+    ? `https:${decodedUrl}`
+    : decodedUrl.startsWith('/')
+      ? `https://duckduckgo.com${decodedUrl}`
+      : decodedUrl;
+
+  if (!joined.startsWith('http://') && !joined.startsWith('https://')) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(joined);
+
+    if ((parsed.pathname === '/l/' || parsed.pathname === '/l') && parsed.searchParams.has('uddg')) {
+      return htmlEntityDecodeUrl(parsed.searchParams.get('uddg') ?? joined);
+    }
+
+    return joined;
+  } catch {
+    return null;
+  }
+}
+
+function extractSearchHits(html: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  let remaining = html;
+
+  while (true) {
+    const anchorStart = remaining.indexOf('result__a');
+
+    if (anchorStart < 0) {
+      break;
+    }
+
+    const afterClass = remaining.slice(anchorStart);
+    const hrefIndex = afterClass.indexOf('href=');
+
+    if (hrefIndex < 0) {
+      remaining = afterClass.slice(1);
+      continue;
+    }
+
+    const quotedUrl = extractQuotedValue(afterClass.slice(hrefIndex + 5));
+
+    if (!quotedUrl) {
+      remaining = afterClass.slice(1);
+      continue;
+    }
+
+    const closeTagIndex = quotedUrl.rest.indexOf('>');
+
+    if (closeTagIndex < 0) {
+      remaining = afterClass.slice(1);
+      continue;
+    }
+
+    const afterTag = quotedUrl.rest.slice(closeTagIndex + 1);
+    const endAnchorIndex = afterTag.indexOf('</a>');
+
+    if (endAnchorIndex < 0) {
+      remaining = afterTag.slice(1);
+      continue;
+    }
+
+    const title = htmlToText(afterTag.slice(0, endAnchorIndex)).trim();
+    const decodedUrl = decodeDuckDuckGoRedirect(quotedUrl.value);
+
+    if (title && decodedUrl) {
+      hits.push({
+        title,
+        url: decodedUrl
+      });
+    }
+
+    remaining = afterTag.slice(endAnchorIndex + 4);
+  }
+
+  return hits;
+}
+
+function extractSearchHitsFromGenericLinks(html: string): SearchHit[] {
+  const hits: SearchHit[] = [];
+  let remaining = html;
+
+  while (true) {
+    const anchorStart = remaining.indexOf('<a');
+
+    if (anchorStart < 0) {
+      break;
+    }
+
+    const afterAnchor = remaining.slice(anchorStart);
+    const hrefIndex = afterAnchor.indexOf('href=');
+
+    if (hrefIndex < 0) {
+      remaining = afterAnchor.slice(2);
+      continue;
+    }
+
+    const quotedUrl = extractQuotedValue(afterAnchor.slice(hrefIndex + 5));
+
+    if (!quotedUrl) {
+      remaining = afterAnchor.slice(2);
+      continue;
+    }
+
+    const closeTagIndex = quotedUrl.rest.indexOf('>');
+
+    if (closeTagIndex < 0) {
+      remaining = afterAnchor.slice(2);
+      continue;
+    }
+
+    const afterTag = quotedUrl.rest.slice(closeTagIndex + 1);
+    const endAnchorIndex = afterTag.indexOf('</a>');
+
+    if (endAnchorIndex < 0) {
+      remaining = afterAnchor.slice(2);
+      continue;
+    }
+
+    const title = htmlToText(afterTag.slice(0, endAnchorIndex)).trim();
+    const decodedUrl = decodeDuckDuckGoRedirect(quotedUrl.value);
+
+    if (title && decodedUrl?.match(/^https?:\/\//i)) {
+      hits.push({
+        title,
+        url: decodedUrl
+      });
+    }
+
+    remaining = afterTag.slice(endAnchorIndex + 4);
+  }
+
+  return hits;
+}
+
+function normalizeDomainFilter(domain: string): string {
+  const trimmed = domain.trim();
+  let host = trimmed;
+
+  try {
+    host = new URL(trimmed).hostname;
+  } catch {
+    try {
+      host = new URL(`https://${trimmed}`).hostname;
+    } catch {
+      host = trimmed.split('/')[0] ?? trimmed;
+    }
+  }
+
+  return host.trim().replace(/^\.+|\.+$/g, '').toLowerCase();
+}
+
+function hostMatchesList(url: string, domains: string[]): boolean {
+  let host: string;
+
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  return domains.some((domain) => {
+    const normalized = normalizeDomainFilter(domain);
+
+    return Boolean(normalized) && (host === normalized || host.endsWith(`.${normalized}`));
+  });
+}
+
+function dedupeSearchHits(hits: SearchHit[]): SearchHit[] {
+  const seen = new Set<string>();
+
+  return hits.filter((hit) => {
+    if (seen.has(hit.url)) {
+      return false;
+    }
+
+    seen.add(hit.url);
+    return true;
+  });
+}
+
+async function runWebSearch(input: WebSearchInput): Promise<WebSearchOutput> {
+  const startedAt = Date.now();
+  const searchUrl = buildWebSearchUrl(input.query);
+  const html = await fetchWebSearchHtml(searchUrl);
+  let hits = extractSearchHits(html);
+
+  if (hits.length === 0) {
+    hits = extractSearchHitsFromGenericLinks(html);
+  }
+
+  if (input.allowedDomains?.length) {
+    hits = hits.filter((hit) => hostMatchesList(hit.url, input.allowedDomains ?? []));
+  }
+
+  if (input.blockedDomains?.length) {
+    hits = hits.filter((hit) => !hostMatchesList(hit.url, input.blockedDomains ?? []));
+  }
+
+  hits = dedupeSearchHits(hits).slice(0, webSearchMaxResults);
+
+  const summary =
+    hits.length === 0
+      ? `No web search results matched the query "${input.query}".`
+      : [
+          `Search results for "${input.query}". Include a Sources section in the final answer.`,
+          ...hits.map((hit) => `- [${hit.title}](${hit.url})`)
+        ].join('\n');
+
+  return {
+    durationSeconds: (Date.now() - startedAt) / 1000,
+    query: input.query,
+    results: [
+      summary,
+      {
+        content: hits,
+        tool_use_id: 'web_search_1'
+      }
+    ]
+  };
 }
 
 function splitTextLines(content: string): string[] {
@@ -4174,6 +4596,50 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'WebSearch',
+        description:
+          'Search the web for current information and return cited results. Use when the user enables Web Search or asks for current external information.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                query: {
+                  type: 'string',
+                  minLength: 2,
+                  description: 'The web search query.'
+                },
+                allowed_domains: {
+                  type: 'array',
+                  items: {
+                    type: 'string'
+                  },
+                  description:
+                    'Optional domain allowlist, such as ["openai.com", "docs.rs"]. Results outside these domains are removed.'
+                },
+                blocked_domains: {
+                  type: 'array',
+                  items: {
+                    type: 'string'
+                  },
+                  description:
+                    'Optional domain blocklist, such as ["example.com"]. Matching results are removed.'
+                }
+              },
+              required: ['query'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'REPL',
         description:
           'Execute a short Python, JavaScript/Node.js, or shell code snippet in a sandboxed subprocess inside the active filesystem workspace.',
@@ -4313,6 +4779,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
       editWorkspaceTextFile(context, normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll), hooks),
     write_file: (inputOrPath?: unknown, content?: unknown) =>
       writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
+    WebSearch: (inputOrQuery?: unknown, allowedDomains?: unknown, blockedDomains?: unknown) =>
+      runWebSearch(normalizeWebSearchToolInput(inputOrQuery, allowedDomains, blockedDomains)),
     REPL: (inputOrCode?: unknown, language?: unknown, timeoutMs?: unknown) =>
       runRepl(context, normalizeReplToolInput(inputOrCode, language, timeoutMs)),
     PowerShell: (inputOrCommand?: unknown, timeout?: unknown, description?: unknown, runInBackground?: unknown) =>
@@ -4400,6 +4868,9 @@ Use information in this priority order:
 - Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer \`edit_file\` over \`write_file\` for targeted changes. Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use \`WebSearch\` when the user enables Web Search or asks for current external information that is likely outside the workspace. Use \`allowed_domains\` or \`blocked_domains\` when the user asks to include or avoid specific sources.
+- Treat \`WebSearch\` results as source candidates, not as guaranteed truth. Cite the returned URLs in a Sources section when web results inform the answer.
+- Do not claim that you searched the web unless \`WebSearch\` returned a tool result for this request.
 - Use \`REPL\` for short, bounded Python, JavaScript/Node.js, or shell snippets when execution is useful for verification, calculation, or small transformations. It is filesystem-workspace-only, sandboxed, and network access is blocked.
 - Do not use \`REPL\` for long-running services, dependency installation, broad file edits, destructive operations, or tasks that should be handled by \`read_file\`, \`edit_file\`, \`write_file\`, or \`run_bash_command\`.
 - Do not claim that REPL code succeeded unless the tool result reports success. If the requested runtime is unavailable or unsupported, report that clearly.
@@ -4449,6 +4920,20 @@ function isDirectPowerShellCommandRequest(prompt: string): boolean {
   return /\b(powershell|pwsh)\b/i.test(normalizedPrompt);
 }
 
+function isDirectWebSearchRequest(prompt: string): boolean {
+  const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
+
+  if (!normalizedPrompt) {
+    return false;
+  }
+
+  return (
+    /\b(web search|search the web|search online|look up online)\b/i.test(normalizedPrompt) ||
+    /(?:联网|网络|网页|网上|互联网).{0,16}(?:搜索|查询|查找|查一下|检索)/.test(normalizedPrompt) ||
+    /(?:搜索|查询|查一下|检索).{0,16}(?:联网|网络|网页|网上|互联网)/.test(normalizedPrompt)
+  );
+}
+
 function isDirectReplExecutionRequest(prompt: string): boolean {
   const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
 
@@ -4490,8 +4975,18 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
     metadata.push(`<attachments>\n${attachmentList}\n</attachments>`);
   }
 
-  if (request.webSearch) {
-    metadata.push('用户开启了 Web Search 开关，但当前 Veloca 版本尚未接入实时网页搜索工具；不要声称已经联网搜索。');
+  if (request.webSearch || isDirectWebSearchRequest(prompt)) {
+    metadata.push(
+      [
+        '<tool-routing-hint>',
+        '- The user enabled Web Search or explicitly asked for web search.',
+        '- If current external information is useful, call `WebSearch` with arguments inside the required `input` object.',
+        '- Do not say that web search is unavailable before trying the tool.',
+        '- If web results inform the final answer, include a Sources section with returned URLs.',
+        '- If the tool is unavailable, blocked, or returns no useful results, report that clearly.',
+        '</tool-routing-hint>'
+      ].join('\n')
+    );
   }
 
   if (isDirectPowerShellCommandRequest(prompt)) {

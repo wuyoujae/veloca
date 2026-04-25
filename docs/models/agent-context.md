@@ -92,6 +92,9 @@ Use information in this priority order:
 - Use `edit_file` for precise replacements in existing text files. Provide an exact `old_string`, use `replace_all` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use `write_file` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer `edit_file` over `write_file` for targeted changes. Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use `WebSearch` when the user enables Web Search or asks for current external information that is likely outside the workspace. Use `allowed_domains` or `blocked_domains` when the user asks to include or avoid specific sources.
+- Treat `WebSearch` results as source candidates, not as guaranteed truth. Cite the returned URLs in a Sources section when web results inform the answer.
+- Do not claim that you searched the web unless `WebSearch` returned a tool result for this request.
 - Use `REPL` for short, bounded Python, JavaScript/Node.js, or shell snippets when execution is useful for verification, calculation, or small transformations. It is filesystem-workspace-only, sandboxed, and network access is blocked.
 - Do not use `REPL` for long-running services, dependency installation, broad file edits, destructive operations, or tasks that should be handled by `read_file`, `edit_file`, `write_file`, or `run_bash_command`.
 - Do not claim that REPL code succeeded unless the tool result reports success. If the requested runtime is unavailable or unsupported, report that clearly.
@@ -158,6 +161,7 @@ Use information in this priority order:
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
 - 后端已经暴露写入 tool `edit_file`，用于在当前活动工作区内精确替换已有文本文件内容。
 - 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
+- 后端已经暴露只读 tool `WebSearch`，用于执行网络搜索并返回带来源 URL 的结果。
 - 后端已经暴露受沙箱限制的 tool `REPL`，用于在当前文件系统工作区内运行短 Python、JavaScript/Node.js 或 Shell 代码片段。
 - 后端已经暴露受限制的 tool `PowerShell`，用于在当前文件系统工作区内运行前台 PowerShell 命令。
 - 后端已经暴露受沙箱限制的 tool `run_bash_command`，用于在当前文件系统工作区内运行前台 Bash 命令。
@@ -261,6 +265,25 @@ Use information in this priority order:
 
 写入成功后，后端会通过 `workspace:changed` IPC 事件广播最新 workspace snapshot。前端通过 `window.veloca.workspace.onChanged(...)` 订阅该事件并刷新文件树，因此 Agent 新建 filesystem 文件或 database 虚拟文件后，左侧 Workspace 会自动更新。
 
+## WebSearch Tool
+
+`WebSearch` 用于让 Agent 在用户开启 Web Search 或明确要求联网搜索时检索当前外部信息。它不读取本地工作区，也不修改任何文件。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `WebSearch` |
+| 参数 | `input: { query: string, allowed_domains?: string[], blocked_domains?: string[] }` |
+| 默认搜索端点 | `https://html.duckduckgo.com/html/` |
+| 可配置项 | `VELOCA_WEB_SEARCH_BASE_URL`，兼容读取 `CLAWD_WEB_SEARCH_BASE_URL`。 |
+| 返回内容 | `query`、`durationSeconds`、`results`；其中 `results` 包含一段摘要和 `tool_use_id: "web_search_1"` 的结构化结果列表。 |
+| 结果限制 | 最多返回 8 个去重后的结果，每个结果包含 `title` 和 `url`。 |
+
+`allowed_domains` 是域名白名单，`blocked_domains` 是域名黑名单。域名匹配会规范化大小写，并支持子域名匹配，例如 `docs.example.com` 会匹配 `example.com`。
+
+后端会优先解析 DuckDuckGo HTML 的 `result__a` 结构；如果没有命中，会退回到通用 `<a href="...">` 链接解析。搜索结果只作为候选来源，Agent 需要在最终回答里根据结果内容谨慎引用，并在使用 WebSearch 信息时提供 Sources。
+
+如果用户开启 Web Search 开关，后端会在本轮 user prompt 中追加 `<tool-routing-hint>`，提醒模型可调用 `WebSearch`。如果搜索请求失败、没有结果或被域名过滤为空，Agent 应直接说明工具结果，不应假装已经找到资料。
+
 ## REPL Tool
 
 `REPL` 用于让 Agent 在当前 `filesystem` 工作区内执行短代码片段。它支持 Python、JavaScript/Node.js 和 Shell，适合小范围验证、计算、格式转换或快速检查，不适合长时间运行的任务。
@@ -314,9 +337,7 @@ Shell 语言会复用 Bash tool 的危险命令拦截逻辑，例如后台命令
 
 ## 后续扩展
 
-- 继续设计 workspace tools，例如读取当前文件、读取邻近文件、搜索工作区内容。
-- 为数据库工作区提供独立读取工具，避免将 `veloca-db://...` 虚拟路径误用为本地路径。
 - 根据任务类型智能注入当前文件全文、当前标题段落、文档大纲或附近上下文。
 - 为写入类工具设计权限边界和用户确认机制，避免 Agent 在未确认时直接修改用户文档。
 - 为 Bash tool 设计显式网络授权、长任务管理和用户确认流。
-- 为附件解析、Web Search 和外部资料检索建立独立上下文层，避免和核心工作区上下文混淆。
+- 为附件解析、WebFetch 和更完整的外部资料阅读建立独立上下文层，避免和核心工作区上下文混淆。

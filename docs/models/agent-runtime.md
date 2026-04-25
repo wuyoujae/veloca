@@ -153,7 +153,7 @@ await veloca.InvokeAgent(input, {
 
 Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. Veloca-owned workspace tools therefore expose a single top-level `input` object and unwrap that object inside the backend adapter. This avoids bugs where the model emits valid JSON with fields in a different order, such as `{"description":"...","command":"pwd"}`, which would otherwise be passed as positional arguments incorrectly.
 
-Veloca currently exposes nine backend-owned workspace tools:
+Veloca currently exposes ten backend-owned tools:
 
 - `get_workspace_directory_tree`: read-only directory-tree inspection for the active workspace. It merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
 - `glob_search`: read-only filename search for the active workspace. It supports brace expansion, honors Veloca ignore rules, scopes searches to the active workspace, deduplicates results, sorts recent files first, and returns at most 100 file paths.
@@ -161,11 +161,12 @@ Veloca currently exposes nine backend-owned workspace tools:
 - `read_file`: read-only text-file access for the active workspace. It supports filesystem text files and database virtual files, enforces workspace boundaries, rejects binary or oversized files, and returns line-windowed content with `offset` and `limit`.
 - `edit_file`: targeted text replacement for existing files in the active workspace. It supports filesystem files and database virtual files, enforces workspace boundaries, requires an exact non-empty `old_string`, and returns the original file plus a structured patch.
 - `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
+- `WebSearch`: read-only web search for current external information. It searches a configurable HTML endpoint, parses cited results, supports allowed/blocked domain filters, deduplicates URLs, and returns at most 8 result links.
 - `REPL`: sandboxed short code execution for the active `filesystem` workspace. It supports Python, JavaScript/Node.js, and Shell snippets, detects available runtimes, blocks network access through macOS `sandbox-exec`, applies a timeout, and truncates each output stream at `16384` bytes.
 - `PowerShell`: foreground PowerShell execution for the active `filesystem` workspace. It detects `pwsh` or `powershell`, accepts workspace-scoped `cwd`, blocks background execution and dangerous commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 - `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 
-For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. For direct PowerShell requests that mention `PowerShell` or `pwsh`, Veloca adds a similar hint for the `PowerShell` tool. For direct short-code execution requests that mention `REPL` or ask to run Python/Node/Shell snippets, Veloca adds a hint for the `REPL` tool. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same tool call after the first tool result instead of producing the final answer.
+For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. For direct PowerShell requests that mention `PowerShell` or `pwsh`, Veloca adds a similar hint for the `PowerShell` tool. For direct short-code execution requests that mention `REPL` or ask to run Python/Node/Shell snippets, Veloca adds a hint for the `REPL` tool. When the UI Web Search toggle is enabled, or when the prompt explicitly asks for online/web search, Veloca adds a hint for `WebSearch`. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same tool call after the first tool result instead of producing the final answer.
 
 ### `glob_search` Tool
 
@@ -245,6 +246,25 @@ For database workspaces, `path` may be an existing `veloca-db://entry/...` file 
 Use `edit_file` instead of `write_file` for targeted replacements in existing files. The tool returns `type: "create"` when no previous file existed and `type: "update"` when existing content was replaced. `originalFile` is `null` for creates and the prior file content for updates. `structuredPatch` is a compact full-file patch envelope for UI or audit display; `gitDiff` is reserved and currently `null`.
 
 After a successful `write_file`, the backend emits a `workspace:changed` IPC event with a fresh workspace snapshot. The renderer subscribes through `window.veloca.workspace.onChanged(...)` and refreshes the file tree from that snapshot, so Agent-created filesystem files and database virtual files appear without requiring a manual reload.
+
+### `WebSearch` Tool
+
+`WebSearch` searches the web for current external information and returns cited result links. It is not scoped to the active workspace and does not read or write local files.
+
+| Field | Description |
+| --- | --- |
+| Tool name | `WebSearch` |
+| Parameters | `input: { query: string, allowed_domains?: string[], blocked_domains?: string[] }` |
+| Return value | `query`, `durationSeconds`, `results` |
+| Default endpoint | `https://html.duckduckgo.com/html/` |
+| Config | `VELOCA_WEB_SEARCH_BASE_URL`; `CLAWD_WEB_SEARCH_BASE_URL` is accepted for compatibility. |
+| Result limit | 8 deduplicated URLs |
+
+The backend builds the search URL by appending `q=<query>` to the configured endpoint. It fetches HTML with a `20000` ms timeout, parses DuckDuckGo `result__a` links first, then falls back to generic anchor extraction when needed.
+
+`allowed_domains` keeps only matching domains, and `blocked_domains` removes matching domains. Domain filters normalize scheme, casing, leading dots, and trailing slashes. Subdomains match their parent domain, so `docs.example.com` matches `example.com`.
+
+The result shape mirrors the reference implementation: `results` includes a commentary string and a structured block with `tool_use_id: "web_search_1"` plus `content: [{ title, url }]`. The system prompt instructs the Agent to include a Sources section when web results inform the answer and to avoid claiming web search occurred without a tool result.
 
 ### `REPL` Tool
 
@@ -348,6 +368,7 @@ VELOCA_AGENT_BASE_URL=https://openrouter.ai/api/v1
 VELOCA_AGENT_MODEL=google/gemini-3.1-flash-lite-preview
 VELOCA_AGENT_API_KEY=your-openrouter-api-key
 VELOCA_AGENT_CONTEXT_WINDOW=128000
+VELOCA_WEB_SEARCH_BASE_URL=https://html.duckduckgo.com/html/
 ```
 
 The first integrated backend path uses OpenRouter through the package's OpenAI-compatible provider. The renderer calls `window.veloca.agent.sendMessage(...)`; the Electron main process validates the request and calls `veloca.InvokeAgent` with a simple Veloca editor system prompt. Lite / Pro / Ultra are currently UI selections only and all resolve to `VELOCA_AGENT_MODEL` until separate model routing is added.
