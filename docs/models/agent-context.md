@@ -92,6 +92,9 @@ Use information in this priority order:
 - Use `edit_file` for precise replacements in existing text files. Provide an exact `old_string`, use `replace_all` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use `write_file` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer `edit_file` over `write_file` for targeted changes. Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use `REPL` for short, bounded Python, JavaScript/Node.js, or shell snippets when execution is useful for verification, calculation, or small transformations. It is filesystem-workspace-only, sandboxed, and network access is blocked.
+- Do not use `REPL` for long-running services, dependency installation, broad file edits, destructive operations, or tasks that should be handled by `read_file`, `edit_file`, `write_file`, or `run_bash_command`.
+- Do not claim that REPL code succeeded unless the tool result reports success. If the requested runtime is unavailable or unsupported, report that clearly.
 - Use `PowerShell` only when the user explicitly asks for PowerShell or when PowerShell-specific behavior is necessary. It is foreground-only, filesystem-workspace-only, and background execution is blocked.
 - For `PowerShell`, prefer the `cwd` argument over changing directories inside the command. Do not use dangerous, destructive, privileged, background, or network-dependent PowerShell commands.
 - Do not claim that a PowerShell command succeeded unless the tool result reports success. If `pwsh` or `powershell` is unavailable, report that clearly.
@@ -155,6 +158,7 @@ Use information in this priority order:
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
 - 后端已经暴露写入 tool `edit_file`，用于在当前活动工作区内精确替换已有文本文件内容。
 - 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
+- 后端已经暴露受沙箱限制的 tool `REPL`，用于在当前文件系统工作区内运行短 Python、JavaScript/Node.js 或 Shell 代码片段。
 - 后端已经暴露受限制的 tool `PowerShell`，用于在当前文件系统工作区内运行前台 PowerShell 命令。
 - 后端已经暴露受沙箱限制的 tool `run_bash_command`，用于在当前文件系统工作区内运行前台 Bash 命令。
 
@@ -256,6 +260,23 @@ Use information in this priority order:
 `write_file` 会完整替换目标文件内容，不是局部 patch 工具。更新已有文件前应优先使用 `read_file` 读取相关内容，避免覆盖用户未纳入上下文的编辑。返回的 `structuredPatch` 是用于审计或 UI 展示的全文件 patch envelope；当前不生成真实 `gitDiff`。
 
 写入成功后，后端会通过 `workspace:changed` IPC 事件广播最新 workspace snapshot。前端通过 `window.veloca.workspace.onChanged(...)` 订阅该事件并刷新文件树，因此 Agent 新建 filesystem 文件或 database 虚拟文件后，左侧 Workspace 会自动更新。
+
+## REPL Tool
+
+`REPL` 用于让 Agent 在当前 `filesystem` 工作区内执行短代码片段。它支持 Python、JavaScript/Node.js 和 Shell，适合小范围验证、计算、格式转换或快速检查，不适合长时间运行的任务。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `REPL` |
+| 参数 | `input: { code: string, language: string, timeout_ms?: number }` |
+| 支持语言 | `python` / `py`、`javascript` / `js` / `node`、`shell` / `sh` / `bash` |
+| 默认行为 | 在当前注册的 filesystem workspace root 中执行；`timeout_ms` 默认 `10000` ms，最大 `120000` ms。 |
+| 返回内容 | `ok`、`stdout`、`stderr`、`exitCode`、`language`、`runtimePath`、`interrupted`、`timedOut`、`blocked`、`cwd`、`durationMs`、`outputTruncated`、`sandboxStatus`。 |
+| 安全边界 | 仅支持 filesystem workspace；依赖 macOS `sandbox-exec`；网络访问被阻止；写入限制在当前 workspace 和 `.veloca/repl-sandbox/`；输出单流最多保留 `16384` bytes。 |
+
+第一版 `REPL` 会自动检测运行时：Python 优先 `python3` 再 `python`，JavaScript 使用 `node`，Shell 优先 `bash` 再 `sh`。如果运行时不存在、语言不支持、没有 filesystem workspace、代码为空、代码超过 `20000` 字符或 sandbox 不可用，工具会返回 `blocked: true`，不会执行代码。
+
+Shell 语言会复用 Bash tool 的危险命令拦截逻辑，例如后台命令、提权命令、父目录逃逸和明显 destructive 命令。Python 和 JavaScript 通过 OS sandbox 限制网络和工作区外写入；Agent 仍然不应使用 REPL 执行破坏性代码或替代正式文件工具。
 
 ## PowerShell Tool
 

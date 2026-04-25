@@ -89,6 +89,9 @@ const bashSandboxExecPath = '/usr/bin/sandbox-exec';
 const powerShellDefaultTimeoutMs = 10000;
 const powerShellMaxCommandLength = 2000;
 const powerShellMaxTimeoutMs = 120000;
+const replDefaultTimeoutMs = 10000;
+const replMaxCodeLength = 20000;
+const replMaxTimeoutMs = 120000;
 const maxGlobPatternExpansions = 64;
 const maxGlobPatternLength = 1000;
 const maxGlobSearchResults = 100;
@@ -190,6 +193,12 @@ interface PowerShellCommandInput {
   timeout?: number;
 }
 
+interface ReplInput {
+  code: string;
+  language: string;
+  timeoutMs?: number;
+}
+
 interface AgentToolEnvelopeInput {
   input?: unknown;
 }
@@ -244,6 +253,34 @@ interface PowerShellCommandOutput {
   stdout: string;
   timedOut: boolean;
   workspaceRootPath?: string;
+}
+
+interface ReplOutput {
+  blocked: boolean;
+  cwd: string;
+  durationMs: number;
+  error?: string;
+  exitCode: number | null;
+  interrupted: boolean;
+  language: string;
+  ok: boolean;
+  outputTruncated: boolean;
+  runtimePath?: string;
+  sandboxStatus: {
+    enabled: boolean;
+    filesystem: 'workspace-write';
+    network: 'blocked';
+  };
+  stderr: string;
+  stdout: string;
+  timedOut: boolean;
+  workspaceRootPath?: string;
+}
+
+interface ReplRuntime {
+  args: string[];
+  language: string;
+  program: string;
 }
 
 interface OutputBuffer {
@@ -779,6 +816,35 @@ function normalizePowerShellToolInput(first: unknown, second: unknown, third: un
   }
 
   return normalizePowerShellInput(first, undefined, second, third, fourth);
+}
+
+function normalizeReplInput(code: unknown, language: unknown, timeoutMs: unknown): ReplInput {
+  if (typeof code !== 'string') {
+    throw new Error('REPL code is required.');
+  }
+
+  if (typeof language !== 'string' || !language.trim()) {
+    throw new Error('REPL language is required.');
+  }
+
+  const parsedTimeout = normalizeOptionalTimeout(timeoutMs);
+  const normalizedTimeout = parsedTimeout === undefined ? undefined : Math.min(parsedTimeout, replMaxTimeoutMs);
+
+  return {
+    code,
+    language: language.trim(),
+    timeoutMs: normalizedTimeout
+  };
+}
+
+function normalizeReplToolInput(first: unknown, second: unknown, third: unknown): ReplInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeReplInput(input.code, input.language, input.timeout_ms ?? input.timeoutMs);
+  }
+
+  return normalizeReplInput(first, second, third);
 }
 
 function normalizeDirectoryTreeToolInput(first: unknown): string | undefined {
@@ -1497,6 +1563,177 @@ function executePowerShell(command: string, cwd: string, powerShellPath: string,
   });
 }
 
+function createReplOutput(values: Partial<ReplOutput> & Pick<ReplOutput, 'cwd' | 'language' | 'ok'>): ReplOutput {
+  return {
+    blocked: values.blocked ?? false,
+    cwd: values.cwd,
+    durationMs: values.durationMs ?? 0,
+    error: values.error,
+    exitCode: values.exitCode ?? null,
+    interrupted: values.interrupted ?? false,
+    language: values.language,
+    ok: values.ok,
+    outputTruncated: values.outputTruncated ?? false,
+    runtimePath: values.runtimePath,
+    sandboxStatus: values.sandboxStatus ?? {
+      enabled: false,
+      filesystem: 'workspace-write',
+      network: 'blocked'
+    },
+    stderr: values.stderr ?? '',
+    stdout: values.stdout ?? '',
+    timedOut: values.timedOut ?? false,
+    workspaceRootPath: values.workspaceRootPath
+  };
+}
+
+function detectFirstReplRuntime(commands: string[]): string | null {
+  for (const command of commands) {
+    const executablePath = findExecutableOnPath(command);
+
+    if (executablePath) {
+      return executablePath;
+    }
+  }
+
+  return null;
+}
+
+function resolveReplRuntime(language: string): ReplRuntime {
+  const normalizedLanguage = language.trim().toLowerCase();
+
+  if (normalizedLanguage === 'python' || normalizedLanguage === 'py') {
+    const program = detectFirstReplRuntime(['python3', 'python']);
+
+    if (!program) {
+      throw new Error('python runtime not found');
+    }
+
+    return {
+      args: ['-c'],
+      language: 'python',
+      program
+    };
+  }
+
+  if (normalizedLanguage === 'javascript' || normalizedLanguage === 'js' || normalizedLanguage === 'node') {
+    const program = detectFirstReplRuntime(['node']);
+
+    if (!program) {
+      throw new Error('node runtime not found');
+    }
+
+    return {
+      args: ['-e'],
+      language: 'javascript',
+      program
+    };
+  }
+
+  if (normalizedLanguage === 'sh' || normalizedLanguage === 'shell' || normalizedLanguage === 'bash') {
+    const program = detectFirstReplRuntime(['bash', 'sh']);
+
+    if (!program) {
+      throw new Error('shell runtime not found');
+    }
+
+    return {
+      args: ['-lc'],
+      language: 'shell',
+      program
+    };
+  }
+
+  throw new Error(`unsupported REPL language: ${normalizedLanguage || language}`);
+}
+
+function executeSandboxedRepl(
+  input: ReplInput,
+  runtime: ReplRuntime,
+  cwd: string,
+  workspaceRootPath: string,
+  timeoutMs: number
+): Promise<CapturedOutput & {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+}> {
+  const sandboxRootPath = join(workspaceRootPath, '.veloca', 'repl-sandbox');
+  const sandboxHomePath = join(sandboxRootPath, 'home');
+  const sandboxTmpPath = join(sandboxRootPath, 'tmp');
+  const sandboxProfile = buildBashSandboxProfile(workspaceRootPath, sandboxRootPath);
+  const stdoutBuffer = createOutputBuffer();
+  const stderrBuffer = createOutputBuffer();
+
+  mkdirSync(sandboxHomePath, { recursive: true });
+  mkdirSync(sandboxTmpPath, { recursive: true });
+
+  return new Promise((resolveCommand, rejectCommand) => {
+    const started = spawn(bashSandboxExecPath, ['-p', sandboxProfile, runtime.program, ...runtime.args, input.code], {
+      cwd,
+      detached: true,
+      env: {
+        ...process.env,
+        HOME: sandboxHomePath,
+        TMPDIR: sandboxTmpPath
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+
+      if (started.pid) {
+        try {
+          process.kill(-started.pid, 'SIGTERM');
+        } catch {
+          started.kill('SIGTERM');
+        }
+
+        killTimer = setTimeout(() => {
+          if (!started.killed && started.pid) {
+            try {
+              process.kill(-started.pid, 'SIGKILL');
+            } catch {
+              started.kill('SIGKILL');
+            }
+          }
+        }, 1000);
+      }
+    }, timeoutMs);
+
+    started.stdout?.on('data', (chunk: Buffer) => appendOutput(stdoutBuffer, chunk));
+    started.stderr?.on('data', (chunk: Buffer) => appendOutput(stderrBuffer, chunk));
+    started.on('error', (error) => {
+      clearTimeout(timeoutTimer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+
+      rejectCommand(error);
+    });
+    started.on('close', (exitCode, signal) => {
+      clearTimeout(timeoutTimer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+
+      resolveCommand({
+        exitCode,
+        signal,
+        stderr: readOutputBuffer(stderrBuffer),
+        stdout: readOutputBuffer(stdoutBuffer),
+        timedOut,
+        truncated: stdoutBuffer.truncated || stderrBuffer.truncated
+      });
+    });
+  });
+}
+
 function splitTextLines(content: string): string[] {
   const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
@@ -2087,6 +2324,154 @@ function writeWorkspaceTextFile(
   hooks?.onWorkspaceChanged?.(getWorkspaceSnapshot());
 
   return output;
+}
+
+async function runRepl(context: AgentRuntimeContext | undefined, input: ReplInput): Promise<ReplOutput> {
+  const startedAt = Date.now();
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const language = input.language.trim();
+
+  if (workspaceType !== 'filesystem') {
+    return createReplOutput({
+      blocked: true,
+      cwd: 'No filesystem workspace',
+      error: 'REPL execution is only available in filesystem workspaces.',
+      language,
+      ok: false,
+      workspaceRootPath
+    });
+  }
+
+  if (!workspaceRootPath) {
+    return createReplOutput({
+      blocked: true,
+      cwd: 'No active workspace',
+      error: 'No active workspace root is available for REPL execution.',
+      language,
+      ok: false
+    });
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  if (!workspaceRoot) {
+    return createReplOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: 'The active workspace root is not registered in Veloca.',
+      language,
+      ok: false,
+      workspaceRootPath
+    });
+  }
+
+  const registeredWorkspaceRootPath = workspaceRoot.rootPath;
+
+  if (!input.code.trim()) {
+    return createReplOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: 'REPL code must not be empty.',
+      language,
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  if (input.code.length > replMaxCodeLength) {
+    return createReplOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: `REPL code cannot exceed ${replMaxCodeLength} characters.`,
+      language,
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  if (!existsSync(bashSandboxExecPath)) {
+    return createReplOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: 'REPL sandbox is unavailable on this machine.',
+      language,
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  let runtime: ReplRuntime;
+
+  try {
+    runtime = resolveReplRuntime(language);
+  } catch (error) {
+    return createReplOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: getErrorMessage(error),
+      language,
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  if (runtime.language === 'shell') {
+    const blockedReason = getBlockedBashReason(input.code, registeredWorkspaceRootPath);
+
+    if (blockedReason) {
+      return createReplOutput({
+        blocked: true,
+        cwd: registeredWorkspaceRootPath,
+        error: blockedReason,
+        language: runtime.language,
+        ok: false,
+        runtimePath: runtime.program,
+        workspaceRootPath: registeredWorkspaceRootPath
+      });
+    }
+  }
+
+  const cwd = realpathSync(registeredWorkspaceRootPath);
+  const timeoutMs = input.timeoutMs ?? replDefaultTimeoutMs;
+
+  try {
+    const result = await executeSandboxedRepl(input, runtime, cwd, registeredWorkspaceRootPath, timeoutMs);
+    const stderr = result.timedOut
+      ? `${result.stderr}${result.stderr ? '\n' : ''}REPL execution exceeded timeout of ${timeoutMs} ms`
+      : result.stderr;
+
+    return createReplOutput({
+      cwd,
+      durationMs: Date.now() - startedAt,
+      exitCode: result.exitCode,
+      interrupted: result.timedOut || result.signal !== null,
+      language: runtime.language,
+      ok: result.exitCode === 0 && !result.timedOut,
+      outputTruncated: result.truncated,
+      runtimePath: runtime.program,
+      sandboxStatus: {
+        enabled: true,
+        filesystem: 'workspace-write',
+        network: 'blocked'
+      },
+      stderr,
+      stdout: result.stdout,
+      timedOut: result.timedOut,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  } catch (error) {
+    return createReplOutput({
+      cwd,
+      durationMs: Date.now() - startedAt,
+      error: getErrorMessage(error),
+      language: runtime.language,
+      ok: false,
+      runtimePath: runtime.program,
+      stderr: getErrorMessage(error),
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
 }
 
 async function runPowerShellCommand(
@@ -3789,6 +4174,44 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'REPL',
+        description:
+          'Execute a short Python, JavaScript/Node.js, or shell code snippet in a sandboxed subprocess inside the active filesystem workspace.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                code: {
+                  type: 'string',
+                  description: 'Code to execute. Keep it short and use it for verification, calculation, or small transformations.'
+                },
+                language: {
+                  type: 'string',
+                  enum: ['python', 'py', 'javascript', 'js', 'node', 'shell', 'sh', 'bash'],
+                  description: 'Runtime language. Supported values: python/py, javascript/js/node, shell/sh/bash.'
+                },
+                timeout_ms: {
+                  type: 'number',
+                  minimum: 1,
+                  description:
+                    'Optional timeout in milliseconds. Defaults to 10000 and cannot exceed 120000.'
+                }
+              },
+              required: ['code', 'language'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'PowerShell',
         description:
           'Execute a foreground PowerShell command inside the active filesystem workspace. Veloca detects pwsh or powershell from PATH, blocks dangerous commands, and does not support background execution.',
@@ -3890,6 +4313,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
       editWorkspaceTextFile(context, normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll), hooks),
     write_file: (inputOrPath?: unknown, content?: unknown) =>
       writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
+    REPL: (inputOrCode?: unknown, language?: unknown, timeoutMs?: unknown) =>
+      runRepl(context, normalizeReplToolInput(inputOrCode, language, timeoutMs)),
     PowerShell: (inputOrCommand?: unknown, timeout?: unknown, description?: unknown, runInBackground?: unknown) =>
       runPowerShellCommand(context, normalizePowerShellToolInput(inputOrCommand, timeout, description, runInBackground)),
     run_bash_command: (inputOrCommand?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
@@ -3975,6 +4400,9 @@ Use information in this priority order:
 - Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer \`edit_file\` over \`write_file\` for targeted changes. Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use \`REPL\` for short, bounded Python, JavaScript/Node.js, or shell snippets when execution is useful for verification, calculation, or small transformations. It is filesystem-workspace-only, sandboxed, and network access is blocked.
+- Do not use \`REPL\` for long-running services, dependency installation, broad file edits, destructive operations, or tasks that should be handled by \`read_file\`, \`edit_file\`, \`write_file\`, or \`run_bash_command\`.
+- Do not claim that REPL code succeeded unless the tool result reports success. If the requested runtime is unavailable or unsupported, report that clearly.
 - Use \`PowerShell\` only when the user explicitly asks for PowerShell or when PowerShell-specific behavior is necessary. It is foreground-only, filesystem-workspace-only, and background execution is blocked.
 - For \`PowerShell\`, prefer the \`cwd\` argument over changing directories inside the command. Do not use dangerous, destructive, privileged, background, or network-dependent PowerShell commands.
 - Do not claim that a PowerShell command succeeded unless the tool result reports success. If \`pwsh\` or \`powershell\` is unavailable, report that clearly.
@@ -4021,6 +4449,20 @@ function isDirectPowerShellCommandRequest(prompt: string): boolean {
   return /\b(powershell|pwsh)\b/i.test(normalizedPrompt);
 }
 
+function isDirectReplExecutionRequest(prompt: string): boolean {
+  const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
+
+  if (!normalizedPrompt) {
+    return false;
+  }
+
+  return (
+    /\bREPL\b/i.test(normalizedPrompt) ||
+    /(?:运行|执行|跑一下|跑下|run|execute).{0,40}\b(python|py|javascript|js|node)\b/i.test(normalizedPrompt) ||
+    /\b(python|py|javascript|js|node)\b.{0,40}(?:运行|执行|跑一下|跑下|run|execute)/i.test(normalizedPrompt)
+  );
+}
+
 function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): string {
   const metadata: string[] = [];
   const context = request.context;
@@ -4059,6 +4501,17 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
         '- The user is explicitly asking for PowerShell.',
         '- If the command is safe and the active workspace is a filesystem workspace, call `PowerShell` with arguments inside the required `input` object.',
         '- Do not say that you cannot execute PowerShell before trying the tool for a safe command.',
+        '- If the tool is unavailable, blocked, or returns an error, report that tool result clearly.',
+        '</tool-routing-hint>'
+      ].join('\n')
+    );
+  } else if (isDirectReplExecutionRequest(prompt)) {
+    metadata.push(
+      [
+        '<tool-routing-hint>',
+        '- The user is explicitly asking to execute a short code snippet.',
+        '- If the code is safe and the active workspace is a filesystem workspace, call `REPL` with arguments inside the required `input` object.',
+        '- Do not say that you cannot execute code before trying the tool for a safe, bounded snippet.',
         '- If the tool is unavailable, blocked, or returns an error, report that tool result clearly.',
         '</tool-routing-hint>'
       ].join('\n')
