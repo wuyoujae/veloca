@@ -92,6 +92,9 @@ Use information in this priority order:
 - Use `edit_file` for precise replacements in existing text files. Provide an exact `old_string`, use `replace_all` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use `write_file` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer `edit_file` over `write_file` for targeted changes. Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use `PowerShell` only when the user explicitly asks for PowerShell or when PowerShell-specific behavior is necessary. It is foreground-only, filesystem-workspace-only, and background execution is blocked.
+- For `PowerShell`, prefer the `cwd` argument over changing directories inside the command. Do not use dangerous, destructive, privileged, background, or network-dependent PowerShell commands.
+- Do not claim that a PowerShell command succeeded unless the tool result reports success. If `pwsh` or `powershell` is unavailable, report that clearly.
 - Use `run_bash_command` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
 - When the user explicitly asks you to run a safe shell command, call `run_bash_command` instead of saying you cannot execute commands.
 - For `run_bash_command`, prefer the `cwd` argument over putting `cd ...` in the command. `cwd` may be workspace-relative or an absolute path inside the active workspace.
@@ -152,6 +155,7 @@ Use information in this priority order:
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
 - 后端已经暴露写入 tool `edit_file`，用于在当前活动工作区内精确替换已有文本文件内容。
 - 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
+- 后端已经暴露受限制的 tool `PowerShell`，用于在当前文件系统工作区内运行前台 PowerShell 命令。
 - 后端已经暴露受沙箱限制的 tool `run_bash_command`，用于在当前文件系统工作区内运行前台 Bash 命令。
 
 ## Workspace Directory Tree Tool
@@ -252,6 +256,22 @@ Use information in this priority order:
 `write_file` 会完整替换目标文件内容，不是局部 patch 工具。更新已有文件前应优先使用 `read_file` 读取相关内容，避免覆盖用户未纳入上下文的编辑。返回的 `structuredPatch` 是用于审计或 UI 展示的全文件 patch envelope；当前不生成真实 `gitDiff`。
 
 写入成功后，后端会通过 `workspace:changed` IPC 事件广播最新 workspace snapshot。前端通过 `window.veloca.workspace.onChanged(...)` 订阅该事件并刷新文件树，因此 Agent 新建 filesystem 文件或 database 虚拟文件后，左侧 Workspace 会自动更新。
+
+## PowerShell Tool
+
+`PowerShell` 用于让 Agent 在当前 `filesystem` 工作区内执行必要的前台 PowerShell 命令。它会自动检测 `pwsh` 或 `powershell` 可执行文件，优先使用 `pwsh`。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `PowerShell` |
+| 参数 | `input: { command: string, cwd?: string, timeout?: number, description?: string, run_in_background?: boolean }` |
+| 默认行为 | `cwd` 可为相对当前工作区根目录的路径，也可为当前工作区内的绝对路径；`timeout` 默认 `10000` ms，最大 `120000` ms。 |
+| 返回内容 | `ok`、`stdout`、`stderr`、`exitCode`、`interrupted`、`timedOut`、`blocked`、`cwd`、`durationMs`、`outputTruncated`、`powershellPath`、`sandboxStatus`、`noOutputExpected`。 |
+| 安全边界 | 仅支持 filesystem workspace；不支持后台执行；不提供 OS 级网络沙箱；会拦截明显危险、提权、后台、网络和 destructive 命令。 |
+
+第一版 `PowerShell` 是为了满足 PowerShell 特定命令场景，不是 `run_bash_command` 的替代品。普通 shell 检查优先使用 `run_bash_command`；只有用户明确要求 PowerShell 或确实需要 PowerShell 语义时才使用 `PowerShell`。
+
+如果用户传入 `run_in_background: true`，工具会返回 `blocked: true`，不会执行命令。由于当前没有跨平台 PowerShell 沙箱，返回值中的 `sandboxStatus.enabled` 为 `false`，Agent 不应声称 PowerShell 命令具备 Bash tool 相同的 OS 级禁网沙箱。
 
 ## Bash Command Tool
 

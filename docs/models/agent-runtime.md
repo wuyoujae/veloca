@@ -153,7 +153,7 @@ await veloca.InvokeAgent(input, {
 
 Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. Veloca-owned workspace tools therefore expose a single top-level `input` object and unwrap that object inside the backend adapter. This avoids bugs where the model emits valid JSON with fields in a different order, such as `{"description":"...","command":"pwd"}`, which would otherwise be passed as positional arguments incorrectly.
 
-Veloca currently exposes seven backend-owned workspace tools:
+Veloca currently exposes eight backend-owned workspace tools:
 
 - `get_workspace_directory_tree`: read-only directory-tree inspection for the active workspace. It merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
 - `glob_search`: read-only filename search for the active workspace. It supports brace expansion, honors Veloca ignore rules, scopes searches to the active workspace, deduplicates results, sorts recent files first, and returns at most 100 file paths.
@@ -161,9 +161,10 @@ Veloca currently exposes seven backend-owned workspace tools:
 - `read_file`: read-only text-file access for the active workspace. It supports filesystem text files and database virtual files, enforces workspace boundaries, rejects binary or oversized files, and returns line-windowed content with `offset` and `limit`.
 - `edit_file`: targeted text replacement for existing files in the active workspace. It supports filesystem files and database virtual files, enforces workspace boundaries, requires an exact non-empty `old_string`, and returns the original file plus a structured patch.
 - `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
+- `PowerShell`: foreground PowerShell execution for the active `filesystem` workspace. It detects `pwsh` or `powershell`, accepts workspace-scoped `cwd`, blocks background execution and dangerous commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 - `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 
-For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same bash tool call after the first tool result instead of producing the final answer.
+For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. For direct PowerShell requests that mention `PowerShell` or `pwsh`, Veloca adds a similar hint for the `PowerShell` tool. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same tool call after the first tool result instead of producing the final answer.
 
 ### `glob_search` Tool
 
@@ -243,6 +244,26 @@ For database workspaces, `path` may be an existing `veloca-db://entry/...` file 
 Use `edit_file` instead of `write_file` for targeted replacements in existing files. The tool returns `type: "create"` when no previous file existed and `type: "update"` when existing content was replaced. `originalFile` is `null` for creates and the prior file content for updates. `structuredPatch` is a compact full-file patch envelope for UI or audit display; `gitDiff` is reserved and currently `null`.
 
 After a successful `write_file`, the backend emits a `workspace:changed` IPC event with a fresh workspace snapshot. The renderer subscribes through `window.veloca.workspace.onChanged(...)` and refreshes the file tree from that snapshot, so Agent-created filesystem files and database virtual files appear without requiring a manual reload.
+
+### `PowerShell` Tool
+
+`PowerShell` executes foreground PowerShell commands inside the current active filesystem workspace. It is intended for PowerShell-specific workflows and should not replace `run_bash_command` for normal shell inspection on macOS/Linux.
+
+| Field | Description |
+| --- | --- |
+| Tool name | `PowerShell` |
+| Parameters | `input: { command: string, cwd?: string, timeout?: number, description?: string, run_in_background?: boolean }` |
+| Return value | `ok`, `stdout`, `stderr`, `exitCode`, `interrupted`, `timedOut`, `blocked`, `cwd`, `durationMs`, `outputTruncated`, `powershellPath`, `sandboxStatus`, `noOutputExpected` |
+| Default timeout | `10000` ms |
+| Maximum timeout | `120000` ms |
+
+The backend detects `pwsh` first and falls back to `powershell` when available in `PATH`. If neither executable exists, the tool returns a structured blocked result instead of throwing an unhandled runtime error.
+
+`cwd` is resolved inside the registered active workspace root. The command itself is executed through `-NoProfile -NonInteractive -Command`. Output is captured from stdout/stderr and truncated per stream at `16384` bytes.
+
+Veloca intentionally does not support `run_in_background` for this first version. If the model or user requests background execution, the tool returns `blocked: true` and does not spawn a process.
+
+Unlike `run_bash_command`, the first PowerShell implementation does not provide an OS-level network sandbox. The output includes `sandboxStatus.enabled: false` and `network: "not-enforced"`. To reduce risk, the backend blocks obvious background, privileged, destructive, network, service-management, disk-management, home-directory, parent-directory, and external absolute-path command patterns before execution.
 
 ## Persistence
 

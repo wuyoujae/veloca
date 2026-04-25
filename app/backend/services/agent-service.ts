@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { veloca } from 'otherone-agent';
 import { getDatabase } from '../database/connection';
 import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
@@ -86,6 +86,9 @@ const bashMaxCommandLength = 2000;
 const bashMaxOutputBytes = 16384;
 const bashMaxTimeoutMs = 120000;
 const bashSandboxExecPath = '/usr/bin/sandbox-exec';
+const powerShellDefaultTimeoutMs = 10000;
+const powerShellMaxCommandLength = 2000;
+const powerShellMaxTimeoutMs = 120000;
 const maxGlobPatternExpansions = 64;
 const maxGlobPatternLength = 1000;
 const maxGlobSearchResults = 100;
@@ -179,6 +182,14 @@ interface BashCommandInput {
   timeout?: number;
 }
 
+interface PowerShellCommandInput {
+  command: string;
+  cwd?: string;
+  description?: string;
+  runInBackground: boolean;
+  timeout?: number;
+}
+
 interface AgentToolEnvelopeInput {
   input?: unknown;
 }
@@ -208,6 +219,31 @@ interface CapturedOutput {
   stderr: string;
   stdout: string;
   truncated: boolean;
+}
+
+interface PowerShellCommandOutput {
+  backgroundTaskId: null;
+  backgroundedByUser: false;
+  blocked: boolean;
+  cwd: string;
+  durationMs: number;
+  error?: string;
+  exitCode: number | null;
+  interrupted: boolean;
+  noOutputExpected: boolean;
+  ok: boolean;
+  outputTruncated: boolean;
+  powershellPath?: string;
+  runInBackground: boolean;
+  sandboxStatus: {
+    enabled: false;
+    filesystem: 'workspace-write';
+    network: 'not-enforced';
+  };
+  stderr: string;
+  stdout: string;
+  timedOut: boolean;
+  workspaceRootPath?: string;
 }
 
 interface OutputBuffer {
@@ -703,6 +739,48 @@ function normalizeBashToolInput(first: unknown, second: unknown, third: unknown,
   return normalizeBashInput(first, second, third, fourth);
 }
 
+function normalizePowerShellInput(
+  command: unknown,
+  cwd: unknown,
+  timeout: unknown,
+  description: unknown,
+  runInBackground: unknown
+): PowerShellCommandInput {
+  const normalizedCommand = typeof command === 'string' ? command : '';
+  const normalizedCwd = normalizeOptionalString(cwd);
+  const parsedTimeout = normalizeOptionalTimeout(timeout);
+  const normalizedTimeout = parsedTimeout === undefined ? undefined : Math.min(parsedTimeout, powerShellMaxTimeoutMs);
+  const normalizedDescription = normalizeOptionalString(description);
+
+  if (runInBackground !== undefined && runInBackground !== null && typeof runInBackground !== 'boolean') {
+    throw new Error('PowerShell run_in_background must be a boolean.');
+  }
+
+  return {
+    command: normalizedCommand,
+    cwd: normalizedCwd,
+    description: normalizedDescription,
+    runInBackground: runInBackground === true,
+    timeout: normalizedTimeout
+  };
+}
+
+function normalizePowerShellToolInput(first: unknown, second: unknown, third: unknown, fourth: unknown): PowerShellCommandInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizePowerShellInput(
+      input.command,
+      input.cwd,
+      input.timeout,
+      input.description,
+      input.run_in_background ?? input.runInBackground
+    );
+  }
+
+  return normalizePowerShellInput(first, undefined, second, third, fourth);
+}
+
 function normalizeDirectoryTreeToolInput(first: unknown): string | undefined {
   const input = unwrapToolInput(first);
   const velocaignore = isRecord(input) ? input.velocaignore : input;
@@ -1164,6 +1242,223 @@ function executeSandboxedBash(command: string, cwd: string, workspaceRootPath: s
           if (!started.killed && started.pid) {
             try {
               process.kill(-started.pid, 'SIGKILL');
+            } catch {
+              started.kill('SIGKILL');
+            }
+          }
+        }, 1000);
+      }
+    }, timeoutMs);
+
+    started.stdout?.on('data', (chunk: Buffer) => appendOutput(stdoutBuffer, chunk));
+    started.stderr?.on('data', (chunk: Buffer) => appendOutput(stderrBuffer, chunk));
+    started.on('error', (error) => {
+      clearTimeout(timeoutTimer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+
+      rejectCommand(error);
+    });
+    started.on('close', (exitCode, signal) => {
+      clearTimeout(timeoutTimer);
+
+      if (killTimer) {
+        clearTimeout(killTimer);
+      }
+
+      resolveCommand({
+        exitCode,
+        signal,
+        stderr: readOutputBuffer(stderrBuffer),
+        stdout: readOutputBuffer(stdoutBuffer),
+        timedOut,
+        truncated: stdoutBuffer.truncated || stderrBuffer.truncated
+      });
+    });
+  });
+}
+
+function createPowerShellOutput(
+  values: Partial<PowerShellCommandOutput> & Pick<PowerShellCommandOutput, 'cwd' | 'ok'>
+): PowerShellCommandOutput {
+  const stdout = values.stdout ?? '';
+  const stderr = values.stderr ?? '';
+
+  return {
+    backgroundTaskId: null,
+    backgroundedByUser: false,
+    blocked: values.blocked ?? false,
+    cwd: values.cwd,
+    durationMs: values.durationMs ?? 0,
+    error: values.error,
+    exitCode: values.exitCode ?? null,
+    interrupted: values.interrupted ?? false,
+    noOutputExpected: values.noOutputExpected ?? (stdout.trim().length === 0 && stderr.trim().length === 0),
+    ok: values.ok,
+    outputTruncated: values.outputTruncated ?? false,
+    powershellPath: values.powershellPath,
+    runInBackground: values.runInBackground ?? false,
+    sandboxStatus: {
+      enabled: false,
+      filesystem: 'workspace-write',
+      network: 'not-enforced'
+    },
+    stderr,
+    stdout,
+    timedOut: values.timedOut ?? false,
+    workspaceRootPath: values.workspaceRootPath
+  };
+}
+
+function findExecutableOnPath(command: string): string | null {
+  const pathEntries = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  const extensions =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)
+      : [''];
+
+  for (const pathEntry of pathEntries) {
+    for (const extension of extensions) {
+      const candidateName =
+        extension && command.toLowerCase().endsWith(extension.toLowerCase()) ? command : `${command}${extension}`;
+      const candidatePath = join(pathEntry, candidateName);
+
+      if (!existsSync(candidatePath)) {
+        continue;
+      }
+
+      try {
+        const stats = statSync(candidatePath);
+
+        if (stats.isFile()) {
+          return candidatePath;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return null;
+}
+
+function detectPowerShellShell(): string | null {
+  return findExecutableOnPath('pwsh') ?? findExecutableOnPath('powershell');
+}
+
+function resolvePowerShellCwd(workspaceRootPath: string, cwd: string | undefined): string {
+  const rootPath = realpathSync(workspaceRootPath);
+  const candidatePath = cwd ? (isAbsolute(cwd) ? cwd : resolve(rootPath, cwd)) : rootPath;
+
+  if (!existsSync(candidatePath)) {
+    throw new Error('PowerShell cwd does not exist inside the active workspace.');
+  }
+
+  const resolvedCwd = realpathSync(candidatePath);
+  const stats = statSync(resolvedCwd);
+
+  if (!stats.isDirectory()) {
+    throw new Error('PowerShell cwd must be a directory.');
+  }
+
+  if (!isSameOrChildPath(rootPath, resolvedCwd)) {
+    throw new Error('PowerShell cwd is outside the active workspace root.');
+  }
+
+  return resolvedCwd;
+}
+
+function getCommandForPowerShellSafetyCheck(command: string, workspaceRootPath: string): string {
+  const workspacePathPattern = new RegExp(`${escapeRegex(workspaceRootPath)}(?=$|[\\s"';&|)]|[\\\\/])`, 'g');
+
+  return command.replace(workspacePathPattern, '.');
+}
+
+function getBlockedPowerShellReason(command: string, workspaceRootPath: string): string | null {
+  const checkedCommand = getCommandForPowerShellSafetyCheck(command, workspaceRootPath);
+  const checks: Array<[RegExp, string]> = [
+    [/(^|[;|\n]\s*)Start-Job(\s|$)/i, 'PowerShell background jobs are not supported.'],
+    [/(^|[;|\n]\s*)Start-ThreadJob(\s|$)/i, 'PowerShell background jobs are not supported.'],
+    [/(^|[\s"'=])-AsJob(\s|$)/i, 'PowerShell background jobs are not supported.'],
+    [/(^|[;|\n]\s*)Start-Process\b/i, 'Start-Process is blocked for Agent PowerShell commands.'],
+    [/\b-Verb\s+RunAs\b/i, 'Elevated PowerShell execution is blocked.'],
+    [/(^|[;|\n]\s*)Set-ExecutionPolicy\b/i, 'Set-ExecutionPolicy is blocked.'],
+    [/(^|[;|\n]\s*)Remove-Item\b/i, 'Remove-Item is blocked.'],
+    [/(^|[;|\n]\s*)(rm|del|erase|rmdir|rd)\b/i, 'Destructive PowerShell aliases are blocked.'],
+    [/(^|[;|\n]\s*)Clear-Content\b/i, 'Clear-Content is blocked.'],
+    [/(^|[;|\n]\s*)Format-Volume\b/i, 'Format-Volume is blocked.'],
+    [/(^|[;|\n]\s*)Clear-Disk\b/i, 'Clear-Disk is blocked.'],
+    [/(^|[;|\n]\s*)Remove-Partition\b/i, 'Remove-Partition is blocked.'],
+    [/(^|[;|\n]\s*)diskpart(\.exe)?\b/i, 'diskpart is blocked.'],
+    [/(^|[;|\n]\s*)Stop-Computer\b/i, 'Stop-Computer is blocked.'],
+    [/(^|[;|\n]\s*)Restart-Computer\b/i, 'Restart-Computer is blocked.'],
+    [/(^|[;|\n]\s*)shutdown(\.exe)?\b/i, 'shutdown is blocked.'],
+    [/(^|[;|\n]\s*)New-Service\b/i, 'Service creation is blocked.'],
+    [/(^|[;|\n]\s*)sc(\.exe)?\s+/i, 'Service control commands are blocked.'],
+    [/(^|[;|\n]\s*)net\s+user\b/i, 'User-management commands are blocked.'],
+    [/(^|[;|\n]\s*)Invoke-WebRequest\b/i, 'Network PowerShell commands are blocked.'],
+    [/(^|[;|\n]\s*)Invoke-RestMethod\b/i, 'Network PowerShell commands are blocked.'],
+    [/(^|[;|\n]\s*)Start-BitsTransfer\b/i, 'Network transfer commands are blocked.'],
+    [/(^|[;|\n]\s*)(iwr|irm|curl|wget)\b/i, 'Network PowerShell aliases are blocked.'],
+    [/(^|[\s"'=])~(?=[\\/]|[\s"'`]|$)/, 'Home-directory paths are blocked; use workspace-relative paths.'],
+    [/(^|[\s"'=])\.\.(?=[\\/]|[\s"'`]|$)/, 'Parent-directory traversal is blocked; use workspace-relative paths.'],
+    [/(^|[\s"'=])([A-Za-z]:\\|\\\\)/, 'Absolute Windows paths are blocked; use cwd and workspace-relative paths.'],
+    [
+      /(^|[\s"'=])\/(?!dev\/null(?=\s|$)|bin\/|usr\/bin\/|usr\/local\/bin\/|opt\/homebrew\/bin\/)/,
+      'Absolute local paths outside the workspace command model are blocked; use cwd and relative paths.'
+    ]
+  ];
+
+  for (const [pattern, reason] of checks) {
+    if (pattern.test(checkedCommand)) {
+      return reason;
+    }
+  }
+
+  return null;
+}
+
+function executePowerShell(command: string, cwd: string, powerShellPath: string, timeoutMs: number): Promise<CapturedOutput & {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+}> {
+  const stdoutBuffer = createOutputBuffer();
+  const stderrBuffer = createOutputBuffer();
+
+  return new Promise((resolveCommand, rejectCommand) => {
+    const started = spawn(powerShellPath, ['-NoProfile', '-NonInteractive', '-Command', command], {
+      cwd,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+
+      if (started.pid) {
+        try {
+          if (process.platform !== 'win32') {
+            process.kill(-started.pid, 'SIGTERM');
+          } else {
+            started.kill('SIGTERM');
+          }
+        } catch {
+          started.kill('SIGTERM');
+        }
+
+        killTimer = setTimeout(() => {
+          if (!started.killed && started.pid) {
+            try {
+              if (process.platform !== 'win32') {
+                process.kill(-started.pid, 'SIGKILL');
+              } else {
+                started.kill('SIGKILL');
+              }
             } catch {
               started.kill('SIGKILL');
             }
@@ -1792,6 +2087,155 @@ function writeWorkspaceTextFile(
   hooks?.onWorkspaceChanged?.(getWorkspaceSnapshot());
 
   return output;
+}
+
+async function runPowerShellCommand(
+  context: AgentRuntimeContext | undefined,
+  input: PowerShellCommandInput
+): Promise<PowerShellCommandOutput> {
+  const startedAt = Date.now();
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const command = input.command.trim();
+
+  if (workspaceType !== 'filesystem') {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: 'No filesystem workspace',
+      error: 'PowerShell commands are only available in filesystem workspaces.',
+      ok: false,
+      runInBackground: input.runInBackground,
+      workspaceRootPath
+    });
+  }
+
+  if (!workspaceRootPath) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: 'No active workspace',
+      error: 'No active workspace root is available for PowerShell execution.',
+      ok: false,
+      runInBackground: input.runInBackground
+    });
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  if (!workspaceRoot) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: workspaceRootPath,
+      error: 'The active workspace root is not registered in Veloca.',
+      ok: false,
+      runInBackground: input.runInBackground,
+      workspaceRootPath
+    });
+  }
+
+  const registeredWorkspaceRootPath = workspaceRoot.rootPath;
+
+  if (input.runInBackground) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: 'PowerShell background execution is not supported in Veloca Agent.',
+      ok: false,
+      runInBackground: true,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  if (!command) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: 'PowerShell command cannot be empty.',
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  if (command.length > powerShellMaxCommandLength) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: `PowerShell command cannot exceed ${powerShellMaxCommandLength} characters.`,
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  const blockedReason = getBlockedPowerShellReason(command, registeredWorkspaceRootPath);
+
+  if (blockedReason) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: blockedReason,
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  const powerShellPath = detectPowerShellShell();
+
+  if (!powerShellPath) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: 'PowerShell executable not found (expected `pwsh` or `powershell` in PATH).',
+      ok: false,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  let cwd: string;
+
+  try {
+    cwd = resolvePowerShellCwd(registeredWorkspaceRootPath, input.cwd);
+  } catch (error) {
+    return createPowerShellOutput({
+      blocked: true,
+      cwd: registeredWorkspaceRootPath,
+      error: getErrorMessage(error),
+      ok: false,
+      powershellPath: powerShellPath,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
+
+  const timeoutMs = input.timeout ?? powerShellDefaultTimeoutMs;
+
+  try {
+    const result = await executePowerShell(command, cwd, powerShellPath, timeoutMs);
+    const stderr = result.timedOut
+      ? `${result.stderr}${result.stderr ? '\n' : ''}Command exceeded timeout of ${timeoutMs} ms`
+      : result.stderr;
+
+    return createPowerShellOutput({
+      cwd,
+      durationMs: Date.now() - startedAt,
+      exitCode: result.exitCode,
+      interrupted: result.timedOut || result.signal !== null,
+      ok: result.exitCode === 0 && !result.timedOut,
+      outputTruncated: result.truncated,
+      powershellPath: powerShellPath,
+      stderr,
+      stdout: result.stdout,
+      timedOut: result.timedOut,
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  } catch (error) {
+    return createPowerShellOutput({
+      cwd,
+      durationMs: Date.now() - startedAt,
+      error: getErrorMessage(error),
+      ok: false,
+      powershellPath: powerShellPath,
+      stderr: getErrorMessage(error),
+      workspaceRootPath: registeredWorkspaceRootPath
+    });
+  }
 }
 
 async function runBashCommand(context: AgentRuntimeContext | undefined, input: BashCommandInput): Promise<BashCommandOutput> {
@@ -3345,6 +3789,53 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'PowerShell',
+        description:
+          'Execute a foreground PowerShell command inside the active filesystem workspace. Veloca detects pwsh or powershell from PATH, blocks dangerous commands, and does not support background execution.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                command: {
+                  type: 'string',
+                  description: 'The PowerShell command to run. Keep it short and explain the purpose before using it.'
+                },
+                cwd: {
+                  type: 'string',
+                  description:
+                    'Optional working directory. May be relative to the active workspace root or an absolute path inside the active workspace.'
+                },
+                timeout: {
+                  type: 'number',
+                  minimum: 1,
+                  description:
+                    'Optional timeout in milliseconds. Defaults to 10000 and cannot exceed 120000.'
+                },
+                description: {
+                  type: 'string',
+                  description: 'Optional short description of why this command is needed.'
+                },
+                run_in_background: {
+                  type: 'boolean',
+                  description:
+                    'Optional. Background execution is accepted for compatibility but blocked by Veloca Agent.'
+                }
+              },
+              required: ['command'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'run_bash_command',
         description:
           'Run a foreground bash command inside the active filesystem workspace. The command is sandboxed, network access is blocked, and writes are limited to the workspace.',
@@ -3399,6 +3890,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
       editWorkspaceTextFile(context, normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll), hooks),
     write_file: (inputOrPath?: unknown, content?: unknown) =>
       writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
+    PowerShell: (inputOrCommand?: unknown, timeout?: unknown, description?: unknown, runInBackground?: unknown) =>
+      runPowerShellCommand(context, normalizePowerShellToolInput(inputOrCommand, timeout, description, runInBackground)),
     run_bash_command: (inputOrCommand?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
       runBashCommand(context, normalizeBashToolInput(inputOrCommand, cwd, timeout, description))
   };
@@ -3482,6 +3975,9 @@ Use information in this priority order:
 - Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer \`edit_file\` over \`write_file\` for targeted changes. Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use \`PowerShell\` only when the user explicitly asks for PowerShell or when PowerShell-specific behavior is necessary. It is foreground-only, filesystem-workspace-only, and background execution is blocked.
+- For \`PowerShell\`, prefer the \`cwd\` argument over changing directories inside the command. Do not use dangerous, destructive, privileged, background, or network-dependent PowerShell commands.
+- Do not claim that a PowerShell command succeeded unless the tool result reports success. If \`pwsh\` or \`powershell\` is unavailable, report that clearly.
 - Use \`run_bash_command\` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
 - When the user explicitly asks you to run a safe shell command, call \`run_bash_command\` instead of saying you cannot execute commands.
 - For \`run_bash_command\`, prefer the \`cwd\` argument over putting \`cd ...\` in the command. \`cwd\` may be workspace-relative or an absolute path inside the active workspace.
@@ -3515,6 +4011,16 @@ function isDirectBashCommandRequest(prompt: string): boolean {
   );
 }
 
+function isDirectPowerShellCommandRequest(prompt: string): boolean {
+  const normalizedPrompt = prompt.trim().replace(/\s+/g, ' ');
+
+  if (!normalizedPrompt) {
+    return false;
+  }
+
+  return /\b(powershell|pwsh)\b/i.test(normalizedPrompt);
+}
+
 function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): string {
   const metadata: string[] = [];
   const context = request.context;
@@ -3546,7 +4052,18 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
     metadata.push('用户开启了 Web Search 开关，但当前 Veloca 版本尚未接入实时网页搜索工具；不要声称已经联网搜索。');
   }
 
-  if (isDirectBashCommandRequest(prompt)) {
+  if (isDirectPowerShellCommandRequest(prompt)) {
+    metadata.push(
+      [
+        '<tool-routing-hint>',
+        '- The user is explicitly asking for PowerShell.',
+        '- If the command is safe and the active workspace is a filesystem workspace, call `PowerShell` with arguments inside the required `input` object.',
+        '- Do not say that you cannot execute PowerShell before trying the tool for a safe command.',
+        '- If the tool is unavailable, blocked, or returns an error, report that tool result clearly.',
+        '</tool-routing-hint>'
+      ].join('\n')
+    );
+  } else if (isDirectBashCommandRequest(prompt)) {
     metadata.push(
       [
         '<tool-routing-hint>',
