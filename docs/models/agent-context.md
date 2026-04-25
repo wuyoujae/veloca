@@ -86,6 +86,8 @@ Use information in this priority order:
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
 - Use `read_file` to read a known text file from the active workspace. Use `offset` and `limit` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
+- Use `write_file` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
+- Before using `write_file`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
 - Use `run_bash_command` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
 - For `run_bash_command`, prefer the `cwd` argument over putting `cd ...` in the command. `cwd` may be workspace-relative or an absolute path inside the active workspace.
 - Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.
@@ -141,6 +143,7 @@ Use information in this priority order:
 - 如果没有活动文件或工作区，后端会使用 `No active file`、`No active workspace` 和 `none`，避免 prompt 中残留未替换变量。
 - 后端已经暴露只读 tool `get_workspace_directory_tree`，用于获取当前活动工作区目录树。
 - 后端已经暴露只读 tool `read_file`，用于读取当前活动工作区内的文本文件。
+- 后端已经暴露写入 tool `write_file`，用于在当前活动工作区内创建或完整覆盖文本文件。
 - 后端已经暴露受沙箱限制的 tool `run_bash_command`，用于在当前文件系统工作区内运行前台 Bash 命令。
 
 ## Workspace Directory Tree Tool
@@ -176,6 +179,21 @@ Use information in this priority order:
 | 安全边界 | 最大 `10MB`；filesystem 读取前检查前 `8192` bytes 是否包含 NUL byte；拒绝二进制文件和 workspace 逃逸路径。 |
 
 `offset` 是 0-based 行偏移，`limit` 是最多读取的行数。读取超出文件尾部时返回空内容，并将 `startLine` 设置为 `totalLines + 1`。
+
+## Write File Tool
+
+`write_file` 用于在当前 active workspace 内写入完整文本文件。它是写入类 tool，只有当用户明确要求创建、覆盖或保存文件时才应调用；普通草稿、改写建议或解释类输出应直接回复用户，不应写入磁盘或数据库。
+
+| Field | Description |
+| --- | --- |
+| Tool name | `write_file` |
+| 参数 | `path: string`、`content: string` |
+| 返回内容 | `type: "create" | "update"`、`filePath`、`content`、`structuredPatch`、`originalFile`、`gitDiff: null`、`workspaceType`。 |
+| filesystem 路径 | 支持工作区相对路径或当前工作区内的绝对路径；缺失父目录会自动创建；真实路径解析后必须仍在 active workspace root 内。 |
+| database 路径 | 支持已有 `veloca-db://entry/...` 文件路径或数据库工作区内的相对路径；相对路径会创建缺失虚拟 folder，并创建或更新最终文件 entry。 |
+| 安全边界 | 最大 `10MB`；拒绝 workspace 逃逸路径、filesystem symlink 逃逸、目录目标、无效数据库路径段和非 active workspace 条目。 |
+
+`write_file` 会完整替换目标文件内容，不是局部 patch 工具。更新已有文件前应优先使用 `read_file` 读取相关内容，避免覆盖用户未纳入上下文的编辑。返回的 `structuredPatch` 是用于审计或 UI 展示的全文件 patch envelope；当前不生成真实 `gitDiff`。
 
 ## Bash Command Tool
 

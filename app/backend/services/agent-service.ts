@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { veloca } from 'otherone-agent';
+import { getDatabase } from '../database/connection';
 import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceTreeNode } from './workspace-service';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
@@ -85,6 +87,7 @@ const maxDirectoryTreeDepth = 8;
 const maxDirectoryTreeNodes = 1200;
 const maxPromptLength = 20000;
 const maxReadFileBytes = 10 * 1024 * 1024;
+const maxWriteFileBytes = 10 * 1024 * 1024;
 const readFileBinarySampleBytes = 8192;
 let envLoaded = false;
 
@@ -198,6 +201,39 @@ interface ReadFileOutput {
     totalLines: number;
   };
   type: 'text';
+}
+
+interface StructuredPatchHunk {
+  lines: string[];
+  newLines: number;
+  newStart: number;
+  oldLines: number;
+  oldStart: number;
+}
+
+interface WriteFileInput {
+  content: string;
+  path: string;
+}
+
+interface WriteFileOutput {
+  content: string;
+  filePath: string;
+  gitDiff: null;
+  originalFile: string | null;
+  structuredPatch: StructuredPatchHunk[];
+  type: 'create' | 'update';
+  workspaceType: 'database' | 'filesystem';
+}
+
+interface AgentDatabaseEntryRow {
+  content: string;
+  created_at: number;
+  entry_type: number;
+  id: string;
+  name: string;
+  parent_id: string | null;
+  workspace_id: string;
 }
 
 function loadLocalEnv(): void {
@@ -394,10 +430,61 @@ function normalizeReadFileInput(path: unknown, offset: unknown, limit: unknown):
   };
 }
 
+function normalizeWriteFileInput(path: unknown, content: unknown): WriteFileInput {
+  if (typeof path !== 'string' || !path.trim()) {
+    throw new Error('write_file path is required.');
+  }
+
+  if (typeof content !== 'string') {
+    throw new Error('write_file content is required.');
+  }
+
+  const normalizedPath = path.trim();
+
+  if (normalizedPath.includes('\0')) {
+    throw new Error('write_file path cannot contain NUL bytes.');
+  }
+
+  return {
+    content,
+    path: normalizedPath
+  };
+}
+
+function ensureWritableTextContentSize(content: string): void {
+  const byteLength = Buffer.byteLength(content, 'utf8');
+
+  if (byteLength > maxWriteFileBytes) {
+    throw new Error(`content is too large (${byteLength} bytes, max ${maxWriteFileBytes} bytes)`);
+  }
+}
+
 function isSameOrChildPath(parentPath: string, childPath: string): boolean {
   const relativePath = relative(parentPath, childPath);
 
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
+}
+
+function createStructuredPatch(original: string, updated: string): StructuredPatchHunk[] {
+  if (original === updated) {
+    return [];
+  }
+
+  const originalLines = splitTextLines(original);
+  const updatedLines = splitTextLines(updated);
+
+  return [
+    {
+      lines: [
+        ...originalLines.map((line) => `-${line}`),
+        ...updatedLines.map((line) => `+${line}`)
+      ],
+      newLines: updatedLines.length,
+      newStart: 1,
+      oldLines: originalLines.length,
+      oldStart: 1
+    }
+  ];
 }
 
 function resolveBashCwd(workspaceRootPath: string, cwd: string | undefined): string {
@@ -766,6 +853,292 @@ function readWorkspaceTextFile(context: AgentRuntimeContext | undefined, input: 
   }
 
   throw new Error('read_file requires an active workspace.');
+}
+
+function findExistingAncestor(path: string, stopPath: string): string {
+  let currentPath = path;
+
+  while (!existsSync(currentPath)) {
+    const parentPath = dirname(currentPath);
+
+    if (parentPath === currentPath || !isSameOrChildPath(stopPath, parentPath)) {
+      throw new Error('write_file parent path is outside the active workspace root.');
+    }
+
+    currentPath = parentPath;
+  }
+
+  return currentPath;
+}
+
+function resolveFilesystemWritePath(workspaceRootPath: string, path: string): string {
+  const canonicalRoot = realpathSync(workspaceRootPath);
+  const candidatePath = isAbsolute(path) ? resolve(path) : resolve(canonicalRoot, path);
+
+  if (!isSameOrChildPath(canonicalRoot, candidatePath)) {
+    throw new Error(`path ${candidatePath} escapes workspace boundary ${canonicalRoot}`);
+  }
+
+  if (existsSync(candidatePath)) {
+    const resolvedPath = realpathSync(candidatePath);
+    const stats = statSync(resolvedPath);
+
+    if (!isSameOrChildPath(canonicalRoot, resolvedPath)) {
+      throw new Error(`path ${resolvedPath} escapes workspace boundary ${canonicalRoot}`);
+    }
+
+    if (!stats.isFile()) {
+      throw new Error('write_file path must point to a file.');
+    }
+
+    return resolvedPath;
+  }
+
+  const parentPath = dirname(candidatePath);
+  const ancestorPath = findExistingAncestor(parentPath, canonicalRoot);
+  const resolvedAncestorPath = realpathSync(ancestorPath);
+  const ancestorStats = statSync(resolvedAncestorPath);
+
+  if (!isSameOrChildPath(canonicalRoot, resolvedAncestorPath)) {
+    throw new Error(`path ${resolvedAncestorPath} escapes workspace boundary ${canonicalRoot}`);
+  }
+
+  if (!ancestorStats.isDirectory()) {
+    throw new Error('write_file parent path must be a directory.');
+  }
+
+  mkdirSync(parentPath, { recursive: true });
+
+  const resolvedParentPath = realpathSync(parentPath);
+
+  if (!isSameOrChildPath(canonicalRoot, resolvedParentPath)) {
+    throw new Error(`path ${resolvedParentPath} escapes workspace boundary ${canonicalRoot}`);
+  }
+
+  return candidatePath;
+}
+
+function createWriteFileOutput(
+  filePath: string,
+  content: string,
+  originalFile: string | null,
+  workspaceType: 'database' | 'filesystem'
+): WriteFileOutput {
+  return {
+    content,
+    filePath,
+    gitDiff: null,
+    originalFile,
+    structuredPatch: createStructuredPatch(originalFile ?? '', content),
+    type: originalFile === null ? 'create' : 'update',
+    workspaceType
+  };
+}
+
+function writeFilesystemTextFile(workspaceRootPath: string, input: WriteFileInput): WriteFileOutput {
+  const filePath = resolveFilesystemWritePath(workspaceRootPath, input.path);
+  const originalFile = existsSync(filePath) ? readFileSync(filePath, 'utf8') : null;
+
+  writeFileSync(filePath, input.content, 'utf8');
+
+  return createWriteFileOutput(filePath, input.content, originalFile, 'filesystem');
+}
+
+function getDatabaseEntryPath(entryId: string): string {
+  return `veloca-db://entry/${entryId}`;
+}
+
+function getDatabaseEntryId(filePath: string): string {
+  if (!filePath.startsWith('veloca-db://entry/')) {
+    throw new Error('Invalid database entry path.');
+  }
+
+  const entryId = filePath.replace('veloca-db://entry/', '').trim();
+
+  if (!entryId) {
+    throw new Error('Invalid database entry path.');
+  }
+
+  return entryId;
+}
+
+function getAgentDatabaseEntry(entryId: string): AgentDatabaseEntryRow {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE id = ? AND status = 0
+      `
+    )
+    .get(entryId) as AgentDatabaseEntryRow | undefined;
+
+  if (!row) {
+    throw new Error('Database entry not found.');
+  }
+
+  return row;
+}
+
+function findAgentDatabaseEntry(
+  workspaceId: string,
+  parentId: string | null,
+  name: string
+): AgentDatabaseEntryRow | undefined {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE workspace_id = ? AND parent_id IS ? AND name = ? AND status = 0
+      ORDER BY created_at ASC
+      LIMIT 1
+      `
+    )
+    .get(workspaceId, parentId, name) as AgentDatabaseEntryRow | undefined;
+}
+
+function validateDatabaseWriteSegments(path: string): string[] {
+  if (path.startsWith('veloca-db://')) {
+    throw new Error('write_file database paths must use veloca-db://entry/... or a workspace-relative path.');
+  }
+
+  if (path.startsWith('/')) {
+    throw new Error('write_file database relative paths cannot start with /.');
+  }
+
+  const segments = path.split('/');
+
+  if (segments.length === 0) {
+    throw new Error('write_file database path is required.');
+  }
+
+  for (const segment of segments) {
+    if (!segment || segment === '.' || segment === '..' || segment.includes('\\') || segment.includes('\0')) {
+      throw new Error('write_file database path contains an invalid segment.');
+    }
+  }
+
+  return segments;
+}
+
+function createAgentDatabaseEntry(
+  workspaceId: string,
+  parentId: string | null,
+  name: string,
+  entryType: 0 | 1,
+  content: string
+): AgentDatabaseEntryRow {
+  const now = Date.now();
+  const id = randomUUID();
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO virtual_workspace_entries
+        (id, workspace_id, parent_id, entry_type, name, content, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)
+      `
+    )
+    .run(id, workspaceId, parentId, entryType, name, content, now, now);
+
+  return {
+    content,
+    created_at: now,
+    entry_type: entryType,
+    id,
+    name,
+    parent_id: parentId,
+    workspace_id: workspaceId
+  };
+}
+
+function updateAgentDatabaseFile(entryId: string, content: string): void {
+  getDatabase()
+    .prepare('UPDATE virtual_workspace_entries SET content = ?, updated_at = ? WHERE id = ? AND status = 0')
+    .run(content, Date.now(), entryId);
+}
+
+function writeDatabaseEntryFile(rootNode: WorkspaceTreeNode, path: string, content: string): WriteFileOutput {
+  const entry = getAgentDatabaseEntry(getDatabaseEntryId(path));
+
+  if (entry.workspace_id !== rootNode.workspaceFolderId) {
+    throw new Error('Database file is not inside the active workspace.');
+  }
+
+  if (entry.entry_type !== 1) {
+    throw new Error('write_file path must point to a database file.');
+  }
+
+  const originalFile = entry.content;
+  updateAgentDatabaseFile(entry.id, content);
+
+  return createWriteFileOutput(getDatabaseEntryPath(entry.id), content, originalFile, 'database');
+}
+
+function writeDatabaseRelativeFile(rootNode: WorkspaceTreeNode, path: string, content: string): WriteFileOutput {
+  const workspaceId = rootNode.workspaceFolderId;
+  const segments = validateDatabaseWriteSegments(path);
+  const fileName = segments[segments.length - 1];
+  let parentId: string | null = null;
+
+  for (const folderName of segments.slice(0, -1)) {
+    const existingFolder = findAgentDatabaseEntry(workspaceId, parentId, folderName);
+
+    if (existingFolder && existingFolder.entry_type !== 0) {
+      throw new Error('write_file database path crosses an existing file.');
+    }
+
+    const folder: AgentDatabaseEntryRow =
+      existingFolder ?? createAgentDatabaseEntry(workspaceId, parentId, folderName, 0, '');
+    parentId = folder.id;
+  }
+
+  const existingFile = findAgentDatabaseEntry(workspaceId, parentId, fileName);
+
+  if (existingFile && existingFile.entry_type !== 1) {
+    throw new Error('write_file path must point to a database file.');
+  }
+
+  if (existingFile) {
+    updateAgentDatabaseFile(existingFile.id, content);
+
+    return createWriteFileOutput(getDatabaseEntryPath(existingFile.id), content, existingFile.content, 'database');
+  }
+
+  const createdFile = createAgentDatabaseEntry(workspaceId, parentId, fileName, 1, content);
+
+  return createWriteFileOutput(getDatabaseEntryPath(createdFile.id), content, null, 'database');
+}
+
+function writeDatabaseTextFile(rootNode: WorkspaceTreeNode, input: WriteFileInput): WriteFileOutput {
+  if (input.path.startsWith('veloca-db://entry/')) {
+    return writeDatabaseEntryFile(rootNode, input.path, input.content);
+  }
+
+  return writeDatabaseRelativeFile(rootNode, input.path, input.content);
+}
+
+function writeWorkspaceTextFile(context: AgentRuntimeContext | undefined, input: WriteFileInput): WriteFileOutput {
+  const workspaceType = getWorkspaceType(context);
+  const workspaceRootPath = context?.workspaceRootPath?.trim();
+  const workspaceRoot = resolveWorkspaceRoot(workspaceRootPath, workspaceType);
+
+  ensureWritableTextContentSize(input.content);
+
+  if (!workspaceRootPath || !workspaceRoot) {
+    throw new Error('No active workspace root is available for file writing.');
+  }
+
+  if (workspaceType === 'filesystem') {
+    return writeFilesystemTextFile(workspaceRoot.rootPath, input);
+  }
+
+  if (workspaceType === 'database') {
+    return writeDatabaseTextFile(workspaceRoot.node, input);
+  }
+
+  throw new Error('write_file requires an active workspace.');
 }
 
 async function runBashCommand(context: AgentRuntimeContext | undefined, input: BashCommandInput): Promise<BashCommandOutput> {
@@ -1255,6 +1628,30 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'write_file',
+        description:
+          'Write a text file in the active Veloca workspace. Supports filesystem files and database workspace virtual files. Use only when the user clearly wants to create or replace a file.',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description:
+                'File path to write. Filesystem paths may be workspace-relative or absolute within the active workspace. Database paths may be veloca-db://entry/... for existing files or workspace-relative for create/update.'
+            },
+            content: {
+              type: 'string',
+              description: 'Complete text content to write to the file. The full file will be replaced.'
+            }
+          },
+          required: ['path', 'content'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'run_bash_command',
         description:
           'Run a foreground bash command inside the active filesystem workspace. The command is sandboxed, network access is blocked, and writes are limited to the workspace.',
@@ -1293,6 +1690,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext) {
       getWorkspaceDirectoryTree(context, typeof velocaignore === 'string' ? velocaignore : undefined),
     read_file: (path?: unknown, offset?: unknown, limit?: unknown) =>
       readWorkspaceTextFile(context, normalizeReadFileInput(path, offset, limit)),
+    write_file: (path?: unknown, content?: unknown) =>
+      writeWorkspaceTextFile(context, normalizeWriteFileInput(path, content)),
     run_bash_command: (command?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
       runBashCommand(context, normalizeBashInput(command, cwd, timeout, description))
   };
@@ -1370,6 +1769,8 @@ Use information in this priority order:
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
 - Use \`read_file\` to read a known text file from the active workspace. Use \`offset\` and \`limit\` when reading large files or when you only need a specific section.
 - Do not claim that you read an entire file when you only read a line window.
+- Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
+- Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
 - Use \`run_bash_command\` only when a shell command is necessary to inspect, verify, build, or make a workspace-local change.
 - For \`run_bash_command\`, prefer the \`cwd\` argument over putting \`cd ...\` in the command. \`cwd\` may be workspace-relative or an absolute path inside the active workspace.
 - Before running a bash command, briefly state why the command is needed. Prefer read-only inspection commands before write commands.

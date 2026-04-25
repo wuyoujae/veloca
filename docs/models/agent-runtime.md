@@ -153,11 +153,29 @@ await veloca.InvokeAgent(input, {
 
 Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. For Veloca-owned tools, define argument schemas with stable property order, or wrap the library behind an adapter that converts arguments into a named object before calling product code.
 
-Veloca currently exposes two backend-owned workspace tools:
+Veloca currently exposes four backend-owned workspace tools:
 
 - `get_workspace_directory_tree`: read-only directory-tree inspection for the active workspace. It merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
 - `read_file`: read-only text-file access for the active workspace. It supports filesystem text files and database virtual files, enforces workspace boundaries, rejects binary or oversized files, and returns line-windowed content with `offset` and `limit`.
+- `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
 - `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
+
+### `write_file` Tool
+
+`write_file` writes complete text content to a single file in the current active workspace. It is intentionally scoped to the workspace passed through the Agent runtime context and does not accept an arbitrary root path.
+
+| Field | Description |
+| --- | --- |
+| Tool name | `write_file` |
+| Parameters | `path: string`, `content: string` |
+| Return value | `type`, `filePath`, `content`, `structuredPatch`, `originalFile`, `gitDiff`, `workspaceType` |
+| Size limit | `10MB` by UTF-8 byte length |
+
+For filesystem workspaces, `path` may be workspace-relative or an absolute path under the registered active workspace root. Missing parent directories are created automatically. Existing targets must be regular files, and real path checks reject workspace escapes and symlink escapes.
+
+For database workspaces, `path` may be an existing `veloca-db://entry/...` file path or a workspace-relative virtual path. Relative paths create missing virtual folders and then create or update the final file entry. Database path segments reject empty values, `.`, `..`, backslashes, NUL bytes, and root escapes.
+
+The tool returns `type: "create"` when no previous file existed and `type: "update"` when existing content was replaced. `originalFile` is `null` for creates and the prior file content for updates. `structuredPatch` is a compact full-file patch envelope for UI or audit display; `gitDiff` is reserved and currently `null`.
 
 ## Persistence
 
