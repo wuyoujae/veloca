@@ -4452,7 +4452,11 @@ function WorkspaceContextMenu({
       className="context-menu"
       style={{ left: menu.x, top: menu.y }}
       onClick={(event) => event.stopPropagation()}
-      onContextMenu={(event) => event.preventDefault()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
     >
       {isFolder && (
         <>

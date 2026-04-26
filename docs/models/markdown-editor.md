@@ -72,6 +72,10 @@ flowchart TD
 - 文件树点击某个 Markdown 文件时，采用“打开/聚焦”策略：
   - 如果该文件已在 `openTabs` 中，直接激活或创建它对应的单文件组合，并恢复该标签的 `draftContent`；
   - 否则读取文件后新增 `openTabs` 内容项，并新增单文件组合。
+- 文件树右键菜单通过 portal 渲染在页面根部：
+  - 菜单项点击前会先触发浏览器 `mousedown`，因此菜单容器必须阻止内部 `mousedown` 冒泡，避免全局关闭监听在 `click` 之前卸载菜单；
+  - 文件夹节点菜单支持新建文件、新建文件夹、粘贴、打开/定位、复制路径，以及非工作区根节点的复制、剪切、复制副本、重命名和删除；
+  - 新建条目时先展开目标文件夹，创建成功后刷新 workspace snapshot，并进入 inline rename 状态。
 - 由 `openTabs: OpenEditorTab[]`、`tabGroups: string[][]` 与 `activeTabPath: string | null` 统一管理当前打开集合、顶部选择栏组合和当前激活文件。
 - `activeFile` 不再作为独立状态维护，始终由 `activeTabPath` 在 `openTabs` 中派生。
 - `openTabs` 中每个文件只保存一份内容状态；同一个文件可以出现在多个 `tabGroups` 组合里。
