@@ -8,26 +8,37 @@ import {
   type KeyboardEvent
 } from 'react';
 import {
+  AlertCircle,
   ArrowDown,
   ArrowUp,
   AudioLines,
   Check,
+  CheckCircle2,
   ChevronDown,
   Copy,
   File,
   FileCode,
+  FilePenLine,
   FileText,
+  FolderTree,
   Globe,
   Hexagon,
   History,
   Image as ImageIcon,
+  Link2,
+  Loader2,
   Mic,
   Paperclip,
   Pencil,
+  Play,
   Plus,
+  Save,
+  Search,
+  SearchCode,
   Sparkles,
   Square,
   Table2,
+  Terminal,
   Undo2,
   X,
   Zap,
@@ -55,6 +66,9 @@ type AgentModelId = 'lite' | 'pro' | 'ultra';
 type AgentAttachmentStatus = 'uploading' | 'parsing' | 'recording' | 'ready';
 type AgentMessageStatus = 'pending' | 'complete' | 'error';
 type AgentPopover = 'model' | 'plus' | 'session' | null;
+type AgentToolCallStatus = 'running' | 'success' | 'error';
+type AgentInteractionStatus = 'open' | 'resolved';
+type AgentInteractionKind = 'confirm' | 'input';
 
 interface AgentAttachment {
   id: string;
@@ -67,10 +81,34 @@ interface AgentConversation {
   answer: string;
   attachments: AgentAttachment[];
   id: string;
+  interactionItems?: AgentInteractionItem[];
   model: AgentModelId;
   prompt: string;
   status: AgentMessageStatus;
+  toolCalls?: AgentToolCallMessage[];
   webSearch: boolean;
+}
+
+interface AgentToolCallMessage {
+  action: string;
+  detail?: string;
+  icon: string;
+  id: string;
+  openable: boolean;
+  status: AgentToolCallStatus;
+  summary?: string;
+}
+
+interface AgentInteractionItem {
+  accent?: 'blue' | 'purple';
+  description: string;
+  icon: string;
+  id: string;
+  kind: AgentInteractionKind;
+  placeholder?: string;
+  resolvedText?: string;
+  status: AgentInteractionStatus;
+  title: string;
 }
 
 interface AgentSession {
@@ -204,6 +242,141 @@ function AgentMarkdown({ content }: { content: string }): JSX.Element {
   }, [html]);
 
   return <div ref={markdownRef} className="agent-ai-markdown" dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+const agentSupplementIcons: Record<string, LucideIcon> = {
+  alert: AlertCircle,
+  'file-pen-line': FilePenLine,
+  'file-text': FileText,
+  'folder-tree': FolderTree,
+  globe: Globe,
+  link: Link2,
+  play: Play,
+  save: Save,
+  search: Search,
+  'search-code': SearchCode,
+  terminal: Terminal,
+  'terminal-square': Terminal,
+  'git-commit': FileCode
+};
+
+function getAgentSupplementIcon(icon: string): LucideIcon {
+  return agentSupplementIcons[icon] ?? Sparkles;
+}
+
+function upsertAgentToolCall(
+  toolCalls: AgentToolCallMessage[] | undefined,
+  nextToolCall: AgentToolCallMessage
+): AgentToolCallMessage[] {
+  const currentToolCalls = toolCalls ?? [];
+  const index = currentToolCalls.findIndex((toolCall) => toolCall.id === nextToolCall.id);
+
+  if (index < 0) {
+    return [...currentToolCalls, nextToolCall];
+  }
+
+  return currentToolCalls.map((toolCall, currentIndex) => (currentIndex === index ? nextToolCall : toolCall));
+}
+
+function AgentToolCallItem({ toolCall }: { toolCall: AgentToolCallMessage }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ToolIcon = getAgentSupplementIcon(toolCall.icon);
+  const canOpen = toolCall.openable && Boolean(toolCall.detail?.trim());
+  const StatusIcon = toolCall.status === 'running' ? Loader2 : toolCall.status === 'error' ? AlertCircle : CheckCircle2;
+  const contentId = `agent-tool-detail-${toolCall.id}`;
+
+  return (
+    <div className={`agent-tool-call${canOpen ? ' interactive' : ''}${open ? ' open' : ''} ${toolCall.status}`}>
+      {canOpen ? (
+        <button
+          className="agent-tool-header"
+          type="button"
+          aria-expanded={open}
+          aria-controls={contentId}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <ToolIcon className="agent-tool-main-icon" size={14} />
+          <span className="agent-tool-name">
+            {toolCall.action}
+            {toolCall.summary ? <span className="agent-tool-summary"> {toolCall.summary}</span> : null}
+          </span>
+          <StatusIcon className="agent-tool-status-icon" size={14} />
+          <ChevronDown className="agent-tool-chevron" size={14} />
+        </button>
+      ) : (
+        <div className="agent-tool-header">
+          <ToolIcon className="agent-tool-main-icon" size={14} />
+          <span className="agent-tool-name">
+            {toolCall.action}
+            {toolCall.summary ? <span className="agent-tool-summary"> {toolCall.summary}</span> : null}
+          </span>
+          <StatusIcon className="agent-tool-status-icon" size={14} />
+        </div>
+      )}
+
+      {canOpen && (
+        <div className="agent-tool-body" id={contentId}>
+          <pre>
+            <code>{toolCall.detail}</code>
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentInteractionCard({ item }: { item: AgentInteractionItem }): JSX.Element {
+  const [resolvedText, setResolvedText] = useState(item.status === 'resolved' ? item.resolvedText ?? 'Action resolved' : '');
+  const [value, setValue] = useState('');
+  const ActionIcon = getAgentSupplementIcon(item.icon);
+
+  if (resolvedText) {
+    return (
+      <div className="agent-action-card resolved">
+        <div className="agent-action-resolved-msg">
+          <CheckCircle2 size={14} />
+          <span>{resolvedText}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="agent-action-card">
+      <div className="agent-action-content">
+        <div className="agent-action-header">
+          <ActionIcon className={`agent-action-icon ${item.accent ?? 'blue'}`} size={18} />
+          <div>
+            <div className="agent-action-title">{item.title}</div>
+            <div className="agent-action-desc">{item.description}</div>
+          </div>
+        </div>
+
+        {item.kind === 'input' && (
+          <input
+            className="agent-action-input"
+            type="text"
+            value={value}
+            placeholder={item.placeholder}
+            onChange={(event) => setValue(event.target.value)}
+          />
+        )}
+
+        <div className="agent-action-footer">
+          <button className="agent-action-btn outline" type="button" onClick={() => setResolvedText('Action cancelled by user')}>
+            Cancel
+          </button>
+          <button
+            className="agent-action-btn primary"
+            type="button"
+            onClick={() => setResolvedText(item.kind === 'input' ? 'Input submitted' : 'Action confirmed')}
+          >
+            {item.kind === 'input' ? 'Submit' : 'Confirm'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function AgentPalette({
@@ -727,6 +900,22 @@ export function AgentPalette({
         }
 
         if (event.type === 'tool_calls') {
+          return;
+        }
+
+        if (event.type === 'tool_call') {
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    toolCalls: upsertAgentToolCall(message.toolCalls, event.toolCall)
+                  }
+                : message
+            )
+          }));
+          followStreamToBottom();
           return;
         }
 
@@ -1300,15 +1489,24 @@ export function AgentPalette({
                       Web Search context is enabled for this turn.
                     </p>
                   )}
+                  {Boolean(message.toolCalls?.length) && (
+                    <div className="agent-tool-call-stack">
+                      {(message.toolCalls ?? []).map((toolCall) => (
+                        <AgentToolCallItem key={toolCall.id} toolCall={toolCall} />
+                      ))}
+                    </div>
+                  )}
+                  {Boolean(message.interactionItems?.length) &&
+                    (message.interactionItems ?? []).map((item) => <AgentInteractionCard key={item.id} item={item} />)}
                   {message.answer.trim() ? (
                     <AgentMarkdown content={message.answer} />
-                  ) : (
+                  ) : !message.toolCalls?.length ? (
                     <div className="agent-typing-indicator" aria-label="Veloca is typing">
                       <span />
                       <span />
                       <span />
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 {message.status === 'complete' && message.answer.trim() && (

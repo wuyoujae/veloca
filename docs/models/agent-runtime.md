@@ -109,6 +109,40 @@ for await (const chunk of stream) {
 
 The stream yields raw OpenAI chunks while accumulating the final assistant content for storage. It may also yield internal status chunks with `type` values such as `tool_calls`, `thinking`, `complete`, or `error`.
 
+## Tool Call UI Events
+
+Veloca also emits a renderer-facing `tool_call` stream event from the backend tool adapters. This event is separate from the raw `otherone-agent` `tool_calls` status chunk and is meant for the Agent canvas UI.
+
+```ts
+type AgentToolCallMessage = {
+  id: string;
+  action: string;
+  summary?: string;
+  icon: string;
+  status: 'running' | 'success' | 'error';
+  openable: boolean;
+  detail?: string;
+};
+```
+
+The UI must not display raw tool names such as `read_file` as the primary text. Backend adapters map tool names to user-facing action labels:
+
+| Tool | User-facing action | Expandable |
+| --- | --- | --- |
+| `get_workspace_directory_tree` | 查看工作区结构 | No |
+| `glob_search` | 查找文件 | No |
+| `grep_search` | 搜索内容 | No |
+| `read_file` | 阅读文件 | No |
+| `edit_file` | 编辑文件 | Yes |
+| `write_file` | 写入文件 | Yes |
+| `WebFetch` | 读取网页 | Yes |
+| `WebSearch` | 搜索网页 | Yes |
+| `REPL` | 运行代码 | Yes |
+| `PowerShell` | 运行 PowerShell | Yes |
+| `run_bash_command` | 运行命令 | Yes |
+
+The expandable decision follows the user visibility rule: if the result is mainly private context for the model, such as reading a file or searching local text before answering, the item stays compact. If the result is otherwise invisible to the user, such as command stdout/stderr, code execution output, web results, or file-write patches, the item can expand to show a concise detail panel. Tool errors are expandable when a detail message is available, even for normally compact tools.
+
 ## Tool Calling
 
 Tools are passed in OpenAI-compatible function-tool format. Implementations are passed through `tools_realize`.
@@ -401,7 +435,7 @@ The current implementation uses a backend Agent service boundary:
 2. Use `agent:send-message-stream` for streaming Agent responses. The legacy `agent:send-message` invoke path remains available for non-streaming calls.
 3. Resolve model selection to backend config.
 4. Call `veloca.InvokeAgent` from the main process with `stream: true`.
-5. Normalize raw chunks into UI events: `delta`, `tool_calls`, `complete`, and `error`.
+5. Normalize raw chunks into UI events: `delta`, `tool_calls`, structured `tool_call`, `complete`, and `error`.
 6. Use `otherone-agent` local-file session ids directly as Veloca Agent session ids.
 
 The preload layer creates a request id per send operation, listens for `agent:message-event`, filters events by request id, and returns an unsubscribe function to the renderer. The Agent palette appends each `delta` to the active AI message so the canvas updates while the model is still generating.

@@ -39,6 +39,7 @@ export interface AgentSendMessageResponse {
 }
 
 export interface AgentRuntimeHooks {
+  onToolCallItem?: (toolCall: AgentToolCallMessage) => void;
   onWorkspaceChanged?: (snapshot: WorkspaceSnapshot) => void;
 }
 
@@ -58,12 +59,30 @@ export interface AgentStoredSession {
   name: string;
 }
 
+export type AgentToolCallStatus = 'running' | 'success' | 'error';
+
+export interface AgentToolCallMessage {
+  action: string;
+  detail?: string;
+  icon: string;
+  id: string;
+  openable: boolean;
+  status: AgentToolCallStatus;
+  summary?: string;
+}
+
 export type AgentStreamEvent =
   | {
       content: string;
       model: string;
       sessionId: string;
       type: 'delta' | 'tool_calls';
+    }
+  | {
+      model: string;
+      sessionId: string;
+      toolCall: AgentToolCallMessage;
+      type: 'tool_call';
     }
   | {
       answer: string;
@@ -114,6 +133,7 @@ const readFileBinarySampleBytes = 8192;
 const agentStorageDirectory = join(process.cwd(), '.veloca', 'storage');
 const agentSessionWorkspaceIndexPath = join(agentStorageDirectory, 'veloca-session-workspaces.json');
 let envLoaded = false;
+let agentToolCallSequence = 0;
 
 const defaultVelocaIgnorePatterns = [
   '.DS_Store',
@@ -449,6 +469,92 @@ interface WriteFileOutput {
   workspaceType: 'database' | 'filesystem';
 }
 
+type AgentToolName =
+  | 'PowerShell'
+  | 'REPL'
+  | 'WebFetch'
+  | 'WebSearch'
+  | 'edit_file'
+  | 'get_workspace_directory_tree'
+  | 'glob_search'
+  | 'grep_search'
+  | 'read_file'
+  | 'run_bash_command'
+  | 'write_file';
+
+interface AgentToolDisplayConfig {
+  action: string;
+  icon: string;
+  openable: boolean;
+}
+
+interface AgentToolRunState {
+  detail?: string;
+  id: string;
+  input?: unknown;
+  status: AgentToolCallStatus;
+  summary?: string;
+  toolName: AgentToolName;
+}
+
+const agentToolDisplayConfig: Record<AgentToolName, AgentToolDisplayConfig> = {
+  get_workspace_directory_tree: {
+    action: '查看工作区结构',
+    icon: 'folder-tree',
+    openable: false
+  },
+  glob_search: {
+    action: '查找文件',
+    icon: 'search',
+    openable: false
+  },
+  grep_search: {
+    action: '搜索内容',
+    icon: 'search-code',
+    openable: false
+  },
+  read_file: {
+    action: '阅读文件',
+    icon: 'file-text',
+    openable: false
+  },
+  edit_file: {
+    action: '编辑文件',
+    icon: 'file-pen-line',
+    openable: true
+  },
+  write_file: {
+    action: '写入文件',
+    icon: 'save',
+    openable: true
+  },
+  WebFetch: {
+    action: '读取网页',
+    icon: 'link',
+    openable: true
+  },
+  WebSearch: {
+    action: '搜索网页',
+    icon: 'globe',
+    openable: true
+  },
+  REPL: {
+    action: '运行代码',
+    icon: 'play',
+    openable: true
+  },
+  PowerShell: {
+    action: '运行 PowerShell',
+    icon: 'terminal',
+    openable: true
+  },
+  run_bash_command: {
+    action: '运行命令',
+    icon: 'terminal',
+    openable: true
+  }
+};
+
 interface AgentDatabaseEntryRow {
   content: string;
   created_at: number;
@@ -744,6 +850,272 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function unwrapToolInput(value: unknown): unknown {
   return isRecord(value) && 'input' in value ? (value as AgentToolEnvelopeInput).input : value;
+}
+
+function truncateToolDisplayText(value: string, maxCharacters = 8000): string {
+  if (value.length <= maxCharacters) {
+    return value;
+  }
+
+  return `${value.slice(0, maxCharacters).trimEnd()}\n...truncated for display`;
+}
+
+function compactToolSummary(value: string | undefined, fallback = ''): string | undefined {
+  const normalized = value?.replace(/\s+/g, ' ').trim() ?? fallback;
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.length > 90 ? `${normalized.slice(0, 87).trimEnd()}...` : normalized;
+}
+
+function stringifyToolDetail(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function getToolInputSummary(toolName: AgentToolName, input: unknown): string | undefined {
+  if (toolName === 'get_workspace_directory_tree') {
+    return compactToolSummary(undefined, '当前工作区');
+  }
+
+  if (!isRecord(input)) {
+    return undefined;
+  }
+
+  switch (toolName) {
+    case 'glob_search':
+      return compactToolSummary(typeof input.pattern === 'string' ? input.pattern : undefined);
+    case 'grep_search':
+      return compactToolSummary(typeof input.pattern === 'string' ? input.pattern : undefined);
+    case 'read_file':
+    case 'edit_file':
+    case 'write_file':
+      return compactToolSummary(typeof input.path === 'string' ? input.path : undefined);
+    case 'WebFetch':
+      return compactToolSummary(typeof input.url === 'string' ? input.url : undefined);
+    case 'WebSearch':
+      return compactToolSummary(typeof input.query === 'string' ? input.query : undefined);
+    case 'REPL': {
+      const language = typeof input.language === 'string' ? input.language : 'code';
+      return compactToolSummary(language);
+    }
+    case 'PowerShell':
+    case 'run_bash_command':
+      return compactToolSummary(typeof input.command === 'string' ? input.command : undefined);
+  }
+}
+
+function formatCommandToolDetail(result: unknown): string {
+  if (!isRecord(result)) {
+    return stringifyToolDetail(result);
+  }
+
+  const lines: string[] = [];
+
+  if (typeof result.cwd === 'string') {
+    lines.push(`CWD: ${result.cwd}`);
+  }
+
+  if ('exitCode' in result) {
+    lines.push(`Exit code: ${result.exitCode === null ? 'null' : String(result.exitCode)}`);
+  }
+
+  if (typeof result.durationMs === 'number') {
+    lines.push(`Duration: ${result.durationMs} ms`);
+  }
+
+  if (result.blocked === true) {
+    lines.push('Status: blocked');
+  } else if (result.timedOut === true) {
+    lines.push('Status: timed out');
+  } else if (result.ok === false) {
+    lines.push('Status: failed');
+  }
+
+  if (typeof result.error === 'string' && result.error) {
+    lines.push(`Error: ${result.error}`);
+  }
+
+  if (typeof result.stdout === 'string' && result.stdout) {
+    lines.push(`\nstdout\n${result.stdout}`);
+  }
+
+  if (typeof result.stderr === 'string' && result.stderr) {
+    lines.push(`\nstderr\n${result.stderr}`);
+  }
+
+  return lines.length ? lines.join('\n') : stringifyToolDetail(result);
+}
+
+function formatPatchLines(patch: unknown): string {
+  if (!Array.isArray(patch)) {
+    return stringifyToolDetail(patch);
+  }
+
+  const lines = patch.flatMap((hunk) => (isRecord(hunk) && Array.isArray(hunk.lines) ? hunk.lines : []));
+
+  return lines.map(String).join('\n');
+}
+
+function formatToolResultDetail(toolName: AgentToolName, result: unknown): string | undefined {
+  if (!result) {
+    return undefined;
+  }
+
+  if (toolName === 'run_bash_command' || toolName === 'PowerShell' || toolName === 'REPL') {
+    return truncateToolDisplayText(formatCommandToolDetail(result));
+  }
+
+  if (toolName === 'WebFetch' && isRecord(result)) {
+    return truncateToolDisplayText(
+      [
+        typeof result.url === 'string' ? `URL: ${result.url}` : '',
+        typeof result.code === 'number' ? `HTTP: ${result.code} ${typeof result.codeText === 'string' ? result.codeText : ''}` : '',
+        typeof result.result === 'string' ? `\n${result.result}` : stringifyToolDetail(result)
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  }
+
+  if (toolName === 'WebSearch' && isRecord(result)) {
+    const results = Array.isArray(result.results) ? result.results : [];
+    const structured = results.find((item) => isRecord(item) && Array.isArray(item.content));
+    const hits = isRecord(structured) && Array.isArray(structured.content) ? structured.content : [];
+    const renderedHits = hits
+      .filter(isRecord)
+      .map((hit) => {
+        const title = typeof hit.title === 'string' ? hit.title : 'Untitled result';
+        const url = typeof hit.url === 'string' ? hit.url : '';
+
+        return url ? `- ${title}\n  ${url}` : `- ${title}`;
+      })
+      .join('\n');
+
+    return truncateToolDisplayText(
+      [`Query: ${typeof result.query === 'string' ? result.query : ''}`, renderedHits || stringifyToolDetail(result)]
+        .filter(Boolean)
+        .join('\n\n')
+    );
+  }
+
+  if ((toolName === 'edit_file' || toolName === 'write_file') && isRecord(result)) {
+    return truncateToolDisplayText(
+      [
+        typeof result.filePath === 'string' ? `File: ${result.filePath}` : '',
+        toolName === 'write_file' && typeof result.type === 'string' ? `Mode: ${result.type}` : '',
+        'Patch:',
+        formatPatchLines(result.structuredPatch)
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  }
+
+  return truncateToolDisplayText(stringifyToolDetail(result));
+}
+
+function getToolResultStatus(result: unknown): AgentToolCallStatus {
+  if (!isRecord(result)) {
+    return 'success';
+  }
+
+  if (result.ok === false || result.blocked === true || (typeof result.error === 'string' && result.error.trim())) {
+    return 'error';
+  }
+
+  return 'success';
+}
+
+function createAgentToolCallId(toolName: AgentToolName): string {
+  agentToolCallSequence += 1;
+
+  return `tool-${toolName}-${Date.now().toString(36)}-${agentToolCallSequence.toString(36)}`;
+}
+
+function toAgentToolCallMessage(state: AgentToolRunState): AgentToolCallMessage {
+  const config = agentToolDisplayConfig[state.toolName];
+
+  return {
+    action: config.action,
+    detail: state.detail,
+    icon: config.icon,
+    id: state.id,
+    openable: Boolean(state.detail?.trim()) && (config.openable || state.status === 'error'),
+    status: state.status,
+    summary: state.summary ?? getToolInputSummary(state.toolName, state.input)
+  };
+}
+
+async function runVisibleAgentTool<Input, Output>(
+  hooks: AgentRuntimeHooks | undefined,
+  toolName: AgentToolName,
+  readInput: () => Input,
+  execute: (input: Input) => Output | Promise<Output>
+): Promise<Output> {
+  const id = createAgentToolCallId(toolName);
+  let input: Input;
+
+  try {
+    input = readInput();
+  } catch (error) {
+    hooks?.onToolCallItem?.(
+      toAgentToolCallMessage({
+        detail: getErrorMessage(error),
+        id,
+        status: 'error',
+        toolName
+      })
+    );
+    throw error;
+  }
+
+  hooks?.onToolCallItem?.(
+    toAgentToolCallMessage({
+      id,
+      input,
+      status: 'running',
+      toolName
+    })
+  );
+
+  try {
+    const result = await Promise.resolve(execute(input));
+    const status = getToolResultStatus(result);
+    const shouldExposeDetail = agentToolDisplayConfig[toolName].openable || status === 'error';
+
+    hooks?.onToolCallItem?.(
+      toAgentToolCallMessage({
+        detail: shouldExposeDetail ? formatToolResultDetail(toolName, result) : undefined,
+        id,
+        input,
+        status,
+        toolName
+      })
+    );
+
+    return result;
+  } catch (error) {
+    hooks?.onToolCallItem?.(
+      toAgentToolCallMessage({
+        detail: getErrorMessage(error),
+        id,
+        input,
+        status: 'error',
+        toolName
+      })
+    );
+    throw error;
+  }
 }
 
 function isLikelyShellCommand(value: string): boolean {
@@ -4995,26 +5367,82 @@ function buildAgentTools() {
 function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRuntimeHooks) {
   return {
     get_workspace_directory_tree: (input?: unknown) =>
-      getWorkspaceDirectoryTree(context, normalizeDirectoryTreeToolInput(input)),
+      runVisibleAgentTool(
+        hooks,
+        'get_workspace_directory_tree',
+        () => normalizeDirectoryTreeToolInput(input),
+        (toolInput) => getWorkspaceDirectoryTree(context, toolInput)
+      ),
     glob_search: (inputOrPattern?: unknown, path?: unknown) =>
-      globSearchWorkspace(context, normalizeGlobSearchToolInput(inputOrPattern, path)),
-    grep_search: (input?: unknown) => grepSearchWorkspace(context, normalizeGrepSearchToolInput(input)),
+      runVisibleAgentTool(
+        hooks,
+        'glob_search',
+        () => normalizeGlobSearchToolInput(inputOrPattern, path),
+        (toolInput) => globSearchWorkspace(context, toolInput)
+      ),
+    grep_search: (input?: unknown) =>
+      runVisibleAgentTool(
+        hooks,
+        'grep_search',
+        () => normalizeGrepSearchToolInput(input),
+        (toolInput) => grepSearchWorkspace(context, toolInput)
+      ),
     read_file: (inputOrPath?: unknown, offset?: unknown, limit?: unknown) =>
-      readWorkspaceTextFile(context, normalizeReadFileToolInput(inputOrPath, offset, limit)),
+      runVisibleAgentTool(
+        hooks,
+        'read_file',
+        () => normalizeReadFileToolInput(inputOrPath, offset, limit),
+        (toolInput) => readWorkspaceTextFile(context, toolInput)
+      ),
     edit_file: (inputOrPath?: unknown, oldString?: unknown, newString?: unknown, replaceAll?: unknown) =>
-      editWorkspaceTextFile(context, normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll), hooks),
+      runVisibleAgentTool(
+        hooks,
+        'edit_file',
+        () => normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll),
+        (toolInput) => editWorkspaceTextFile(context, toolInput, hooks)
+      ),
     write_file: (inputOrPath?: unknown, content?: unknown) =>
-      writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
+      runVisibleAgentTool(
+        hooks,
+        'write_file',
+        () => normalizeWriteFileToolInput(inputOrPath, content),
+        (toolInput) => writeWorkspaceTextFile(context, toolInput, hooks)
+      ),
     WebFetch: (inputOrUrl?: unknown, prompt?: unknown) =>
-      runWebFetch(normalizeWebFetchToolInput(inputOrUrl, prompt)),
+      runVisibleAgentTool(
+        hooks,
+        'WebFetch',
+        () => normalizeWebFetchToolInput(inputOrUrl, prompt),
+        (toolInput) => runWebFetch(toolInput)
+      ),
     WebSearch: (inputOrQuery?: unknown, allowedDomains?: unknown, blockedDomains?: unknown) =>
-      runWebSearch(normalizeWebSearchToolInput(inputOrQuery, allowedDomains, blockedDomains)),
+      runVisibleAgentTool(
+        hooks,
+        'WebSearch',
+        () => normalizeWebSearchToolInput(inputOrQuery, allowedDomains, blockedDomains),
+        (toolInput) => runWebSearch(toolInput)
+      ),
     REPL: (inputOrCode?: unknown, language?: unknown, timeoutMs?: unknown) =>
-      runRepl(context, normalizeReplToolInput(inputOrCode, language, timeoutMs)),
+      runVisibleAgentTool(
+        hooks,
+        'REPL',
+        () => normalizeReplToolInput(inputOrCode, language, timeoutMs),
+        (toolInput) => runRepl(context, toolInput)
+      ),
     PowerShell: (inputOrCommand?: unknown, timeout?: unknown, description?: unknown, runInBackground?: unknown) =>
-      runPowerShellCommand(context, normalizePowerShellToolInput(inputOrCommand, timeout, description, runInBackground)),
+      runVisibleAgentTool(
+        hooks,
+        'PowerShell',
+        () => normalizePowerShellToolInput(inputOrCommand, timeout, description, runInBackground),
+        (toolInput) => runPowerShellCommand(context, toolInput)
+      ),
     run_bash_command: (inputOrCommand?: unknown, cwd?: unknown, timeout?: unknown, description?: unknown) =>
-      runBashCommand(context, normalizeBashToolInput(inputOrCommand, cwd, timeout, description))
+      runVisibleAgentTool(
+        hooks,
+        'run_bash_command',
+        () => normalizeBashToolInput(inputOrCommand, cwd, timeout, description),
+        (toolInput) => runBashCommand(context, toolInput)
+      )
   };
 }
 
@@ -5087,6 +5515,7 @@ Use information in this priority order:
 
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
 - When calling Veloca workspace tools, pass arguments inside the required \`input\` object.
+- When describing tool activity to the user, use natural action wording such as "I read the file" or "I ran the command" instead of raw tool names.
 - Use \`get_workspace_directory_tree\` to inspect the active workspace structure before making claims about available folders or files.
 - When calling \`get_workspace_directory_tree\`, pass a \`velocaignore\` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace \`.velocaignore\` file.
 - Use \`glob_search\` to find files by name or extension before reading them. It supports patterns like \`**/*.md\` and \`**/*.{ts,tsx}\`, honors Veloca ignore rules, and returns at most 100 file paths.
@@ -5477,7 +5906,19 @@ export async function streamAgentMessage(
   let model = defaultAgentModel;
 
   try {
-    const options = getAgentRuntimeOptions(request, true, hooks);
+    const streamHooks: AgentRuntimeHooks = {
+      ...hooks,
+      onToolCallItem: (toolCall) => {
+        hooks?.onToolCallItem?.(toolCall);
+        emit({
+          model,
+          sessionId: request.sessionId,
+          toolCall,
+          type: 'tool_call'
+        });
+      }
+    };
+    const options = getAgentRuntimeOptions(request, true, streamHooks);
     model = options.model;
 
     const stream = await veloca.InvokeAgent(options.input, options.ai);

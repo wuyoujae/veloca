@@ -100,12 +100,30 @@ interface AgentStoredSession {
   name: string;
 }
 
+type AgentToolCallStatus = 'running' | 'success' | 'error';
+
+interface AgentToolCallMessage {
+  action: string;
+  detail?: string;
+  icon: string;
+  id: string;
+  openable: boolean;
+  status: AgentToolCallStatus;
+  summary?: string;
+}
+
 type AgentStreamEvent =
   | {
       content: string;
       model: string;
       sessionId: string;
       type: 'delta' | 'tool_calls';
+    }
+  | {
+      model: string;
+      sessionId: string;
+      toolCall: AgentToolCallMessage;
+      type: 'tool_call';
     }
   | {
       answer: string;

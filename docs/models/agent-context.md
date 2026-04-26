@@ -83,6 +83,7 @@ Use information in this priority order:
 
 - If tools are available, use them to inspect the current file, nearby files, or workspace search results when the user request depends on local context.
 - When calling Veloca workspace tools, pass arguments inside the required `input` object.
+- When describing tool activity to the user, use natural action wording such as "I read the file" or "I ran the command" instead of raw tool names.
 - Use `get_workspace_directory_tree` to inspect the active workspace structure before making claims about available folders or files.
 - When calling `get_workspace_directory_tree`, pass a `velocaignore` string only when you need extra temporary ignore patterns beyond Veloca defaults and the workspace `.velocaignore` file.
 - Use `glob_search` to find files by name or extension before reading them. It supports patterns like `**/*.md` and `**/*.{ts,tsx}`, honors Veloca ignore rules, and returns at most 100 file paths.
