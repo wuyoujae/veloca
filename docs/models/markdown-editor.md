@@ -89,6 +89,22 @@ flowchart TD
   - `status`：`saving` / `saved` / `unsaved` / `failed`。
 - `updateDocumentContent` 每次编辑时同时更新 `documentContent` 与对应标签的 `draftContent`。
 
+## 源代码 / 渲染视图
+
+- 编辑器右上角保存按钮左侧提供内容视图切换按钮：
+  - 默认使用渲染视图，按钮显示代码图标，点击后进入 Markdown 源代码视图；
+  - 源代码视图使用可编辑 textarea 展示当前文件原始 Markdown 内容，按钮显示文档图标，点击后回到渲染视图。
+- 视图模式按文件路径独立记录：
+  - A 文件切到源代码视图不会影响 B 文件；
+  - 分屏模式下左右文件也分别读取各自的视图模式。
+- 源代码视图仍复用当前草稿和保存链路：
+  - textarea 输入会更新 `draftContent`、`documentContent` 和对应标签 `status`；
+  - 自动保存、手动保存、关闭未保存确认和状态栏统计继续使用同一份 Markdown 内容。
+- 切换视图时会尽量保持文本焦点位置：
+  - 渲染视图切到源代码视图时，TipTap 编辑器会临时插入唯一 cursor marker，序列化为 Markdown 后计算 marker offset，再移除 marker；
+  - 源代码视图切回渲染视图时，textarea 的 `selectionStart` 会作为 Markdown offset，通过临时 marker 恢复到 TipTap 文档中的相近位置；
+  - 如果 offset 落在 Markdown 语法边界或无法精确映射，则回退到最近可用文本位置。
+
 ## 关闭标签
 
 - 每个标签右侧带关闭按钮（`X`）。

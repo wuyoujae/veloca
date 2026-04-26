@@ -1,6 +1,8 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -9,6 +11,8 @@ import {
   type PointerEvent as ReactPointerEvent
 } from 'react';
 import type { Editor as TiptapEditor } from '@tiptap/core';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Selection, TextSelection } from '@tiptap/pm/state';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { createPortal } from 'react-dom';
 import {
@@ -79,6 +83,7 @@ type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
+type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
 
 interface ToastMessage {
@@ -157,6 +162,13 @@ interface OpenEditorTab {
   status: SaveStatus;
 }
 
+interface CursorRestoreRequest {
+  filePath: string;
+  mode: DocumentViewMode;
+  offset: number;
+  sequence: number;
+}
+
 type SplitPanePaths = [string, string];
 type EditorTabGroup = string[];
 type EditorMode = 'standard' | 'agent' | 'prompt';
@@ -179,6 +191,8 @@ const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
 ];
 
 const saveActionSuccessDurationMs = 1200;
+const defaultDocumentViewMode: DocumentViewMode = 'rendered';
+const sourceCursorMarkerPrefix = 'VELOCASOURCECURSOR';
 
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
@@ -601,6 +615,8 @@ export function App(): JSX.Element {
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
   const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
   const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
+  const [documentViewModesByPath, setDocumentViewModesByPath] = useState<Record<string, DocumentViewMode>>({});
+  const [cursorRestoreRequest, setCursorRestoreRequest] = useState<CursorRestoreRequest | null>(null);
   const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [agentPaletteOpen, setAgentPaletteOpen] = useState(false);
@@ -636,6 +652,9 @@ export function App(): JSX.Element {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveActionStatesRef = useRef<Record<string, SaveActionState>>({});
   const saveActionTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const cursorRestoreSequenceRef = useRef(0);
+  const renderedEditorHandlesRef = useRef<Map<string, MarkdownEditorHandle>>(new Map());
+  const sourceEditorHandlesRef = useRef<Map<string, SourceMarkdownEditorHandle>>(new Map());
   const editorTabsRef = useRef<HTMLDivElement>(null);
   const editorTabElementByPathRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const splitEditorGridRef = useRef<HTMLDivElement>(null);
@@ -652,6 +671,9 @@ export function App(): JSX.Element {
   );
   const activeFile = activeTab?.file ?? null;
   const activeSaveActionState = activeTabPath ? saveActionStatesByPath[activeTabPath] ?? 'idle' : 'idle';
+  const activeDocumentViewMode = activeTabPath
+    ? documentViewModesByPath[activeTabPath] ?? defaultDocumentViewMode
+    : defaultDocumentViewMode;
   const openTabByPath = useMemo(() => {
     return new Map(openTabs.map((tab) => [tab.file.path, tab]));
   }, [openTabs]);
@@ -869,6 +891,17 @@ export function App(): JSX.Element {
     const livePaths = new Set(openTabs.map((tab) => tab.file.path));
     openTabPathsRef.current = livePaths;
     pruneFileSaveActions(livePaths);
+    setDocumentViewModesByPath((current) => {
+      const next: Record<string, DocumentViewMode> = {};
+
+      for (const [filePath, mode] of Object.entries(current)) {
+        if (livePaths.has(filePath)) {
+          next[filePath] = mode;
+        }
+      }
+
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
 
     setTabGroups((current) => {
       const seenKeys = new Set<string>();
@@ -1097,6 +1130,101 @@ export function App(): JSX.Element {
     setSplitAfterIndex(null);
     setTabDropCue(null);
     setSplitPaneRatio(50);
+  };
+
+  const getDocumentViewMode = (filePath: string): DocumentViewMode => {
+    return documentViewModesByPath[filePath] ?? defaultDocumentViewMode;
+  };
+
+  const getEditorShellElement = (filePath: string): HTMLElement | null => {
+    const editorShells = document.querySelectorAll<HTMLElement>('[data-file-path]');
+
+    for (const shell of editorShells) {
+      if (shell.dataset.filePath === filePath) {
+        return shell;
+      }
+    }
+
+    return null;
+  };
+
+  const getEditorScrollPosition = (filePath: string): number | null => {
+    const scrollContainer = getEditorShellElement(filePath)?.closest<HTMLElement>(
+      '.editor-pane-scroll, .editor-scroll-area'
+    );
+
+    return scrollContainer?.scrollTop ?? null;
+  };
+
+  const restoreEditorScrollPosition = (filePath: string, scrollTop: number | null) => {
+    if (scrollTop === null) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const scrollContainer = getEditorShellElement(filePath)?.closest<HTMLElement>(
+          '.editor-pane-scroll, .editor-scroll-area'
+        );
+
+        if (scrollContainer) {
+          scrollContainer.scrollTop = scrollTop;
+        }
+      });
+    });
+  };
+
+  const getCursorOffsetForViewMode = (filePath: string, mode: DocumentViewMode): number | null => {
+    if (mode === 'source') {
+      return sourceEditorHandlesRef.current.get(filePath)?.getCursorOffset() ?? null;
+    }
+
+    return renderedEditorHandlesRef.current.get(filePath)?.getCursorMarkdownOffset() ?? null;
+  };
+
+  const getCursorRestoreProps = (filePath: string, mode: DocumentViewMode) => {
+    if (cursorRestoreRequest?.filePath !== filePath || cursorRestoreRequest.mode !== mode) {
+      return {
+        onCursorRestoreComplete: undefined,
+        restoreCursorOffset: null,
+        restoreCursorSequence: null
+      };
+    }
+
+    return {
+      onCursorRestoreComplete: (sequence: number) => {
+        setCursorRestoreRequest((current) => (current?.sequence === sequence ? null : current));
+      },
+      restoreCursorOffset: cursorRestoreRequest.offset,
+      restoreCursorSequence: cursorRestoreRequest.sequence
+    };
+  };
+
+  const toggleActiveDocumentViewMode = () => {
+    if (!activeTabPath) {
+      return;
+    }
+
+    const currentMode = getDocumentViewMode(activeTabPath);
+    const nextMode: DocumentViewMode = currentMode === 'rendered' ? 'source' : 'rendered';
+    const cursorOffset = getCursorOffsetForViewMode(activeTabPath, currentMode);
+    const scrollTop = getEditorScrollPosition(activeTabPath);
+
+    if (typeof cursorOffset === 'number') {
+      cursorRestoreSequenceRef.current += 1;
+      setCursorRestoreRequest({
+        filePath: activeTabPath,
+        mode: nextMode,
+        offset: cursorOffset,
+        sequence: cursorRestoreSequenceRef.current
+      });
+    }
+
+    setDocumentViewModesByPath((current) => ({
+      ...current,
+      [activeTabPath]: nextMode
+    }));
+    restoreEditorScrollPosition(activeTabPath, scrollTop);
   };
 
   const ensureTabGroup = (paths: string[], insertIndex?: number) => {
@@ -2354,6 +2482,8 @@ export function App(): JSX.Element {
   const renderSplitEditorPane = (tab: OpenEditorTab, panePosition: 'left' | 'right') => {
     const isActivePane = tab.file.path === activeTabPath;
     const paneContent = isActivePane ? documentContent : tab.draftContent;
+    const viewMode = getDocumentViewMode(tab.file.path);
+    const restoreProps = getCursorRestoreProps(tab.file.path, viewMode);
 
     return (
       <section
@@ -2374,13 +2504,39 @@ export function App(): JSX.Element {
         </div>
         <div className="editor-pane-scroll">
           <article className={focusMode ? 'markdown-body split-pane-body focus-mode' : 'markdown-body split-pane-body'}>
-            <MarkdownEditor
-              content={paneContent}
-              filePath={tab.file.path}
-              theme={theme}
-              onChange={(content) => updateTabDocumentContent(tab.file.path, content)}
-              onToast={showToast}
-            />
+            {viewMode === 'source' ? (
+              <SourceMarkdownEditor
+                content={paneContent}
+                filePath={tab.file.path}
+                ref={(handle) => {
+                  if (handle) {
+                    sourceEditorHandlesRef.current.set(tab.file.path, handle);
+                    return;
+                  }
+
+                  sourceEditorHandlesRef.current.delete(tab.file.path);
+                }}
+                onChange={(content) => updateTabDocumentContent(tab.file.path, content)}
+                {...restoreProps}
+              />
+            ) : (
+              <MarkdownEditor
+                content={paneContent}
+                filePath={tab.file.path}
+                ref={(handle) => {
+                  if (handle) {
+                    renderedEditorHandlesRef.current.set(tab.file.path, handle);
+                    return;
+                  }
+
+                  renderedEditorHandlesRef.current.delete(tab.file.path);
+                }}
+                theme={theme}
+                onChange={(content) => updateTabDocumentContent(tab.file.path, content)}
+                onToast={showToast}
+                {...restoreProps}
+              />
+            )}
           </article>
         </div>
       </section>
@@ -2695,6 +2851,21 @@ export function App(): JSX.Element {
 
             <div className="editor-actions">
               <button
+                className="editor-action-btn editor-action-btn-view"
+                disabled={!activeFile}
+                title={activeDocumentViewMode === 'rendered' ? 'Switch to Source Mode' : 'Switch to Rendered Mode'}
+                type="button"
+                onClick={toggleActiveDocumentViewMode}
+                aria-label={activeDocumentViewMode === 'rendered' ? 'Switch to Source Mode' : 'Switch to Rendered Mode'}
+              >
+                {activeDocumentViewMode === 'rendered' ? (
+                  <Code2 className="editor-action-icon" size={14} />
+                ) : (
+                  <FileText className="editor-action-icon" size={14} />
+                )}
+              </button>
+
+              <button
                 className={`editor-action-btn editor-action-btn-save ${
                   activeSaveActionState === 'saving'
                     ? 'is-saving'
@@ -2875,13 +3046,39 @@ export function App(): JSX.Element {
               </div>
             ) : activeFile ? (
               <article className={focusMode ? 'markdown-body focus-mode' : 'markdown-body'}>
-                <MarkdownEditor
-                  content={documentContent}
-                  filePath={activeFile.path}
-                  theme={theme}
-                  onChange={updateDocumentContent}
-                  onToast={showToast}
-                />
+                {activeDocumentViewMode === 'source' ? (
+                  <SourceMarkdownEditor
+                    content={documentContent}
+                    filePath={activeFile.path}
+                    ref={(handle) => {
+                      if (handle) {
+                        sourceEditorHandlesRef.current.set(activeFile.path, handle);
+                        return;
+                      }
+
+                      sourceEditorHandlesRef.current.delete(activeFile.path);
+                    }}
+                    onChange={updateDocumentContent}
+                    {...getCursorRestoreProps(activeFile.path, 'source')}
+                  />
+                ) : (
+                  <MarkdownEditor
+                    content={documentContent}
+                    filePath={activeFile.path}
+                    ref={(handle) => {
+                      if (handle) {
+                        renderedEditorHandlesRef.current.set(activeFile.path, handle);
+                        return;
+                      }
+
+                      renderedEditorHandlesRef.current.delete(activeFile.path);
+                    }}
+                    theme={theme}
+                    onChange={updateDocumentContent}
+                    onToast={showToast}
+                    {...getCursorRestoreProps(activeFile.path, 'rendered')}
+                  />
+                )}
                 {loadingFile && <div className="loading-state">Loading file...</div>}
               </article>
             ) : (
@@ -3340,9 +3537,31 @@ function OutlinePanel({
 interface MarkdownEditorProps {
   content: string;
   filePath: string;
+  onCursorRestoreComplete?: (sequence: number) => void;
+  restoreCursorOffset?: number | null;
+  restoreCursorSequence?: number | null;
   theme: ThemeMode;
   onChange: (content: string) => void;
   onToast: (message: Omit<ToastMessage, 'id'>) => void;
+}
+
+interface MarkdownEditorHandle {
+  focusAtMarkdownOffset: (offset: number) => void;
+  getCursorMarkdownOffset: () => number | null;
+}
+
+interface SourceMarkdownEditorProps {
+  content: string;
+  filePath: string;
+  onCursorRestoreComplete?: (sequence: number) => void;
+  restoreCursorOffset?: number | null;
+  restoreCursorSequence?: number | null;
+  onChange: (content: string) => void;
+}
+
+interface SourceMarkdownEditorHandle {
+  focusAtOffset: (offset: number) => void;
+  getCursorOffset: () => number | null;
 }
 
 type TableControlsState = {
@@ -3530,13 +3749,140 @@ function insertSlashCommandBlock(
   return editor.chain().focus().insertContentAt({ from: paragraphStart, to: paragraphEnd }, nextContent).run();
 }
 
-function MarkdownEditor({
+function createSourceCursorMarker(): string {
+  return `${sourceCursorMarkerPrefix}${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+}
+
+function findTextMarkerRange(
+  doc: ProseMirrorNode,
+  marker: string
+): {
+  from: number;
+  to: number;
+} | null {
+  let range: { from: number; to: number } | null = null;
+
+  doc.descendants((node, pos) => {
+    if (range) {
+      return false;
+    }
+
+    if (!node.isText || typeof node.text !== 'string') {
+      return true;
+    }
+
+    const markerIndex = node.text.indexOf(marker);
+
+    if (markerIndex < 0) {
+      return true;
+    }
+
+    range = {
+      from: pos + markerIndex,
+      to: pos + markerIndex + marker.length
+    };
+    return false;
+  });
+
+  return range;
+}
+
+function getClosestTextSelection(editor: TiptapEditor, pos: number): Selection {
+  const docSize = editor.state.doc.content.size;
+  const safePos = clampNumber(pos, 0, docSize);
+  const resolvedPos = editor.state.doc.resolve(safePos);
+
+  return TextSelection.near(resolvedPos);
+}
+
+const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdownEditorProps>(
+  function SourceMarkdownEditor({
+    content,
+    filePath,
+    onCursorRestoreComplete,
+    restoreCursorOffset,
+    restoreCursorSequence,
+    onChange
+  }: SourceMarkdownEditorProps, ref): JSX.Element {
+    const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+    const resizeTextarea = useCallback(() => {
+      const textarea = textareaRef.current;
+
+      if (!textarea) {
+        return;
+      }
+
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.max(480, textarea.scrollHeight)}px`;
+    }, []);
+
+    const focusAtOffset = useCallback((offset: number) => {
+      const textarea = textareaRef.current;
+
+      if (!textarea) {
+        return;
+      }
+
+      const nextOffset = clampNumber(offset, 0, textarea.value.length);
+      textarea.focus();
+      textarea.setSelectionRange(nextOffset, nextOffset);
+    }, []);
+
+    const getCursorOffset = useCallback((): number | null => {
+      return textareaRef.current?.selectionStart ?? null;
+    }, []);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        focusAtOffset,
+        getCursorOffset
+      }),
+      [focusAtOffset, getCursorOffset]
+    );
+
+    useEffect(() => {
+      resizeTextarea();
+    }, [content, resizeTextarea]);
+
+    useEffect(() => {
+      if (typeof restoreCursorOffset !== 'number' || restoreCursorSequence === null || restoreCursorSequence === undefined) {
+        return;
+      }
+
+      window.requestAnimationFrame(() => {
+        focusAtOffset(restoreCursorOffset);
+        onCursorRestoreComplete?.(restoreCursorSequence);
+      });
+    }, [focusAtOffset, onCursorRestoreComplete, restoreCursorOffset, restoreCursorSequence]);
+
+    return (
+      <div className="veloca-source-editor" data-file-path={filePath}>
+        <textarea
+          aria-label="Markdown source editor"
+          className="veloca-source-textarea"
+          ref={textareaRef}
+          spellCheck={false}
+          value={content}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          onInput={resizeTextarea}
+        />
+      </div>
+    );
+  }
+);
+
+const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   content,
   filePath,
+  onCursorRestoreComplete,
+  restoreCursorOffset,
+  restoreCursorSequence,
   theme,
   onChange,
   onToast
-}: MarkdownEditorProps): JSX.Element {
+}: MarkdownEditorProps, ref): JSX.Element {
   const contentRef = useRef(content);
   const activeFilePathRef = useRef(filePath);
   const lastEditorContentRef = useRef(content);
@@ -3898,6 +4244,107 @@ function MarkdownEditor({
   useEffect(() => {
     editorInstanceRef.current = editor;
   }, [editor]);
+
+  const getCursorMarkdownOffset = useCallback((): number | null => {
+    const currentEditor = editorInstanceRef.current;
+
+    if (!currentEditor) {
+      return null;
+    }
+
+    const marker = createSourceCursorMarker();
+    const insertPos = currentEditor.state.selection.from;
+    const originalFrom = currentEditor.state.selection.from;
+    const originalTo = currentEditor.state.selection.to;
+
+    syncingRef.current = true;
+
+    try {
+      currentEditor.view.dispatch(currentEditor.state.tr.insertText(marker, insertPos));
+      const markdownWithMarker = transformMarkdownFromEditor(currentEditor.getMarkdown());
+      const markerOffset = markdownWithMarker.indexOf(marker);
+      const deleteTo = Math.min(insertPos + marker.length, currentEditor.state.doc.content.size);
+      currentEditor.view.dispatch(currentEditor.state.tr.delete(insertPos, deleteTo));
+
+      const selectionFrom = clampNumber(originalFrom, 0, currentEditor.state.doc.content.size);
+      const selectionTo = clampNumber(originalTo, selectionFrom, currentEditor.state.doc.content.size);
+      currentEditor.view.dispatch(
+        currentEditor.state.tr.setSelection(TextSelection.create(currentEditor.state.doc, selectionFrom, selectionTo))
+      );
+
+      return markerOffset >= 0 ? markerOffset : null;
+    } catch {
+      return null;
+    } finally {
+      syncingRef.current = false;
+      lastEditorContentRef.current = contentRef.current;
+    }
+  }, []);
+
+  const focusAtMarkdownOffset = useCallback((offset: number) => {
+    const currentEditor = editorInstanceRef.current;
+
+    if (!currentEditor) {
+      return;
+    }
+
+    const currentContent = contentRef.current;
+    const safeOffset = clampNumber(offset, 0, currentContent.length);
+    const marker = createSourceCursorMarker();
+    const markedContent = `${currentContent.slice(0, safeOffset)}${marker}${currentContent.slice(safeOffset)}`;
+
+    syncingRef.current = true;
+
+    try {
+      currentEditor.commands.setContent(transformMarkdownForEditor(markedContent), {
+        contentType: 'markdown',
+        emitUpdate: false
+      });
+
+      const markerRange = findTextMarkerRange(currentEditor.state.doc, marker);
+
+      if (!markerRange) {
+        currentEditor.commands.setContent(transformMarkdownForEditor(currentContent), {
+          contentType: 'markdown',
+          emitUpdate: false
+        });
+        currentEditor.commands.focus();
+        currentEditor.view.dispatch(
+          currentEditor.state.tr.setSelection(getClosestTextSelection(currentEditor, safeOffset))
+        );
+        return;
+      }
+
+      const transaction = currentEditor.state.tr.delete(markerRange.from, markerRange.to);
+      const nextSelection = TextSelection.near(transaction.doc.resolve(markerRange.from));
+      currentEditor.view.dispatch(transaction.setSelection(nextSelection));
+      currentEditor.commands.focus();
+    } finally {
+      syncingRef.current = false;
+      lastEditorContentRef.current = contentRef.current;
+      void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
+    }
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusAtMarkdownOffset,
+      getCursorMarkdownOffset
+    }),
+    [focusAtMarkdownOffset, getCursorMarkdownOffset]
+  );
+
+  useEffect(() => {
+    if (typeof restoreCursorOffset !== 'number' || restoreCursorSequence === null || restoreCursorSequence === undefined) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      focusAtMarkdownOffset(restoreCursorOffset);
+      onCursorRestoreComplete?.(restoreCursorSequence);
+    });
+  }, [focusAtMarkdownOffset, onCursorRestoreComplete, restoreCursorOffset, restoreCursorSequence]);
 
   useEffect(() => {
     if (!editor) {
@@ -4346,7 +4793,7 @@ function MarkdownEditor({
       <EditorContent editor={editor} />
     </div>
   );
-}
+});
 
 interface NameDialogProps {
   description: string;
