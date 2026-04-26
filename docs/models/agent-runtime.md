@@ -153,7 +153,7 @@ await veloca.InvokeAgent(input, {
 
 Important implementation detail: `ProcessTools` parses the tool call arguments JSON and calls the implementation as `fn(...Object.values(args))`. Veloca-owned workspace tools therefore expose a single top-level `input` object and unwrap that object inside the backend adapter. This avoids bugs where the model emits valid JSON with fields in a different order, such as `{"description":"...","command":"pwd"}`, which would otherwise be passed as positional arguments incorrectly.
 
-Veloca currently exposes ten backend-owned tools:
+Veloca currently exposes eleven backend-owned tools:
 
 - `get_workspace_directory_tree`: read-only directory-tree inspection for the active workspace. It merges Veloca default ignore rules with the workspace `.velocaignore` file and the optional `velocaignore` tool argument, and never reads file contents.
 - `glob_search`: read-only filename search for the active workspace. It supports brace expansion, honors Veloca ignore rules, scopes searches to the active workspace, deduplicates results, sorts recent files first, and returns at most 100 file paths.
@@ -161,12 +161,13 @@ Veloca currently exposes ten backend-owned tools:
 - `read_file`: read-only text-file access for the active workspace. It supports filesystem text files and database virtual files, enforces workspace boundaries, rejects binary or oversized files, and returns line-windowed content with `offset` and `limit`.
 - `edit_file`: targeted text replacement for existing files in the active workspace. It supports filesystem files and database virtual files, enforces workspace boundaries, requires an exact non-empty `old_string`, and returns the original file plus a structured patch.
 - `write_file`: text-file write access for the active workspace. It supports filesystem files and SQLite-backed database virtual files, enforces active workspace boundaries, creates missing parent folders, limits content to `10MB`, returns `create` or `update`, and includes the original content plus a structured full-file patch.
+- `WebFetch`: read-only URL fetch for a single link. It fetches the URL, upgrades non-local `http` URLs to `https`, converts HTML into readable text, and returns a prompt-aware summary with HTTP metadata.
 - `WebSearch`: read-only web search for current external information. It searches a configurable HTML endpoint, parses cited results, supports allowed/blocked domain filters, deduplicates URLs, and returns at most 8 result links.
 - `REPL`: sandboxed short code execution for the active `filesystem` workspace. It supports Python, JavaScript/Node.js, and Shell snippets, detects available runtimes, blocks network access through macOS `sandbox-exec`, applies a timeout, and truncates each output stream at `16384` bytes.
 - `PowerShell`: foreground PowerShell execution for the active `filesystem` workspace. It detects `pwsh` or `powershell`, accepts workspace-scoped `cwd`, blocks background execution and dangerous commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 - `run_bash_command`: sandboxed foreground Bash execution for the active `filesystem` workspace. It runs through macOS `sandbox-exec`, blocks network access, limits writes to the workspace, accepts `cwd` as either workspace-relative or an absolute path inside the registered workspace, rejects dangerous/background/privileged commands, captures stdout/stderr, applies a timeout, and truncates each output stream at `16384` bytes.
 
-For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. For direct PowerShell requests that mention `PowerShell` or `pwsh`, Veloca adds a similar hint for the `PowerShell` tool. For direct short-code execution requests that mention `REPL` or ask to run Python/Node/Shell snippets, Veloca adds a hint for the `REPL` tool. When the UI Web Search toggle is enabled, or when the prompt explicitly asks for online/web search, Veloca adds a hint for `WebSearch`. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same tool call after the first tool result instead of producing the final answer.
+For direct user requests such as "运行 pwd" or "run pwd", Veloca adds a per-message `<tool-routing-hint>` that tells the model to call `run_bash_command` with arguments inside `input` for safe commands. For direct PowerShell requests that mention `PowerShell` or `pwsh`, Veloca adds a similar hint for the `PowerShell` tool. For direct short-code execution requests that mention `REPL` or ask to run Python/Node/Shell snippets, Veloca adds a hint for the `REPL` tool. When the UI Web Search toggle is enabled, or when the prompt explicitly asks for online/web search, Veloca adds a hint for `WebSearch`. When the user prompt contains a URL, Veloca adds a hint for `WebFetch` so the model reads the linked content before making claims about it. Runtime `toolChoice` remains `"auto"` intentionally: `otherone-agent` reuses the same `toolChoice` across tool-loop iterations, so forcing a single function can make the model repeat the same tool call after the first tool result instead of producing the final answer.
 
 ### `glob_search` Tool
 
@@ -246,6 +247,23 @@ For database workspaces, `path` may be an existing `veloca-db://entry/...` file 
 Use `edit_file` instead of `write_file` for targeted replacements in existing files. The tool returns `type: "create"` when no previous file existed and `type: "update"` when existing content was replaced. `originalFile` is `null` for creates and the prior file content for updates. `structuredPatch` is a compact full-file patch envelope for UI or audit display; `gitDiff` is reserved and currently `null`.
 
 After a successful `write_file`, the backend emits a `workspace:changed` IPC event with a fresh workspace snapshot. The renderer subscribes through `window.veloca.workspace.onChanged(...)` and refreshes the file tree from that snapshot, so Agent-created filesystem files and database virtual files appear without requiring a manual reload.
+
+### `WebFetch` Tool
+
+`WebFetch` fetches one URL, converts the response into readable text, and returns a prompt-aware result. It is intended for links provided by the user or URLs discovered through `WebSearch` that need deeper inspection.
+
+| Field | Description |
+| --- | --- |
+| Tool name | `WebFetch` |
+| Parameters | `input: { url: string, prompt: string }` |
+| Return value | `bytes`, `code`, `codeText`, `result`, `durationMs`, `url` |
+| Timeout | `20000` ms |
+
+The backend accepts `http` and `https` URLs. Non-local `http` URLs are upgraded to `https`; local development URLs on `localhost`, `127.0.0.1`, and `::1` keep `http` so local preview servers remain usable.
+
+HTML responses are converted to readable text with scripts, styles, and tags removed. Other content types are treated as text. If the prompt asks for a title, the tool extracts the `<title>` element when available. If the prompt asks for a summary, it returns a compact content preview. Otherwise, it returns the prompt plus a content preview.
+
+When a user prompt contains a URL, Veloca adds a per-message `<tool-routing-hint>` that tells the model to use `WebFetch` before making claims about the linked page. The model must not say it opened, read, or verified a URL unless `WebFetch` returned a result.
 
 ### `WebSearch` Tool
 

@@ -92,6 +92,8 @@ const powerShellMaxTimeoutMs = 120000;
 const replDefaultTimeoutMs = 10000;
 const replMaxCodeLength = 20000;
 const replMaxTimeoutMs = 120000;
+const webFetchMaxPromptLength = 4000;
+const webFetchTimeoutMs = 20000;
 const webSearchDefaultBaseUrl = 'https://html.duckduckgo.com/html/';
 const webSearchMaxDomainFilters = 20;
 const webSearchMaxQueryLength = 500;
@@ -210,6 +212,11 @@ interface WebSearchInput {
   query: string;
 }
 
+interface WebFetchInput {
+  prompt: string;
+  url: string;
+}
+
 interface AgentToolEnvelopeInput {
   input?: unknown;
 }
@@ -310,6 +317,15 @@ interface WebSearchOutput {
   durationSeconds: number;
   query: string;
   results: WebSearchResultItem[];
+}
+
+interface WebFetchOutput {
+  bytes: number;
+  code: number;
+  codeText: string;
+  durationMs: number;
+  result: string;
+  url: string;
 }
 
 interface OutputBuffer {
@@ -930,6 +946,37 @@ function normalizeWebSearchToolInput(first: unknown, second: unknown, third: unk
   }
 
   return normalizeWebSearchInput(first, second, third);
+}
+
+function normalizeWebFetchInput(url: unknown, prompt: unknown): WebFetchInput {
+  if (typeof url !== 'string' || !url.trim()) {
+    throw new Error('WebFetch url is required.');
+  }
+
+  if (typeof prompt !== 'string' || !prompt.trim()) {
+    throw new Error('WebFetch prompt is required.');
+  }
+
+  const normalizedPrompt = prompt.trim();
+
+  if (normalizedPrompt.length > webFetchMaxPromptLength) {
+    throw new Error(`WebFetch prompt cannot exceed ${webFetchMaxPromptLength} characters.`);
+  }
+
+  return {
+    prompt: normalizedPrompt,
+    url: url.trim()
+  };
+}
+
+function normalizeWebFetchToolInput(first: unknown, second: unknown): WebFetchInput {
+  const input = unwrapToolInput(first);
+
+  if (isRecord(input)) {
+    return normalizeWebFetchInput(input.url, input.prompt);
+  }
+
+  return normalizeWebFetchInput(first, second);
 }
 
 function normalizeDirectoryTreeToolInput(first: unknown): string | undefined {
@@ -2153,6 +2200,152 @@ async function runWebSearch(input: WebSearchInput): Promise<WebSearchOutput> {
         tool_use_id: 'web_search_1'
       }
     ]
+  };
+}
+
+function normalizeFetchUrl(rawUrl: string): string {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(rawUrl);
+  } catch (error) {
+    throw new Error(getErrorMessage(error));
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('WebFetch url must use http or https.');
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const isLocalhost = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+
+  if (parsed.protocol === 'http:' && !isLocalhost) {
+    parsed.protocol = 'https:';
+  }
+
+  return parsed.toString();
+}
+
+async function fetchUrlText(url: string): Promise<{
+  body: string;
+  code: number;
+  codeText: string;
+  contentType: string;
+  finalUrl: string;
+}> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), webFetchTimeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+        'User-Agent': 'Veloca-Agent-WebFetch/0.1'
+      },
+      redirect: 'follow',
+      signal: controller.signal
+    });
+    const body = await response.text();
+
+    return {
+      body,
+      code: response.status,
+      codeText: response.statusText || 'Unknown',
+      contentType: response.headers.get('content-type') ?? '',
+      finalUrl: response.url || url
+    };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`WebFetch request exceeded timeout of ${webFetchTimeoutMs} ms.`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeFetchedContent(body: string, contentType: string): string {
+  if (contentType.toLowerCase().includes('html')) {
+    return htmlToText(body);
+  }
+
+  return body.trim();
+}
+
+function previewText(input: string, maxChars: number): string {
+  if (input.length <= maxChars) {
+    return input;
+  }
+
+  return `${input.slice(0, maxChars).trimEnd()}...`;
+}
+
+function extractTitle(content: string, rawBody: string, contentType: string): string | null {
+  if (contentType.toLowerCase().includes('html')) {
+    const match = rawBody.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+
+    if (match?.[1]) {
+      const title = htmlToText(match[1]).trim();
+
+      if (title) {
+        return title;
+      }
+    }
+  }
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmedLine = line.trim();
+
+    if (trimmedLine) {
+      return trimmedLine;
+    }
+  }
+
+  return null;
+}
+
+function summarizeWebFetch(
+  url: string,
+  prompt: string,
+  content: string,
+  rawBody: string,
+  contentType: string
+): string {
+  const lowerPrompt = prompt.toLowerCase();
+  const compact = collapseWhitespace(content);
+  let detail: string;
+
+  if (lowerPrompt.includes('title') || prompt.includes('标题')) {
+    const title = extractTitle(content, rawBody, contentType);
+    detail = title ? `Title: ${title}` : previewText(compact, 600);
+  } else if (
+    lowerPrompt.includes('summary') ||
+    lowerPrompt.includes('summarize') ||
+    prompt.includes('总结') ||
+    prompt.includes('摘要')
+  ) {
+    detail = previewText(compact, 900);
+  } else {
+    detail = `Prompt: ${prompt}\nContent preview:\n${previewText(compact, 900)}`;
+  }
+
+  return `Fetched ${url}\n${detail}`;
+}
+
+async function runWebFetch(input: WebFetchInput): Promise<WebFetchOutput> {
+  const startedAt = Date.now();
+  const requestUrl = normalizeFetchUrl(input.url);
+  const response = await fetchUrlText(requestUrl);
+  const normalized = normalizeFetchedContent(response.body, response.contentType);
+
+  return {
+    bytes: Buffer.byteLength(response.body, 'utf8'),
+    code: response.code,
+    codeText: response.codeText,
+    durationMs: Date.now() - startedAt,
+    result: summarizeWebFetch(response.finalUrl, input.prompt, normalized, response.body, response.contentType),
+    url: response.finalUrl
   };
 }
 
@@ -4596,6 +4789,39 @@ function buildAgentTools() {
     {
       type: 'function',
       function: {
+        name: 'WebFetch',
+        description:
+          'Fetch a URL, convert it into readable text, and answer a prompt about it. Use when the user provides a link that needs to be opened or inspected.',
+        parameters: {
+          type: 'object',
+          properties: {
+            input: {
+              type: 'object',
+              description: 'Tool input object. Always pass arguments inside this object.',
+              properties: {
+                url: {
+                  type: 'string',
+                  format: 'uri',
+                  description: 'The URL to fetch. Non-local http URLs are upgraded to https before fetching.'
+                },
+                prompt: {
+                  type: 'string',
+                  description:
+                    'Question or instruction about the fetched content, such as summarize this page or what is the title.'
+                }
+              },
+              required: ['url', 'prompt'],
+              additionalProperties: false
+            }
+          },
+          required: ['input'],
+          additionalProperties: false
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
         name: 'WebSearch',
         description:
           'Search the web for current information and return cited results. Use when the user enables Web Search or asks for current external information.',
@@ -4779,6 +5005,8 @@ function buildAgentToolRealizers(context?: AgentRuntimeContext, hooks?: AgentRun
       editWorkspaceTextFile(context, normalizeEditFileToolInput(inputOrPath, oldString, newString, replaceAll), hooks),
     write_file: (inputOrPath?: unknown, content?: unknown) =>
       writeWorkspaceTextFile(context, normalizeWriteFileToolInput(inputOrPath, content), hooks),
+    WebFetch: (inputOrUrl?: unknown, prompt?: unknown) =>
+      runWebFetch(normalizeWebFetchToolInput(inputOrUrl, prompt)),
     WebSearch: (inputOrQuery?: unknown, allowedDomains?: unknown, blockedDomains?: unknown) =>
       runWebSearch(normalizeWebSearchToolInput(inputOrQuery, allowedDomains, blockedDomains)),
     REPL: (inputOrCode?: unknown, language?: unknown, timeoutMs?: unknown) =>
@@ -4868,6 +5096,8 @@ Use information in this priority order:
 - Use \`edit_file\` for precise replacements in existing text files. Provide an exact \`old_string\`, use \`replace_all\` only when every occurrence should change, and read the file first when you are unsure of the current content.
 - Use \`write_file\` only when the user clearly asks you to create, replace, or save a workspace file. It replaces the full file content, supports filesystem and database workspaces, and is limited to the active workspace.
 - Prefer \`edit_file\` over \`write_file\` for targeted changes. Before using \`write_file\`, read the relevant existing file first when updating a file and explain the intended write in your response. Do not use it for speculative drafts when a normal answer would be enough.
+- Use \`WebFetch\` when the user provides a URL that needs to be opened, inspected, summarized, or used as evidence. It fetches one URL, converts HTML to readable text, and answers a prompt about that page.
+- If a URL appears in the user request and the answer depends on its content, call \`WebFetch\` before making claims about the linked page. Do not claim that you opened, read, or verified a URL unless \`WebFetch\` returned a tool result.
 - Use \`WebSearch\` when the user enables Web Search or asks for current external information that is likely outside the workspace. Use \`allowed_domains\` or \`blocked_domains\` when the user asks to include or avoid specific sources.
 - Treat \`WebSearch\` results as source candidates, not as guaranteed truth. Cite the returned URLs in a Sources section when web results inform the answer.
 - Do not claim that you searched the web unless \`WebSearch\` returned a tool result for this request.
@@ -4918,6 +5148,10 @@ function isDirectPowerShellCommandRequest(prompt: string): boolean {
   }
 
   return /\b(powershell|pwsh)\b/i.test(normalizedPrompt);
+}
+
+function hasUrlInPrompt(prompt: string): boolean {
+  return /https?:\/\/[^\s<>"')\]]+/i.test(prompt);
 }
 
 function isDirectWebSearchRequest(prompt: string): boolean {
@@ -4984,6 +5218,19 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
         '- Do not say that web search is unavailable before trying the tool.',
         '- If web results inform the final answer, include a Sources section with returned URLs.',
         '- If the tool is unavailable, blocked, or returns no useful results, report that clearly.',
+        '</tool-routing-hint>'
+      ].join('\n')
+    );
+  }
+
+  if (hasUrlInPrompt(prompt)) {
+    metadata.push(
+      [
+        '<tool-routing-hint>',
+        '- The user message contains at least one URL.',
+        '- If answering requires the linked content, call `WebFetch` with arguments inside the required `input` object before making claims about the page.',
+        '- Use the user request as the `prompt` for `WebFetch`, or ask a concise question about the page when the user intent is unclear.',
+        '- If WebFetch fails, report the tool result clearly instead of inventing page content.',
         '</tool-routing-hint>'
       ].join('\n')
     );
