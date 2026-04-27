@@ -116,6 +116,7 @@ interface GitHubRepositoryResponse {
 const versionRepositoryName = 'veloca-version-manager';
 const versionProviderGitHub = 1;
 const defaultBranch = 'main';
+const defaultBranchRef = `refs/heads/${defaultBranch}`;
 
 function getVersionRootPath(): string {
   return join(app.getPath('userData'), 'version-manager');
@@ -123,6 +124,10 @@ function getVersionRootPath(): string {
 
 function getShadowRepositoryPath(): string {
   return join(getVersionRootPath(), 'repo');
+}
+
+function getShadowGitDirectoryPath(): string {
+  return join(getShadowRepositoryPath(), '.git');
 }
 
 function normalizeTreePath(value: string): string {
@@ -147,6 +152,10 @@ function getWorkspaceIdSegment(workspaceFolderId: string, length?: number): stri
 
 function getContentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex');
+}
+
+function isGitOid(value: string): boolean {
+  return /^[0-9a-f]{40}$/i.test(value.trim());
 }
 
 function isMarkdownPath(filePath: string): boolean {
@@ -550,7 +559,33 @@ function getGitAuthor(github: GitHubAuthStatus): { email: string; name: string }
 }
 
 function isLocalGitRepositoryReady(): boolean {
-  return existsSync(join(getShadowRepositoryPath(), '.git'));
+  return existsSync(getShadowGitDirectoryPath());
+}
+
+function hasLocalDefaultBranchRef(): boolean {
+  return existsSync(join(getShadowGitDirectoryPath(), ...defaultBranchRef.split('/')));
+}
+
+function repairDefaultBranchRef(): void {
+  if (!isLocalGitRepositoryReady()) {
+    return;
+  }
+
+  const gitdir = getShadowGitDirectoryPath();
+  const legacyShortRefPath = join(gitdir, defaultBranch);
+  const fullRefPath = join(gitdir, ...defaultBranchRef.split('/'));
+
+  if (existsSync(legacyShortRefPath)) {
+    const legacyRefValue = readFileSync(legacyShortRefPath, 'utf8').trim();
+
+    if (isGitOid(legacyRefValue)) {
+      mkdirSync(dirname(fullRefPath), { recursive: true });
+      writeFileSync(fullRefPath, `${legacyRefValue}\n`, 'utf8');
+      rmSync(legacyShortRefPath, { force: true, recursive: true });
+    }
+  }
+
+  writeFileSync(join(gitdir, 'HEAD'), `ref: ${defaultBranchRef}\n`, 'utf8');
 }
 
 async function ensureLocalRepository(repository?: VersionRepositoryStatus): Promise<void> {
@@ -562,6 +597,8 @@ async function ensureLocalRepository(repository?: VersionRepositoryStatus): Prom
     await git.init({ defaultBranch, dir, fs });
   }
 
+  repairDefaultBranchRef();
+
   if (repository) {
     await git.addRemote({
       dir,
@@ -572,7 +609,28 @@ async function ensureLocalRepository(repository?: VersionRepositoryStatus): Prom
     });
     await git.setConfig({ dir, fs, path: 'user.name', value: 'Veloca Version Manager' });
     await git.setConfig({ dir, fs, path: 'user.email', value: 'version-manager@veloca.local' });
+    await git.setConfig({ dir, fs, path: `branch.${defaultBranch}.remote`, value: 'origin' });
+    await git.setConfig({ dir, fs, path: `branch.${defaultBranch}.merge`, value: defaultBranchRef });
   }
+}
+
+async function pushDefaultBranch(token: string): Promise<void> {
+  await git.push({
+    dir: getShadowRepositoryPath(),
+    fs,
+    http: electronGitHttpClient,
+    onAuth: () => ({ username: token }),
+    onPrePush: ({ localRef, remoteRef }) => {
+      if (localRef.ref !== defaultBranchRef || remoteRef.ref !== defaultBranchRef) {
+        throw new Error(`Veloca refused to push invalid Git refs: ${localRef.ref} -> ${remoteRef.ref}`);
+      }
+
+      return true;
+    },
+    ref: defaultBranchRef,
+    remote: 'origin',
+    remoteRef: defaultBranchRef
+  });
 }
 
 function getManagedFileRows(): VersionManagedFileRow[] {
@@ -973,15 +1031,24 @@ export async function syncMarkdownFile(filePath: string): Promise<VersionSyncRes
 export async function commitAndPushVersionChanges(message: string): Promise<VersionCommitResult> {
   const status = await ensureVersionRepository();
   const changes = status.changes;
+  const token = getRequiredGitHubToken();
 
   if (!changes.length) {
+    if (!hasLocalDefaultBranchRef()) {
+      return {
+        pushed: false,
+        status
+      };
+    }
+
+    await pushDefaultBranch(token);
+
     return {
-      pushed: false,
-      status
+      pushed: true,
+      status: await getVersionManagerStatus()
     };
   }
 
-  const token = getRequiredGitHubToken();
   const author = getGitAuthor(status.github);
   const commitMessage = message.trim() || 'Update Veloca markdown versions';
 
@@ -1008,18 +1075,10 @@ export async function commitAndPushVersionChanges(message: string): Promise<Vers
     dir: getShadowRepositoryPath(),
     fs,
     message: commitMessage,
-    ref: defaultBranch
+    ref: defaultBranchRef
   });
 
-  await git.push({
-    dir: getShadowRepositoryPath(),
-    fs,
-    http: electronGitHttpClient,
-    onAuth: () => ({ username: token }),
-    ref: defaultBranch,
-    remoteRef: `refs/heads/${defaultBranch}`,
-    remote: 'origin'
-  });
+  await pushDefaultBranch(token);
 
   return {
     commitOid,

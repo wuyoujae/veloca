@@ -4071,7 +4071,7 @@ function GitVersionPanel({
   onRefresh
 }: GitVersionPanelProps): JSX.Element {
   const repository = status.repository;
-  const canCommit = Boolean(repository) && status.pendingChangeCount > 0 && !loading;
+  const canCommit = Boolean(repository) && !loading;
 
   if (!status.github.connected) {
     return (
