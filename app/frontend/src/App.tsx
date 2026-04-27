@@ -204,6 +204,9 @@ interface GitHubAuthStatus {
   account: GitHubAccountProfile | null;
   connected: boolean;
   configured: boolean;
+  hasVersionManagementScope: boolean;
+  requiresRebindForVersionManagement: boolean;
+  scopes: string[];
 }
 
 interface GitHubDeviceBinding {
@@ -213,6 +216,32 @@ interface GitHubDeviceBinding {
   sessionId: string;
   userCode: string;
   verificationUri: string;
+}
+
+interface VersionRepositoryStatus {
+  htmlUrl: string;
+  localPath: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  remoteUrl: string;
+}
+
+interface VersionManagedChange {
+  filePath: string;
+  kind: 'added' | 'deleted' | 'modified';
+  relativePath: string;
+  shadowPath: string;
+  workspaceFolderId: string;
+}
+
+interface VersionManagerStatus {
+  changes: VersionManagedChange[];
+  github: GitHubAuthStatus;
+  managedFileCount: number;
+  pendingChangeCount: number;
+  repository: VersionRepositoryStatus | null;
+  shadowRepositoryReady: boolean;
 }
 
 type SplitPanePaths = [string, string];
@@ -232,6 +261,23 @@ const sidebarDefaultWidth = 300;
 const sidebarMinimumWidth = 148;
 const sidebarMaximumWidth = 420;
 const sidebarTextMinimumWidth = 292;
+const emptyGitHubStatus: GitHubAuthStatus = {
+  account: null,
+  connected: false,
+  configured: false,
+  hasVersionManagementScope: false,
+  requiresRebindForVersionManagement: false,
+  scopes: []
+};
+
+const createEmptyVersionManagerStatus = (github: GitHubAuthStatus = emptyGitHubStatus): VersionManagerStatus => ({
+  changes: [],
+  github,
+  managedFileCount: 0,
+  pendingChangeCount: 0,
+  repository: null,
+  shadowRepositoryReady: false
+});
 
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
@@ -694,13 +740,12 @@ export function App(): JSX.Element {
   const [focusMode, setFocusMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
-  const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>({
-    account: null,
-    connected: false,
-    configured: false
-  });
+  const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>(emptyGitHubStatus);
   const [githubBinding, setGithubBinding] = useState<GitHubDeviceBinding | null>(null);
   const [githubAuthLoading, setGithubAuthLoading] = useState(false);
+  const [versionStatus, setVersionStatus] = useState<VersionManagerStatus>(() => createEmptyVersionManagerStatus());
+  const [versionLoading, setVersionLoading] = useState(false);
+  const [versionCommitMessage, setVersionCommitMessage] = useState('');
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
@@ -921,13 +966,32 @@ export function App(): JSX.Element {
     saveActionTimersRef.current.set(filePath, timer);
   };
 
+  const refreshVersionManagerStatus = async () => {
+    if (!window.veloca?.versionManager) {
+      return;
+    }
+
+    const status = await window.veloca.versionManager.getStatus();
+    setVersionStatus(status);
+    setGithubStatus(status.github);
+  };
+
+  const applyGitHubStatus = (status: GitHubAuthStatus) => {
+    setGithubStatus(status);
+    setVersionStatus((current) => ({
+      ...current,
+      github: status
+    }));
+  };
+
   useEffect(() => {
     window.veloca?.settings.getTheme().then((storedTheme) => {
       applyTheme(storedTheme);
       setTheme(storedTheme);
     });
     window.veloca?.settings.getAutoSave().then(setAutoSave);
-    window.veloca?.github.getStatus().then(setGithubStatus);
+    window.veloca?.github.getStatus().then(applyGitHubStatus);
+    void refreshVersionManagerStatus();
 
     if (!window.veloca) {
       const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
@@ -1062,8 +1126,17 @@ export function App(): JSX.Element {
       return;
     }
 
-    window.veloca?.github.getStatus().then(setGithubStatus);
+    window.veloca?.github.getStatus().then(applyGitHubStatus);
+    void refreshVersionManagerStatus();
   }, [settingsOpen]);
+
+  useEffect(() => {
+    if (sidebarTab !== 'git') {
+      return;
+    }
+
+    void refreshVersionManagerStatus();
+  }, [sidebarTab]);
 
   useEffect(() => {
     if (!agentPaletteOpen) {
@@ -1232,8 +1305,9 @@ export function App(): JSX.Element {
       });
 
       const status = await window.veloca.github.completeBinding(binding.sessionId);
-      setGithubStatus(status);
+      applyGitHubStatus(status);
       setGithubBinding(null);
+      void refreshVersionManagerStatus();
       showToast({
         type: 'success',
         title: 'GitHub Account Bound',
@@ -1259,8 +1333,9 @@ export function App(): JSX.Element {
 
     try {
       const status = await window.veloca.github.unbind();
-      setGithubStatus(status);
+      applyGitHubStatus(status);
       setGithubBinding(null);
+      setVersionStatus(createEmptyVersionManagerStatus(status));
       showToast({
         type: 'success',
         title: 'GitHub Account Unbound',
@@ -1283,6 +1358,73 @@ export function App(): JSX.Element {
     }
 
     await window.veloca.github.openVerificationUrl(githubBinding.verificationUri);
+  };
+
+  const openAccountSettings = () => {
+    setSettingsPanel('account');
+    setSettingsOpen(true);
+    void refreshVersionManagerStatus();
+  };
+
+  const ensureVersionRepository = async () => {
+    if (!window.veloca?.versionManager || versionLoading) {
+      return;
+    }
+
+    setVersionLoading(true);
+
+    try {
+      const status = await window.veloca.versionManager.ensureRepository();
+      setVersionStatus(status);
+      setGithubStatus(status.github);
+      showToast({
+        type: 'success',
+        title: 'Version Repository Ready',
+        description: `${status.repository?.owner ?? 'GitHub'}/veloca-version-manager is ready.`
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Version Repository Not Ready',
+        description: error instanceof Error ? error.message : 'Unable to prepare the GitHub repository.'
+      });
+    } finally {
+      setVersionLoading(false);
+    }
+  };
+
+  const commitAndPushVersionChanges = async () => {
+    if (!window.veloca?.versionManager || versionLoading) {
+      return;
+    }
+
+    setVersionLoading(true);
+
+    try {
+      const result = await window.veloca.versionManager.commitAndPush(versionCommitMessage);
+      setVersionStatus(result.status);
+      setGithubStatus(result.status.github);
+
+      if (result.pushed) {
+        setVersionCommitMessage('');
+      }
+
+      showToast({
+        type: result.pushed ? 'success' : 'info',
+        title: result.pushed ? 'Version Pushed' : 'No Version Changes',
+        description: result.pushed
+          ? `Commit ${result.commitOid?.slice(0, 8) ?? ''} has been pushed.`
+          : 'There are no Veloca-managed markdown changes to commit.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Version Push Failed',
+        description: error instanceof Error ? error.message : 'Unable to commit and push version changes.'
+      });
+    } finally {
+      setVersionLoading(false);
+    }
   };
 
   const clearSaveTimer = () => {
@@ -1510,6 +1652,8 @@ export function App(): JSX.Element {
         setSaveStatus(documentContentRef.current === content ? 'saved' : 'unsaved');
       }
 
+      void refreshVersionManagerStatus();
+
       return true;
     } catch {
       clearFileSaveAction(filePath);
@@ -1650,6 +1794,7 @@ export function App(): JSX.Element {
         title: 'File Saved',
         description: savedFile.relativePath
       });
+      void refreshVersionManagerStatus();
     } catch {
       clearFileSaveAction(sourcePath);
       setOpenTabs((current) =>
@@ -2256,6 +2401,8 @@ export function App(): JSX.Element {
     } else {
       setSaveStatus('saved');
     }
+
+    void refreshVersionManagerStatus();
   };
 
   const enableSplitView = (
@@ -2936,7 +3083,7 @@ export function App(): JSX.Element {
                 >
                   <GitBranch size={14} />
                   <span className="tab-trigger-label">Git</span>
-                  <span className="tab-status-dot" aria-hidden="true" />
+                  {versionStatus.pendingChangeCount > 0 && <span className="tab-status-dot" aria-hidden="true" />}
                 </button>
               </div>
               <button
@@ -2975,7 +3122,16 @@ export function App(): JSX.Element {
                 onHeadingSelect={selectHeading}
               />
             ) : (
-              <GitVersionPanel />
+              <GitVersionPanel
+                commitMessage={versionCommitMessage}
+                loading={versionLoading}
+                status={versionStatus}
+                onCommitAndPush={commitAndPushVersionChanges}
+                onCommitMessageChange={setVersionCommitMessage}
+                onEnsureRepository={ensureVersionRepository}
+                onOpenAccountSettings={openAccountSettings}
+                onRefresh={() => void refreshVersionManagerStatus()}
+              />
             )}
           </div>
 
@@ -3636,17 +3792,41 @@ export function App(): JSX.Element {
                         </div>
                       )}
 
+                      {githubStatus.connected && githubStatus.requiresRebindForVersionManagement && (
+                        <div className="settings-warning">
+                          Version management needs GitHub repo permission. Rebind GitHub to create and push to the
+                          private veloca-version-manager repository.
+                        </div>
+                      )}
+
                       <div className="account-actions">
                         {githubStatus.connected ? (
-                          <button
-                            className="secondary-action danger"
-                            type="button"
-                            disabled={githubAuthLoading}
-                            onClick={unbindGitHubAccount}
-                          >
-                            <Unlink size={15} />
-                            Unbind GitHub
-                          </button>
+                          <>
+                            {githubStatus.requiresRebindForVersionManagement && (
+                              <button
+                                className="primary-action"
+                                type="button"
+                                disabled={!githubStatus.configured || githubAuthLoading}
+                                onClick={bindGitHubAccount}
+                              >
+                                {githubAuthLoading ? (
+                                  <RefreshCw className="spinning" size={15} />
+                                ) : (
+                                  <Github size={15} />
+                                )}
+                                Rebind GitHub
+                              </button>
+                            )}
+                            <button
+                              className="secondary-action danger"
+                              type="button"
+                              disabled={githubAuthLoading}
+                              onClick={unbindGitHubAccount}
+                            >
+                              <Unlink size={15} />
+                              Unbind GitHub
+                            </button>
+                          </>
                         ) : (
                           <button
                             className="primary-action"
@@ -3818,13 +3998,158 @@ function FileTree({
   );
 }
 
-function GitVersionPanel(): JSX.Element {
+interface GitVersionPanelProps {
+  commitMessage: string;
+  loading: boolean;
+  status: VersionManagerStatus;
+  onCommitAndPush: () => void;
+  onCommitMessageChange: (value: string) => void;
+  onEnsureRepository: () => void;
+  onOpenAccountSettings: () => void;
+  onRefresh: () => void;
+}
+
+const versionChangeLabels: Record<VersionManagedChange['kind'], string> = {
+  added: 'A',
+  deleted: 'D',
+  modified: 'M'
+};
+
+function GitVersionPanel({
+  commitMessage,
+  loading,
+  status,
+  onCommitAndPush,
+  onCommitMessageChange,
+  onEnsureRepository,
+  onOpenAccountSettings,
+  onRefresh
+}: GitVersionPanelProps): JSX.Element {
+  const repository = status.repository;
+  const canCommit = Boolean(repository) && status.pendingChangeCount > 0 && !loading;
+
+  if (!status.github.connected) {
+    return (
+      <section className="git-panel" aria-label="Veloca version management">
+        <div className="git-empty-state">
+          <Github size={20} />
+          <span>Bind a GitHub account before enabling Veloca version management.</span>
+        </div>
+        <div className="git-panel-actions">
+          <button className="primary-action" type="button" onClick={onOpenAccountSettings}>
+            <Github size={15} />
+            Account Settings
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (status.github.requiresRebindForVersionManagement || !status.github.hasVersionManagementScope) {
+    return (
+      <section className="git-panel" aria-label="Veloca version management">
+        <div className="git-empty-state">
+          <Info size={20} />
+          <span>GitHub is connected, but version management needs repo permission. Rebind GitHub in Account.</span>
+        </div>
+        <div className="git-panel-actions">
+          <button className="primary-action" type="button" onClick={onOpenAccountSettings}>
+            <Github size={15} />
+            Rebind GitHub
+          </button>
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className="git-panel" aria-label="Git version management">
-      <div className="git-empty-state">
-        <GitBranch size={20} />
-        <span>GitHub authorization is ready. Repository version management is not connected yet.</span>
+    <section className="git-panel" aria-label="Veloca version management">
+      <div className="git-panel-header">
+        <div>
+          <span className="git-panel-eyebrow">Veloca Version Manager</span>
+          <h3>GitHub Shadow Repository</h3>
+        </div>
+        <button className="git-icon-action" type="button" title="Refresh" onClick={onRefresh}>
+          <RefreshCw className={loading ? 'spinning' : ''} size={15} />
+        </button>
       </div>
+
+      {repository ? (
+        <div className="git-repository-card">
+          <div className="git-repository-title">
+            <CheckCircle2 size={16} />
+            <span>
+              {repository.owner}/{repository.name}
+            </span>
+          </div>
+          <a className="git-repository-link" href={repository.htmlUrl} rel="noreferrer" target="_blank">
+            Open on GitHub
+            <ExternalLink size={13} />
+          </a>
+          <span className="git-repository-path">{repository.localPath}</span>
+        </div>
+      ) : (
+        <div className="git-setup-card">
+          <GitBranch size={20} />
+          <span>Create the private GitHub repository veloca-version-manager for Veloca-managed markdown files.</span>
+          <button className="primary-action" type="button" disabled={loading} onClick={onEnsureRepository}>
+            {loading ? <RefreshCw className="spinning" size={15} /> : <Github size={15} />}
+            Create Repository
+          </button>
+        </div>
+      )}
+
+      <div className="git-summary-grid">
+        <div className="git-summary-item">
+          <span>Managed Files</span>
+          <strong>{status.managedFileCount}</strong>
+        </div>
+        <div className="git-summary-item">
+          <span>Pending</span>
+          <strong>{status.pendingChangeCount}</strong>
+        </div>
+      </div>
+
+      {repository && (
+        <>
+          <div className="git-commit-box">
+            <textarea
+              className="git-commit-input"
+              placeholder="Version message"
+              value={commitMessage}
+              onChange={(event) => onCommitMessageChange(event.target.value)}
+            />
+            <button className="primary-action git-commit-action" type="button" disabled={!canCommit} onClick={onCommitAndPush}>
+              {loading ? <RefreshCw className="spinning" size={15} /> : <Save size={15} />}
+              Commit & Push
+            </button>
+          </div>
+
+          <div className="git-change-list">
+            <div className="git-change-list-header">
+              <span>Veloca Markdown Changes</span>
+              <span>{status.pendingChangeCount}</span>
+            </div>
+
+            {status.changes.length > 0 ? (
+              status.changes.map((change) => (
+                <div className="git-change-item" key={change.shadowPath}>
+                  <FileText size={14} />
+                  <span className="git-change-name">{change.relativePath}</span>
+                  <span className={`git-change-badge ${change.kind}`}>
+                    {versionChangeLabels[change.kind]}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <div className="git-empty-state compact">
+                <CheckCircle2 size={17} />
+                <span>No Veloca-managed markdown changes yet.</span>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </section>
   );
 }

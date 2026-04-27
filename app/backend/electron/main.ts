@@ -53,6 +53,13 @@ import {
   validateWorkspacePath,
   type WorkspaceSnapshot
 } from '../services/workspace-service';
+import {
+  commitAndPushVersionChanges,
+  ensureVersionRepository,
+  getVersionManagerStatus,
+  listManagedChanges,
+  syncMarkdownFile
+} from '../services/version-manager-service';
 
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -208,11 +215,36 @@ function registerIpcHandlers(): void {
   ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
     return readMarkdownFile(filePath);
   });
-  ipcMain.handle('workspace:save-markdown', (_event, filePath: string, content: string) => {
-    return saveMarkdownFile(filePath, content);
+  ipcMain.handle('workspace:save-markdown', async (_event, filePath: string, content: string) => {
+    const file = saveMarkdownFile(filePath, content);
+
+    try {
+      await syncMarkdownFile(file.path);
+    } catch (error) {
+      console.error('Veloca version sync failed after saving markdown.', error);
+    }
+
+    return file;
   });
-  ipcMain.handle('workspace:save-markdown-as', (_event, parentPath: string, name: string, content: string) => {
-    return saveMarkdownFileAs(parentPath, name, content);
+  ipcMain.handle('workspace:save-markdown-as', async (_event, parentPath: string, name: string, content: string) => {
+    const result = saveMarkdownFileAs(parentPath, name, content);
+
+    try {
+      await syncMarkdownFile(result.file.path);
+    } catch (error) {
+      console.error('Veloca version sync failed after saving markdown as.', error);
+    }
+
+    return result;
+  });
+  ipcMain.handle('version-manager:get-status', () => getVersionManagerStatus());
+  ipcMain.handle('version-manager:ensure-repository', () => ensureVersionRepository());
+  ipcMain.handle('version-manager:sync-markdown-file', (_event, filePath: string) => {
+    return syncMarkdownFile(filePath);
+  });
+  ipcMain.handle('version-manager:list-managed-changes', () => listManagedChanges());
+  ipcMain.handle('version-manager:commit-and-push', (_event, message: string) => {
+    return commitAndPushVersionChanges(message);
   });
   ipcMain.handle('workspace:save-asset', (_event, documentPath: string, payload) => {
     return saveWorkspaceAsset(documentPath, payload);

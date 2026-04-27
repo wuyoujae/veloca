@@ -17,6 +17,9 @@ export interface GitHubAuthStatus {
   account: GitHubAccountProfile | null;
   connected: boolean;
   configured: boolean;
+  hasVersionManagementScope: boolean;
+  requiresRebindForVersionManagement: boolean;
+  scopes: string[];
 }
 
 export interface GitHubDeviceBinding {
@@ -66,7 +69,8 @@ interface GitHubUserResponse {
 const githubClientIdEnv = 'VELOCA_GITHUB_CLIENT_ID';
 const githubAccountKey = 'github.account';
 const githubTokenKey = 'github.token';
-const githubScope = 'read:user';
+export const githubVersionManagementScope = 'repo';
+const githubScope = githubVersionManagementScope;
 const githubDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 const pendingBindings = new Map<string, PendingGitHubBinding>();
 
@@ -168,6 +172,21 @@ function storeGitHubToken(token: string): void {
   setSetting(githubTokenKey, safeStorage.encryptString(token).toString('base64'));
 }
 
+export function getGitHubAccessToken(): string | null {
+  const encryptedToken = getSetting(githubTokenKey);
+
+  if (!encryptedToken) {
+    return null;
+  }
+
+  try {
+    assertSecureCredentialStorage();
+    return safeStorage.decryptString(Buffer.from(encryptedToken, 'base64'));
+  } catch {
+    return null;
+  }
+}
+
 function storeGitHubAccount(account: GitHubAccountProfile): void {
   setSetting(githubAccountKey, JSON.stringify(account));
 }
@@ -202,7 +221,18 @@ async function postGitHubForm<T>(url: string, values: Record<string, string>): P
   return payload;
 }
 
-async function fetchGitHubUser(accessToken: string): Promise<GitHubAccountProfile> {
+function parseGitHubScopes(value: string | null): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+}
+
+async function fetchGitHubUser(accessToken: string): Promise<{ account: GitHubAccountProfile; scopes: string[] }> {
   const response = await net.fetch('https://api.github.com/user', {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -219,12 +249,15 @@ async function fetchGitHubUser(accessToken: string): Promise<GitHubAccountProfil
   }
 
   return {
-    avatarUrl: typeof user.avatar_url === 'string' ? user.avatar_url : '',
-    connectedAt: Date.now(),
-    id: user.id,
-    login: user.login,
-    name: typeof user.name === 'string' ? user.name : null,
-    profileUrl: typeof user.html_url === 'string' ? user.html_url : `https://github.com/${user.login}`
+    account: {
+      avatarUrl: typeof user.avatar_url === 'string' ? user.avatar_url : '',
+      connectedAt: Date.now(),
+      id: user.id,
+      login: user.login,
+      name: typeof user.name === 'string' ? user.name : null,
+      profileUrl: typeof user.html_url === 'string' ? user.html_url : `https://github.com/${user.login}`
+    },
+    scopes: parseGitHubScopes(response.headers.get('x-oauth-scopes'))
   };
 }
 
@@ -234,13 +267,29 @@ function wait(ms: number): Promise<void> {
   });
 }
 
-export function getGitHubAuthStatus(): GitHubAuthStatus {
+export async function getGitHubAuthStatus(): Promise<GitHubAuthStatus> {
   const account = getStoredGitHubAccount();
+  const accessToken = getGitHubAccessToken();
+  let scopes: string[] = [];
+
+  if (accessToken) {
+    try {
+      const validated = await fetchGitHubUser(accessToken);
+      scopes = validated.scopes;
+    } catch {
+      scopes = [];
+    }
+  }
+
+  const hasVersionManagementScope = scopes.includes(githubVersionManagementScope);
 
   return {
     account,
     connected: Boolean(account),
-    configured: Boolean(getGitHubClientId())
+    configured: Boolean(getGitHubClientId()),
+    hasVersionManagementScope,
+    requiresRebindForVersionManagement: Boolean(account) && !hasVersionManagementScope,
+    scopes
   };
 }
 
@@ -304,7 +353,7 @@ export async function completeGitHubBinding(sessionId: string): Promise<GitHubAu
       });
 
       if (tokenResponse.access_token) {
-        const account = await fetchGitHubUser(tokenResponse.access_token);
+        const { account } = await fetchGitHubUser(tokenResponse.access_token);
 
         storeGitHubToken(tokenResponse.access_token);
         storeGitHubAccount(account);
@@ -335,5 +384,12 @@ export function unbindGitHubAccount(): GitHubAuthStatus {
   deleteSetting(githubTokenKey);
   deleteSetting(githubAccountKey);
 
-  return getGitHubAuthStatus();
+  return {
+    account: null,
+    connected: false,
+    configured: Boolean(getGitHubClientId()),
+    hasVersionManagementScope: false,
+    requiresRebindForVersionManagement: false,
+    scopes: []
+  };
 }

@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ThemeMode } from '../services/settings-store';
 import type { GitHubAuthStatus, GitHubDeviceBinding } from '../services/github-auth-service';
 import type {
+  VersionCommitResult,
+  VersionManagedChange,
+  VersionManagerStatus,
+  VersionSyncResult
+} from '../services/version-manager-service';
+import type {
   AgentInheritSessionsResult,
   AgentRuntimeContext,
   AgentSendMessageRequest,
@@ -76,6 +82,17 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('github:complete-binding', sessionId) as Promise<GitHubAuthStatus>,
     unbind: () => ipcRenderer.invoke('github:unbind') as Promise<GitHubAuthStatus>,
     openVerificationUrl: (url: string) => ipcRenderer.invoke('github:open-verification-url', url) as Promise<void>
+  },
+  versionManager: {
+    getStatus: () => ipcRenderer.invoke('version-manager:get-status') as Promise<VersionManagerStatus>,
+    ensureRepository: () =>
+      ipcRenderer.invoke('version-manager:ensure-repository') as Promise<VersionManagerStatus>,
+    syncMarkdownFile: (filePath: string) =>
+      ipcRenderer.invoke('version-manager:sync-markdown-file', filePath) as Promise<VersionSyncResult>,
+    listManagedChanges: () =>
+      ipcRenderer.invoke('version-manager:list-managed-changes') as Promise<VersionManagedChange[]>,
+    commitAndPush: (message: string) =>
+      ipcRenderer.invoke('version-manager:commit-and-push', message) as Promise<VersionCommitResult>
   },
   agent: {
     listSessions: (context?: AgentRuntimeContext) =>

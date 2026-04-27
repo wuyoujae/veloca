@@ -2,13 +2,13 @@
 
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
-The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, and local asset handling for richer Markdown documents.
+The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, local asset handling for richer Markdown documents, GitHub account binding, and Veloca-owned markdown version management through an isolated shadow repository.
 
 ## Project Overview
 
 Veloca is positioned as a clean, desktop-first markdown editor. Its first core use case is simple: open the app, write markdown in a Typora-like single-pane editor, and control the editor appearance without visual clutter.
 
-The project currently focuses on desktop-first workspace management, rich markdown editing, media attachment handling, and save behavior. Export, search, and synchronization are planned follow-up modules.
+The project currently focuses on desktop-first workspace management, rich markdown editing, media attachment handling, save behavior, and a simple version-management path for local filesystem markdown files. Export and search are planned follow-up modules.
 
 ## Project Approach
 
@@ -18,6 +18,7 @@ Veloca separates desktop, backend, and renderer responsibilities:
 - React owns the interactive editor interface.
 - Node services own persistent application behavior.
 - SQLite stores local application data with a minimal schema aligned to current requirements, including app settings and workspace folder roots.
+- Version management uses a Veloca-owned Git repository in Electron's user data directory. User project folders are never turned into Git repositories by Veloca, and existing user `.git` folders are not read or modified.
 
 TipTap is used as the editor engine because it is MIT licensed, gives Veloca more control over the final writing experience, and allows the editing surface to fully inherit the application's own layout, typography, and theme tokens.
 
@@ -39,6 +40,9 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - Dual-workspace attachment persistence for both filesystem and SQLite-backed workspaces.
 - Auto Save enabled by default, with `Cmd/Ctrl+S` manual save support.
 - Save status in the editor status bar.
+- GitHub account binding through the OAuth device authorization flow.
+- Veloca version management for saved local filesystem `.md` files through a private GitHub repository named `veloca-version-manager`.
+- Sidebar Git tab showing only Veloca-managed markdown changes from the isolated shadow repository.
 - Settings modal with polished dark/light theme switching.
 - SQLite-backed app setting storage for theme and Auto Save persistence.
 - Toast message component for user feedback.
@@ -47,7 +51,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 
 - Frontend: React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS
 - Desktop shell: Electron, electron-vite
-- Backend: Node.js, TypeScript
+- Backend: Node.js, TypeScript, isomorphic-git
 - Database: SQLite through `better-sqlite3`
 - Build tools: TypeScript, Vite, electron-vite
 - Testing: not configured yet; this foundation milestone is verified through typecheck and production build
@@ -113,9 +117,11 @@ Available environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
-| `VELOCA_GITHUB_CLIENT_ID` | None | GitHub OAuth App client ID used by the Account settings panel to bind a GitHub account through the device authorization flow. Device Flow must be enabled in the OAuth App settings. |
+| `VELOCA_GITHUB_CLIENT_ID` | None | GitHub OAuth App client ID used by the Account settings panel to bind a GitHub account through the device authorization flow. Device Flow must be enabled in the OAuth App settings. Veloca requests the `repo` scope so it can create and push to the private `veloca-version-manager` repository. |
 
 Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Header-level new files start as untitled in-memory tabs and are written only after the user chooses a destination through Veloca's workspace-scoped save dialog. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
+
+Version management data is stored under Electron's user data directory at `version-manager/repo`. This shadow repository contains copies of Veloca-saved local filesystem markdown files under `workspaces/<workspaceFolderId>/files/` plus a workspace `manifest.json`. Database-backed workspace files are intentionally skipped. Veloca also records repository metadata in `version_repositories` and managed markdown mappings in `version_managed_files`; both tables use UUID IDs and numeric status values.
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
@@ -170,20 +176,25 @@ Manual acceptance checks:
 26. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
 27. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
 28. Add `VELOCA_GITHUB_CLIENT_ID` to `.env`, open `Settings` → `Account`, click `Bind GitHub`, enter the displayed code on GitHub, and confirm the connected GitHub account appears in Veloca.
-29. Click `Settings` in the sidebar.
-30. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-31. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
-32. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+29. Switch to the sidebar `Git` tab and confirm it prompts for repository setup after GitHub is bound with the required `repo` permission.
+30. Click `Create Repository` and confirm GitHub has a private repository named `veloca-version-manager`.
+31. Edit and save a local filesystem `.md` file, then confirm the `Git` tab lists a Veloca markdown change.
+32. Confirm the original workspace folder does not gain a new `.git` folder and an existing user `.git` status is not changed by Veloca.
+33. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceFolderId>/files/`.
+34. Click `Settings` in the sidebar.
+35. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
+36. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
+37. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
 Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Use the editor header's `New File` button to create an untitled in-memory tab, then save it into a local or database workspace folder through Veloca's save-location dialog. Use the editor header's code/document toggle to switch the active file between rendered mode and editable raw Markdown source mode; this view preference is tracked independently for each open file. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams and empty 2 × 2 tables can be inserted from the editor slash command menu by typing `/`, `/m`, or `/t`; saved Mermaid diagrams still use the standard Markdown `mermaid` fenced code block format.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Use the editor header's `New File` button to create an untitled in-memory tab, then save it into a local or database workspace folder through Veloca's save-location dialog. Use the editor header's code/document toggle to switch the active file between rendered mode and editable raw Markdown source mode; this view preference is tracked independently for each open file. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams and empty 2 × 2 tables can be inserted from the editor slash command menu by typing `/`, `/m`, or `/t`; saved Mermaid diagrams still use the standard Markdown `mermaid` fenced code block format. After GitHub is bound, the `Git` tab can create the private `veloca-version-manager` repository and commit only Veloca-saved filesystem markdown copies from the shadow repository.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, and outline interactions.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, and isolated Veloca markdown version management.
 - Next: markdown export and search.
 - Later: plugin or extension system if product requirements justify it.
 
@@ -204,6 +215,10 @@ Veloca now loads real markdown files from added workspace folders. Click the add
 ### How are edits saved?
 
 Auto Save is enabled by default and writes changes after a short pause. You can turn it off in `Settings`; when it is off, use `Cmd/Ctrl+S` to save the active markdown file.
+
+### Does Veloca modify my project's Git repository?
+
+No. Veloca version management uses a separate shadow repository in Electron's user data directory. It copies only Veloca-saved local `.md` files into that repository and does not create, read, or modify `.git` inside user workspace folders.
 
 ## Contribution Guide
 

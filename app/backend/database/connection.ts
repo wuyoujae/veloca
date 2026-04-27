@@ -68,6 +68,33 @@ export function getDatabase(): Database.Database {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS version_repositories (
+      id TEXT PRIMARY KEY,
+      provider INTEGER NOT NULL,
+      owner TEXT NOT NULL,
+      repo_name TEXT NOT NULL,
+      remote_url TEXT NOT NULL,
+      html_url TEXT,
+      local_path TEXT NOT NULL,
+      status INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(provider, owner, repo_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS version_managed_files (
+      id TEXT PRIMARY KEY,
+      workspace_folder_id TEXT NOT NULL,
+      source_root_path TEXT NOT NULL,
+      source_path TEXT NOT NULL UNIQUE,
+      relative_path TEXT NOT NULL,
+      shadow_path TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      status INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   return database;

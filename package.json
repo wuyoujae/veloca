@@ -38,6 +38,7 @@
     "better-sqlite3": "^11.9.1",
     "dompurify": "^3.4.0",
     "electron-vite": "^3.0.0",
+    "isomorphic-git": "^1.37.5",
     "katex": "^0.16.45",
     "lucide-react": "^0.468.0",
     "marked": "^18.0.2",

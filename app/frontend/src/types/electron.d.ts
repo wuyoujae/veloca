@@ -71,6 +71,9 @@ interface GitHubAuthStatus {
   account: GitHubAccountProfile | null;
   connected: boolean;
   configured: boolean;
+  hasVersionManagementScope: boolean;
+  requiresRebindForVersionManagement: boolean;
+  scopes: string[];
 }
 
 interface GitHubDeviceBinding {
@@ -80,6 +83,44 @@ interface GitHubDeviceBinding {
   sessionId: string;
   userCode: string;
   verificationUri: string;
+}
+
+interface VersionRepositoryStatus {
+  htmlUrl: string;
+  localPath: string;
+  name: string;
+  owner: string;
+  private: boolean;
+  remoteUrl: string;
+}
+
+interface VersionManagedChange {
+  filePath: string;
+  kind: 'added' | 'deleted' | 'modified';
+  relativePath: string;
+  shadowPath: string;
+  workspaceFolderId: string;
+}
+
+interface VersionManagerStatus {
+  changes: VersionManagedChange[];
+  github: GitHubAuthStatus;
+  managedFileCount: number;
+  pendingChangeCount: number;
+  repository: VersionRepositoryStatus | null;
+  shadowRepositoryReady: boolean;
+}
+
+interface VersionSyncResult {
+  reason?: string;
+  shadowPath?: string;
+  synced: boolean;
+}
+
+interface VersionCommitResult {
+  commitOid?: string;
+  pushed: boolean;
+  status: VersionManagerStatus;
 }
 
 type AgentUiModel = 'lite' | 'pro' | 'ultra';
@@ -223,6 +264,13 @@ declare global {
         completeBinding: (sessionId: string) => Promise<GitHubAuthStatus>;
         unbind: () => Promise<GitHubAuthStatus>;
         openVerificationUrl: (url: string) => Promise<void>;
+      };
+      versionManager: {
+        getStatus: () => Promise<VersionManagerStatus>;
+        ensureRepository: () => Promise<VersionManagerStatus>;
+        syncMarkdownFile: (filePath: string) => Promise<VersionSyncResult>;
+        listManagedChanges: () => Promise<VersionManagedChange[]>;
+        commitAndPush: (message: string) => Promise<VersionCommitResult>;
       };
       agent: {
         listSessions: (context?: AgentRuntimeContext) => Promise<AgentStoredSession[]>;
