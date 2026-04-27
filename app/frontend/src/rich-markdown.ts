@@ -1979,6 +1979,11 @@ export function renderMarkdownToSafeHtml(content: string): string {
 
 export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sourceMessageId: string): boolean {
   if (!markdown.trim() || !editor.markdown) {
+    console.info('[Veloca AI Insert] rich insert aborted before parse', {
+      hasMarkdownManager: Boolean(editor.markdown),
+      markdownLength: markdown.length,
+      sourceMessageId
+    });
     return false;
   }
 
@@ -1999,6 +2004,16 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
     { type: 'paragraph' }
   ];
   const { from, to } = editor.state.selection;
+  const beforeSize = editor.state.doc.content.size;
+
+  console.info('[Veloca AI Insert] rich insert prepared content', {
+    beforeSize,
+    contentTypes: content.map((node) => node.type ?? 'unknown'),
+    from,
+    markdownLength: markdown.length,
+    sourceMessageId,
+    to
+  });
 
   const insertedAtSelection = editor
     .chain()
@@ -2007,16 +2022,32 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
     .setMeta(aiProvenanceInsertMeta, true)
     .run();
 
-  if (insertedAtSelection) {
+  console.info('[Veloca AI Insert] rich insert selection attempt finished', {
+    afterSize: editor.state.doc.content.size,
+    insertedAtSelection,
+    sizeChanged: editor.state.doc.content.size !== beforeSize
+  });
+
+  if (insertedAtSelection && editor.state.doc.content.size !== beforeSize) {
     return true;
   }
 
-  return editor
+  const beforeFallbackSize = editor.state.doc.content.size;
+  const insertedAtDocumentEnd = editor
     .chain()
     .focus()
     .insertContentAt(editor.state.doc.content.size, insertContent, { updateSelection: true })
     .setMeta(aiProvenanceInsertMeta, true)
     .run();
+
+  console.info('[Veloca AI Insert] rich insert document-end fallback finished', {
+    afterSize: editor.state.doc.content.size,
+    beforeFallbackSize,
+    insertedAtDocumentEnd,
+    sizeChanged: editor.state.doc.content.size !== beforeFallbackSize
+  });
+
+  return insertedAtDocumentEnd && editor.state.doc.content.size !== beforeFallbackSize;
 }
 
 function markAiGeneratedContent(content: JSONContent[]): JSONContent[] {

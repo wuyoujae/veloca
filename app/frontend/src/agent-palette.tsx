@@ -152,7 +152,7 @@ interface AgentPaletteProps {
   context: AgentRuntimeContext;
   onCanvasClose?: () => void;
   onCanvasOpen?: () => void;
-  onInsertAnswer?: (answer: string, messageId: string) => void;
+  onInsertAnswer?: (answer: string, messageId: string, targetFilePath?: string) => void;
   onToast?: (toast: { description: string; title: string; type: 'info' | 'success' }) => void;
   position: AgentPaletteAnchor;
   visible: boolean;
@@ -1531,7 +1531,15 @@ export function AgentPalette({
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={(event) => {
                         event.stopPropagation();
-                        onInsertAnswer?.(message.answer, message.id);
+                        console.info('[Veloca AI Insert] action button clicked', {
+                          answerLength: message.answer.length,
+                          hasInsertHandler: Boolean(onInsertAnswer),
+                          messageId: message.id,
+                          targetFilePath: context.currentFilePath,
+                          visible,
+                          workspaceType: context.workspaceType
+                        });
+                        onInsertAnswer?.(message.answer, message.id, context.currentFilePath);
                       }}
                     >
                       <FileInput size={14} />

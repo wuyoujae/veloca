@@ -92,6 +92,11 @@ type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
+const aiInsertLogPrefix = '[Veloca AI Insert]';
+
+function logAiInsertDebug(message: string, details?: Record<string, unknown>): void {
+  console.info(aiInsertLogPrefix, message, details ?? {});
+}
 
 interface ToastMessage {
   id: number;
@@ -1733,9 +1738,16 @@ export function App(): JSX.Element {
     attempt = 0
   ) => {
     const handle = renderedEditorHandlesRef.current.get(filePath);
+    logAiInsertDebug('looking for rendered editor handle', {
+      attempt,
+      filePath,
+      hasHandle: Boolean(handle),
+      renderedHandlePaths: Array.from(renderedEditorHandlesRef.current.keys()),
+      sourceHandlePaths: Array.from(sourceEditorHandlesRef.current.keys())
+    });
 
     if (!handle) {
-      if (attempt < 6) {
+      if (attempt < 20) {
         window.setTimeout(
           () => insertAiAnswerIntoRenderedEditor(filePath, answer, messageId, cursorOffset, attempt + 1),
           50
@@ -1752,10 +1764,22 @@ export function App(): JSX.Element {
     }
 
     if (typeof cursorOffset === 'number') {
+      logAiInsertDebug('restoring source cursor before insert', {
+        cursorOffset,
+        filePath
+      });
       handle.focusAtMarkdownOffset(cursorOffset);
     }
 
-    if (!handle.insertAiGeneratedContent(answer, messageId)) {
+    const inserted = handle.insertAiGeneratedContent(answer, messageId);
+    logAiInsertDebug('rendered editor insert result', {
+      answerLength: answer.length,
+      filePath,
+      inserted,
+      messageId
+    });
+
+    if (!inserted) {
       showToast({
         type: 'info',
         title: 'Insert Failed',
@@ -1771,8 +1795,22 @@ export function App(): JSX.Element {
     });
   };
 
-  const handleInsertAiAnswer = (answer: string, messageId: string) => {
-    if (!activeTabPath) {
+  const handleInsertAiAnswer = (answer: string, messageId: string, targetFilePath?: string) => {
+    const targetPath =
+      targetFilePath && openTabPathsRef.current.has(targetFilePath) ? targetFilePath : activeTabPath;
+    const targetTab = targetPath ? openTabs.find((tab) => tab.file.path === targetPath) ?? null : null;
+
+    logAiInsertDebug('App insert handler entered', {
+      activeTabPath,
+      answerLength: answer.length,
+      hasActiveTab: Boolean(activeTab),
+      hasTargetTab: Boolean(targetTab),
+      messageId,
+      targetFilePath,
+      targetPath
+    });
+
+    if (!targetPath) {
       showToast({
         type: 'info',
         title: 'Insert Failed',
@@ -1790,22 +1828,32 @@ export function App(): JSX.Element {
       return;
     }
 
-    const currentMode = getDocumentViewMode(activeTabPath);
+    const currentMode = getDocumentViewMode(targetPath);
+    logAiInsertDebug('resolved insert target', {
+      currentMode,
+      targetPath
+    });
 
     if (currentMode === 'source') {
-      const cursorOffset = sourceEditorHandlesRef.current.get(activeTabPath)?.getCursorOffset() ?? documentContent.length;
+      const fallbackContentLength =
+        targetPath === activeTabPath ? documentContent.length : targetTab?.draftContent.length ?? 0;
+      const cursorOffset = sourceEditorHandlesRef.current.get(targetPath)?.getCursorOffset() ?? fallbackContentLength;
+      logAiInsertDebug('switching source view to rendered before insert', {
+        cursorOffset,
+        targetPath
+      });
 
       setDocumentViewModesByPath((current) => ({
         ...current,
-        [activeTabPath]: 'rendered'
+        [targetPath]: 'rendered'
       }));
       window.requestAnimationFrame(() => {
-        insertAiAnswerIntoRenderedEditor(activeTabPath, answer, messageId, cursorOffset);
+        insertAiAnswerIntoRenderedEditor(targetPath, answer, messageId, cursorOffset);
       });
       return;
     }
 
-    insertAiAnswerIntoRenderedEditor(activeTabPath, answer, messageId);
+    insertAiAnswerIntoRenderedEditor(targetPath, answer, messageId);
   };
 
   const ensureTabGroup = (paths: string[], insertIndex?: number) => {
@@ -5514,11 +5562,31 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const currentEditor = editorInstanceRef.current;
 
     if (!currentEditor) {
+      logAiInsertDebug('MarkdownEditor handle has no editor instance', {
+        filePath
+      });
       return false;
     }
 
-    return insertAiGeneratedMarkdown(currentEditor, markdown, sourceMessageId);
-  }, []);
+    const beforeSize = currentEditor.state.doc.content.size;
+    const beforeSelection = {
+      from: currentEditor.state.selection.from,
+      to: currentEditor.state.selection.to
+    };
+    const inserted = insertAiGeneratedMarkdown(currentEditor, markdown, sourceMessageId);
+    const afterSize = currentEditor.state.doc.content.size;
+
+    logAiInsertDebug('MarkdownEditor handle finished insert command', {
+      afterSize,
+      beforeSelection,
+      beforeSize,
+      filePath,
+      inserted,
+      sourceMessageId
+    });
+
+    return inserted;
+  }, [filePath]);
 
   const getProvenanceSnapshot = useCallback((): JSONContent | null => {
     const currentEditor = editorInstanceRef.current;
