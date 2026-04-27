@@ -1984,25 +1984,37 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
 
   const parsed = editor.markdown.parse(transformMarkdownForEditor(markdown));
   const content = markAiGeneratedContent(parsed.content?.length ? parsed.content : [{ type: 'paragraph' }]);
+  const createdAt = Date.now();
   const provenanceId = `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const insertContent: JSONContent[] = [
+    {
+      type: 'velocaAiGeneratedBlock',
+      attrs: {
+        createdAt,
+        provenanceId,
+        sourceMessageId
+      },
+      content
+    },
+    { type: 'paragraph' }
+  ];
+  const { from, to } = editor.state.selection;
+
+  const insertedAtSelection = editor
+    .chain()
+    .focus()
+    .insertContentAt({ from, to }, insertContent, { updateSelection: true })
+    .setMeta(aiProvenanceInsertMeta, true)
+    .run();
+
+  if (insertedAtSelection) {
+    return true;
+  }
 
   return editor
     .chain()
     .focus()
-    .insertContent(
-      {
-        type: 'velocaAiGeneratedBlock',
-        attrs: {
-          createdAt: Date.now(),
-          provenanceId,
-          sourceMessageId
-        },
-        content
-      },
-      {
-        updateSelection: true
-      }
-    )
+    .insertContentAt(editor.state.doc.content.size, insertContent, { updateSelection: true })
     .setMeta(aiProvenanceInsertMeta, true)
     .run();
 }

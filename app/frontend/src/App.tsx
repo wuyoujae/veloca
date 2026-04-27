@@ -1772,7 +1772,21 @@ export function App(): JSX.Element {
   };
 
   const handleInsertAiAnswer = (answer: string, messageId: string) => {
-    if (!activeTabPath || !answer.trim()) {
+    if (!activeTabPath) {
+      showToast({
+        type: 'info',
+        title: 'Insert Failed',
+        description: 'Open a document before inserting an AI response.'
+      });
+      return;
+    }
+
+    if (!answer.trim()) {
+      showToast({
+        type: 'info',
+        title: 'Insert Failed',
+        description: 'The AI response is empty.'
+      });
       return;
     }
 

@@ -1528,7 +1528,11 @@ export function AgentPalette({
                       type="button"
                       title="Insert"
                       aria-label="Insert AI response"
-                      onClick={() => onInsertAnswer?.(message.answer, message.id)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onInsertAnswer?.(message.answer, message.id);
+                      }}
                     >
                       <FileInput size={14} />
                     </button>
