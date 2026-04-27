@@ -64,6 +64,7 @@ import {
   createRichEditorExtensions,
   extractFirstMediaUrl,
   getActiveTableInfo,
+  getEditorMarkdown,
   hydrateDocumentAssets,
   insertAiGeneratedMarkdown,
   insertActiveTableColumn,
@@ -5400,7 +5401,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
           return;
         }
 
-        const nextMarkdown = transformMarkdownFromEditor(currentEditor.getMarkdown());
+        const nextMarkdown = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
         lastEditorContentRef.current = nextMarkdown;
 
         if (nextMarkdown !== contentRef.current) {
@@ -5429,7 +5430,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       return;
     }
 
-    if (!fileChanged && !isProvenanceChange && transformMarkdownFromEditor(editor.getMarkdown()) === content) {
+    if (!fileChanged && !isProvenanceChange && transformMarkdownFromEditor(getEditorMarkdown(editor)) === content) {
       lastEditorContentRef.current = content;
       return;
     }
@@ -5480,7 +5481,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
     try {
       currentEditor.view.dispatch(currentEditor.state.tr.insertText(marker, insertPos));
-      const markdownWithMarker = transformMarkdownFromEditor(currentEditor.getMarkdown());
+      const markdownWithMarker = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
       const markerOffset = markdownWithMarker.indexOf(marker);
       const deleteTo = Math.min(insertPos + marker.length, currentEditor.state.doc.content.size);
       currentEditor.view.dispatch(currentEditor.state.tr.delete(insertPos, deleteTo));

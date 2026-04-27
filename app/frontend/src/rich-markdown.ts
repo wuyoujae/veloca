@@ -1995,6 +1995,31 @@ export function renderMarkdownToSafeHtml(content: string): string {
   return sanitizeHtml(renderMarkdownHtml(transformMarkdownForEditor(content)));
 }
 
+export function getEditorMarkdown(editor: Editor): string {
+  const json = unwrapVelocaInternalNodes(editor.state.doc.toJSON() as JSONContent);
+  return editor.markdown?.serialize(json) ?? editor.getMarkdown();
+}
+
+function unwrapVelocaInternalNodes(node: JSONContent): JSONContent {
+  const content = node.content?.flatMap((child) => {
+    const nextChild = unwrapVelocaInternalNodes(child);
+
+    if (nextChild.type === 'velocaAiGeneratedBlock') {
+      return nextChild.content ?? [];
+    }
+
+    return [nextChild];
+  });
+
+  const marks = node.marks?.filter((mark) => mark.type !== 'velocaAiGenerated' && mark.type !== 'velocaAiEdited');
+
+  return {
+    ...node,
+    ...(content ? { content } : {}),
+    ...(marks ? { marks } : {})
+  };
+}
+
 export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sourceMessageId: string): boolean {
   if (!markdown.trim() || !editor.markdown) {
     console.info('[Veloca AI Insert] rich insert aborted before parse', {
@@ -2700,7 +2725,7 @@ function normalizeFootnotesOnBlankLine(editor: Editor): boolean {
     return false;
   }
 
-  const markdown = editor.getMarkdown();
+  const markdown = getEditorMarkdown(editor);
 
   if (!/(^|\n)\[\^[^\]]+\]:\s?/m.test(markdown)) {
     return false;
