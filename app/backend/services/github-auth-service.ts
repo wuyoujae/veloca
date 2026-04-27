@@ -73,6 +73,8 @@ export const githubVersionManagementScope = 'repo';
 const githubScope = githubVersionManagementScope;
 const githubDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
 const pendingBindings = new Map<string, PendingGitHubBinding>();
+const githubNetworkRetryAttempts = 3;
+const githubNetworkRetryDelayMs = 900;
 
 let envLoaded = false;
 
@@ -201,24 +203,58 @@ function buildFormBody(values: Record<string, string>): URLSearchParams {
   return body;
 }
 
-async function postGitHubForm<T>(url: string, values: Record<string, string>): Promise<T> {
-  const response = await net.fetch(url, {
-    body: buildFormBody(values),
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Veloca'
-    },
-    method: 'POST'
-  });
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  const payload = (await response.json()) as T & { error?: string; error_description?: string };
+function isTransientGitHubNetworkError(error: unknown): boolean {
+  const message = getErrorMessage(error);
 
-  if (!response.ok) {
-    throw new Error(payload.error_description || payload.error || `GitHub request failed with ${response.status}.`);
+  return /net::ERR_|ERR_CONNECTION_CLOSED|ERR_CONNECTION_RESET|ERR_NETWORK_CHANGED|ERR_TIMED_OUT|ERR_INTERNET_DISCONNECTED|fetch failed|network/i.test(
+    message
+  );
+}
+
+async function retryGitHubNetworkRequest<T>(operation: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= githubNetworkRetryAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+
+      if (!isTransientGitHubNetworkError(error) || attempt === githubNetworkRetryAttempts) {
+        throw error;
+      }
+
+      await wait(githubNetworkRetryDelayMs * attempt);
+    }
   }
 
-  return payload;
+  throw lastError instanceof Error ? lastError : new Error('GitHub network request failed.');
+}
+
+async function postGitHubForm<T>(url: string, values: Record<string, string>): Promise<T> {
+  return retryGitHubNetworkRequest(async () => {
+    const response = await net.fetch(url, {
+      body: buildFormBody(values),
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Veloca'
+      },
+      method: 'POST'
+    });
+
+    const payload = (await response.json()) as T & { error?: string; error_description?: string };
+
+    if (!response.ok) {
+      throw new Error(payload.error_description || payload.error || `GitHub request failed with ${response.status}.`);
+    }
+
+    return payload;
+  });
 }
 
 function parseGitHubScopes(value: string | null): string[] {
@@ -233,32 +269,34 @@ function parseGitHubScopes(value: string | null): string[] {
 }
 
 async function fetchGitHubUser(accessToken: string): Promise<{ account: GitHubAccountProfile; scopes: string[] }> {
-  const response = await net.fetch('https://api.github.com/user', {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${accessToken}`,
-      'User-Agent': 'Veloca',
-      'X-GitHub-Api-Version': '2022-11-28'
+  return retryGitHubNetworkRequest(async () => {
+    const response = await net.fetch('https://api.github.com/user', {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${accessToken}`,
+        'User-Agent': 'Veloca',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    });
+
+    const user = (await response.json()) as GitHubUserResponse;
+
+    if (!response.ok || typeof user.id !== 'number' || typeof user.login !== 'string') {
+      throw new Error('Unable to validate the authorized GitHub account.');
     }
+
+    return {
+      account: {
+        avatarUrl: typeof user.avatar_url === 'string' ? user.avatar_url : '',
+        connectedAt: Date.now(),
+        id: user.id,
+        login: user.login,
+        name: typeof user.name === 'string' ? user.name : null,
+        profileUrl: typeof user.html_url === 'string' ? user.html_url : `https://github.com/${user.login}`
+      },
+      scopes: parseGitHubScopes(response.headers.get('x-oauth-scopes'))
+    };
   });
-
-  const user = (await response.json()) as GitHubUserResponse;
-
-  if (!response.ok || typeof user.id !== 'number' || typeof user.login !== 'string') {
-    throw new Error('Unable to validate the authorized GitHub account.');
-  }
-
-  return {
-    account: {
-      avatarUrl: typeof user.avatar_url === 'string' ? user.avatar_url : '',
-      connectedAt: Date.now(),
-      id: user.id,
-      login: user.login,
-      name: typeof user.name === 'string' ? user.name : null,
-      profileUrl: typeof user.html_url === 'string' ? user.html_url : `https://github.com/${user.login}`
-    },
-    scopes: parseGitHubScopes(response.headers.get('x-oauth-scopes'))
-  };
 }
 
 function wait(ms: number): Promise<void> {
@@ -341,25 +379,52 @@ export async function completeGitHubBinding(sessionId: string): Promise<GitHubAu
   }
 
   let interval = pendingBinding.interval;
+  let authorizedAccessToken: string | null = null;
+  let lastTransientErrorMessage = '';
 
   try {
     while (Date.now() < pendingBinding.expiresAt) {
       await wait(interval * 1000);
 
-      const tokenResponse = await postGitHubForm<GitHubTokenResponse>('https://github.com/login/oauth/access_token', {
-        client_id: pendingBinding.clientId,
-        device_code: pendingBinding.deviceCode,
-        grant_type: githubDeviceGrantType
-      });
+      if (authorizedAccessToken) {
+        try {
+          const { account } = await fetchGitHubUser(authorizedAccessToken);
+
+          storeGitHubToken(authorizedAccessToken);
+          storeGitHubAccount(account);
+          pendingBindings.delete(sessionId);
+
+          return getGitHubAuthStatus();
+        } catch (error) {
+          if (isTransientGitHubNetworkError(error)) {
+            lastTransientErrorMessage = getErrorMessage(error);
+            continue;
+          }
+
+          throw error;
+        }
+      }
+
+      let tokenResponse: GitHubTokenResponse;
+
+      try {
+        tokenResponse = await postGitHubForm<GitHubTokenResponse>('https://github.com/login/oauth/access_token', {
+          client_id: pendingBinding.clientId,
+          device_code: pendingBinding.deviceCode,
+          grant_type: githubDeviceGrantType
+        });
+      } catch (error) {
+        if (isTransientGitHubNetworkError(error)) {
+          lastTransientErrorMessage = getErrorMessage(error);
+          continue;
+        }
+
+        throw error;
+      }
 
       if (tokenResponse.access_token) {
-        const { account } = await fetchGitHubUser(tokenResponse.access_token);
-
-        storeGitHubToken(tokenResponse.access_token);
-        storeGitHubAccount(account);
-        pendingBindings.delete(sessionId);
-
-        return getGitHubAuthStatus();
+        authorizedAccessToken = tokenResponse.access_token;
+        continue;
       }
 
       if (tokenResponse.error === 'authorization_pending') {
@@ -372,6 +437,10 @@ export async function completeGitHubBinding(sessionId: string): Promise<GitHubAu
       }
 
       throw new Error(tokenResponse.error_description || tokenResponse.error || 'GitHub authorization failed.');
+    }
+
+    if (lastTransientErrorMessage) {
+      throw new Error(`GitHub authorization expired before Veloca could confirm it. Last network error: ${lastTransientErrorMessage}`);
     }
 
     throw new Error('GitHub authorization expired. Please start binding again.');
