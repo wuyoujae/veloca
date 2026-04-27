@@ -113,6 +113,7 @@ Available environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
+| `VELOCA_GITHUB_CLIENT_ID` | None | GitHub OAuth App client ID used by the Account settings panel to bind a GitHub account through the device authorization flow. Device Flow must be enabled in the OAuth App settings. |
 
 Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Header-level new files start as untitled in-memory tabs and are written only after the user chooses a destination through Veloca's workspace-scoped save dialog. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
 
@@ -168,10 +169,11 @@ Manual acceptance checks:
 25. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
 26. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
 27. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
-28. Click `Settings` in the sidebar.
-29. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-30. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
-31. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+28. Add `VELOCA_GITHUB_CLIENT_ID` to `.env`, open `Settings` → `Account`, click `Bind GitHub`, enter the displayed code on GitHub, and confirm the connected GitHub account appears in Veloca.
+29. Click `Settings` in the sidebar.
+30. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
+31. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
+32. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
 Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
 

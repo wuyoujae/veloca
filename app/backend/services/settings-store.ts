@@ -6,12 +6,16 @@ export type ThemeMode = 'dark' | 'light';
 const autoSaveKey = 'autoSave';
 const themeKey = 'theme';
 
-export function getTheme(): ThemeMode {
+export function getSetting(key: string): string | null {
   const row = getDatabase()
     .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
-    .get(themeKey) as { setting_value: string } | undefined;
+    .get(key) as { setting_value: string } | undefined;
 
-  return row?.setting_value === 'light' ? 'light' : 'dark';
+  return row?.setting_value ?? null;
+}
+
+export function getTheme(): ThemeMode {
+  return getSetting(themeKey) === 'light' ? 'light' : 'dark';
 }
 
 export function setTheme(theme: ThemeMode): ThemeMode {
@@ -20,11 +24,7 @@ export function setTheme(theme: ThemeMode): ThemeMode {
 }
 
 export function getAutoSave(): boolean {
-  const row = getDatabase()
-    .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
-    .get(autoSaveKey) as { setting_value: string } | undefined;
-
-  return row?.setting_value === 'false' ? false : true;
+  return getSetting(autoSaveKey) === 'false' ? false : true;
 }
 
 export function setAutoSave(enabled: boolean): boolean {
@@ -32,7 +32,7 @@ export function setAutoSave(enabled: boolean): boolean {
   return enabled;
 }
 
-function setSetting(key: string, value: string): void {
+export function setSetting(key: string, value: string): void {
   const now = Date.now();
 
   getDatabase()
@@ -46,4 +46,8 @@ function setSetting(key: string, value: string): void {
       `
     )
     .run(randomUUID(), key, value, now, now);
+}
+
+export function deleteSetting(key: string): void {
+  getDatabase().prepare('DELETE FROM app_settings WHERE setting_key = ?').run(key);
 }

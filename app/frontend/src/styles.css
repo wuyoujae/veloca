@@ -207,6 +207,7 @@ button {
 
 .sidebar.compact .sidebar-tabs-list {
   gap: 1px;
+  justify-content: center;
   padding: 3px;
 }
 
@@ -313,6 +314,7 @@ button {
 .sidebar.compact .tab-trigger {
   flex: 0 0 26px;
   width: 26px;
+  height: 26px;
   padding: 4px 0;
 }
 
@@ -397,7 +399,8 @@ button {
 }
 
 .toolbar-icon-btn,
-.primary-action {
+.primary-action,
+.secondary-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4333,9 +4336,21 @@ button {
   color: var(--foreground);
 }
 
-.primary-action:hover,
-.secondary-action:hover {
+.secondary-action.danger {
+  border-color: color-mix(in srgb, var(--git-deleted) 34%, var(--border));
+  color: var(--git-deleted);
+}
+
+.primary-action:hover:not(:disabled),
+.secondary-action:hover:not(:disabled) {
   transform: translateY(-1px);
+}
+
+.primary-action:disabled,
+.secondary-action:disabled {
+  cursor: default;
+  opacity: 0.55;
+  transform: none;
 }
 
 .name-dialog-overlay {
@@ -4723,6 +4738,11 @@ button {
   text-align: left;
 }
 
+.settings-nav-item:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
 .settings-nav-item.active {
   background: var(--accent);
   color: var(--foreground);
@@ -4808,6 +4828,160 @@ button {
   color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.account-provider-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--muted) 38%, transparent);
+  animation: contentEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.account-provider-header,
+.account-provider-title,
+.github-account-card,
+.github-account-info,
+.github-empty-state,
+.github-device-code,
+.account-actions {
+  display: flex;
+}
+
+.account-provider-header {
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.account-provider-title {
+  align-items: center;
+  gap: 8px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.account-status {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.account-status.connected {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+
+.github-account-card {
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+
+.github-account-avatar {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.github-account-info {
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.github-account-name,
+.github-account-login {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.github-account-name {
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.github-account-login {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.github-profile-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  transition: background-color 0.18s ease, color 0.18s ease;
+}
+
+.github-profile-link:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+.github-empty-state {
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.github-device-code {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--info) 42%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--info) 10%, transparent);
+}
+
+.github-device-code-label {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.github-device-code strong {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+
+.settings-warning {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--git-modified) 45%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--git-modified) 9%, transparent);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.account-actions {
+  justify-content: flex-end;
 }
 
 .theme-toggle {

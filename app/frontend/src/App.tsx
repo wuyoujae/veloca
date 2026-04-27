@@ -38,6 +38,7 @@ import {
   FolderPlus,
   GitCompare,
   GitBranch,
+  Github,
   Grid3X3,
   Info,
   ListTree,
@@ -49,6 +50,7 @@ import {
   PanelLeftOpen,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
   MoreVertical,
   Settings,
@@ -57,6 +59,7 @@ import {
   Table2,
   Trash2,
   Undo2,
+  Unlink,
   X
 } from 'lucide-react';
 import { marked } from 'marked';
@@ -90,6 +93,7 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline' | 'git';
+type SettingsPanel = 'editor' | 'account';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
@@ -192,6 +196,30 @@ interface SaveLocationOption {
   path: string;
   relativePath: string;
   source: 'database' | 'filesystem';
+}
+
+interface GitHubAccountProfile {
+  avatarUrl: string;
+  connectedAt: number;
+  id: number;
+  login: string;
+  name: string | null;
+  profileUrl: string;
+}
+
+interface GitHubAuthStatus {
+  account: GitHubAccountProfile | null;
+  connected: boolean;
+  configured: boolean;
+}
+
+interface GitHubDeviceBinding {
+  expiresAt: number;
+  interval: number;
+  scope: string;
+  sessionId: string;
+  userCode: string;
+  verificationUri: string;
 }
 
 type SplitPanePaths = [string, string];
@@ -663,6 +691,7 @@ export function App(): JSX.Element {
   const [documentContent, setDocumentContent] = useState('');
   const [activeHeadingId, setActiveHeadingId] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPanel, setSettingsPanel] = useState<SettingsPanel>('editor');
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [nameDialogValue, setNameDialogValue] = useState('');
   const [saveLocationDialog, setSaveLocationDialog] = useState<SaveLocationDialogState | null>(null);
@@ -672,6 +701,13 @@ export function App(): JSX.Element {
   const [focusMode, setFocusMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>({
+    account: null,
+    connected: false,
+    configured: false
+  });
+  const [githubBinding, setGithubBinding] = useState<GitHubDeviceBinding | null>(null);
+  const [githubAuthLoading, setGithubAuthLoading] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
@@ -898,6 +934,7 @@ export function App(): JSX.Element {
       setTheme(storedTheme);
     });
     window.veloca?.settings.getAutoSave().then(setAutoSave);
+    window.veloca?.github.getStatus().then(setGithubStatus);
 
     if (!window.veloca) {
       const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
@@ -1026,6 +1063,14 @@ export function App(): JSX.Element {
   useEffect(() => {
     return window.veloca?.agent.onOpenPalette(openAgentPalette);
   }, [openAgentPalette]);
+
+  useEffect(() => {
+    if (!settingsOpen) {
+      return;
+    }
+
+    window.veloca?.github.getStatus().then(setGithubStatus);
+  }, [settingsOpen]);
 
   useEffect(() => {
     if (!agentPaletteOpen) {
@@ -1175,6 +1220,76 @@ export function App(): JSX.Element {
       title: 'Editor Updated',
       description: `Auto Save is now ${enabled ? 'enabled' : 'disabled'}.`
     });
+  };
+
+  const bindGitHubAccount = async () => {
+    if (!window.veloca?.github || githubAuthLoading) {
+      return;
+    }
+
+    setGithubAuthLoading(true);
+
+    try {
+      const binding = await window.veloca.github.startBinding();
+      setGithubBinding(binding);
+      showToast({
+        type: 'info',
+        title: 'GitHub Authorization Started',
+        description: `Enter ${binding.userCode} in the GitHub page that just opened.`
+      });
+
+      const status = await window.veloca.github.completeBinding(binding.sessionId);
+      setGithubStatus(status);
+      setGithubBinding(null);
+      showToast({
+        type: 'success',
+        title: 'GitHub Account Bound',
+        description: status.account ? `Connected as ${status.account.login}.` : 'GitHub account connected.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'GitHub Binding Failed',
+        description: error instanceof Error ? error.message : 'Unable to bind GitHub account.'
+      });
+    } finally {
+      setGithubAuthLoading(false);
+    }
+  };
+
+  const unbindGitHubAccount = async () => {
+    if (!window.veloca?.github || githubAuthLoading) {
+      return;
+    }
+
+    setGithubAuthLoading(true);
+
+    try {
+      const status = await window.veloca.github.unbind();
+      setGithubStatus(status);
+      setGithubBinding(null);
+      showToast({
+        type: 'success',
+        title: 'GitHub Account Unbound',
+        description: 'The local GitHub token has been removed from Veloca.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'GitHub Unbind Failed',
+        description: error instanceof Error ? error.message : 'Unable to unbind GitHub account.'
+      });
+    } finally {
+      setGithubAuthLoading(false);
+    }
+  };
+
+  const openGitHubVerificationPage = async () => {
+    if (!githubBinding || !window.veloca?.github) {
+      return;
+    }
+
+    await window.veloca.github.openVerificationUrl(githubBinding.verificationUri);
   };
 
   const clearSaveTimer = () => {
@@ -3362,11 +3477,22 @@ export function App(): JSX.Element {
           >
             <aside className="settings-sidebar">
               <h2 className="settings-title">Settings</h2>
-              <button className="settings-nav-item active" type="button">
+              <button
+                className={settingsPanel === 'editor' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('editor')}
+              >
                 Editor
               </button>
               <button className="settings-nav-item" type="button">
                 Appearance
+              </button>
+              <button
+                className={settingsPanel === 'account' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('account')}
+              >
+                Account
               </button>
               <button className="settings-nav-item" type="button">
                 File & Sync
@@ -3391,68 +3517,158 @@ export function App(): JSX.Element {
               </button>
 
               <div className="settings-scroll-area">
-                <h3 className="settings-section-title">Editor Settings</h3>
+                {settingsPanel === 'editor' ? (
+                  <>
+                    <h3 className="settings-section-title">Editor Settings</h3>
 
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <span className="setting-label">Theme</span>
-                    <span className="setting-desc">Switch the entire editor between dark and light mode.</span>
-                  </div>
-                  <div className="theme-toggle" role="group" aria-label="Theme">
-                    <button
-                      className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
-                      type="button"
-                      onClick={() => updateTheme('dark')}
-                    >
-                      <Moon size={15} />
-                      Dark
-                    </button>
-                    <button
-                      className={theme === 'light' ? 'theme-option active' : 'theme-option'}
-                      type="button"
-                      onClick={() => updateTheme('light')}
-                    >
-                      <Sun size={15} />
-                      Light
-                    </button>
-                  </div>
-                </div>
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Theme</span>
+                        <span className="setting-desc">Switch the entire editor between dark and light mode.</span>
+                      </div>
+                      <div className="theme-toggle" role="group" aria-label="Theme">
+                        <button
+                          className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
+                          type="button"
+                          onClick={() => updateTheme('dark')}
+                        >
+                          <Moon size={15} />
+                          Dark
+                        </button>
+                        <button
+                          className={theme === 'light' ? 'theme-option active' : 'theme-option'}
+                          type="button"
+                          onClick={() => updateTheme('light')}
+                        >
+                          <Sun size={15} />
+                          Light
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <span className="setting-label">Font Family</span>
-                    <span className="setting-desc">Controls the font family of the Markdown editor.</span>
-                  </div>
-                  <select className="shadcn-select" defaultValue="inter">
-                    <option value="inter">Inter</option>
-                    <option value="system">System</option>
-                    <option value="mono">JetBrains Mono</option>
-                  </select>
-                </div>
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Font Family</span>
+                        <span className="setting-desc">Controls the font family of the Markdown editor.</span>
+                      </div>
+                      <select className="shadcn-select" defaultValue="inter">
+                        <option value="inter">Inter</option>
+                        <option value="system">System</option>
+                        <option value="mono">JetBrains Mono</option>
+                      </select>
+                    </div>
 
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <span className="setting-label">Auto Save</span>
-                    <span className="setting-desc">Save markdown changes after a short pause while writing.</span>
-                  </div>
-                  <Switch checked={autoSave} onChange={updateAutoSave} />
-                </div>
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Auto Save</span>
+                        <span className="setting-desc">Save markdown changes after a short pause while writing.</span>
+                      </div>
+                      <Switch checked={autoSave} onChange={updateAutoSave} />
+                    </div>
 
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <span className="setting-label">Line Numbers</span>
-                    <span className="setting-desc">Render line numbers alongside the markdown source code.</span>
-                  </div>
-                  <Switch checked={lineNumbers} onChange={setLineNumbers} />
-                </div>
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Line Numbers</span>
+                        <span className="setting-desc">Render line numbers alongside the markdown source code.</span>
+                      </div>
+                      <Switch checked={lineNumbers} onChange={setLineNumbers} />
+                    </div>
 
-                <div className="setting-row">
-                  <div className="setting-info">
-                    <span className="setting-label">Focus Mode</span>
-                    <span className="setting-desc">Dim surrounding text while writing in the active paragraph.</span>
-                  </div>
-                  <Switch checked={focusMode} onChange={setFocusMode} />
-                </div>
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Focus Mode</span>
+                        <span className="setting-desc">Dim surrounding text while writing in the active paragraph.</span>
+                      </div>
+                      <Switch checked={focusMode} onChange={setFocusMode} />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="settings-section-title">Account</h3>
+
+                    <div className="account-provider-panel">
+                      <div className="account-provider-header">
+                        <div className="account-provider-title">
+                          <Github size={18} />
+                          <span>GitHub</span>
+                        </div>
+                        <span className={githubStatus.connected ? 'account-status connected' : 'account-status'}>
+                          {githubStatus.connected ? 'Connected' : 'Not Connected'}
+                        </span>
+                      </div>
+
+                      {githubStatus.connected && githubStatus.account ? (
+                        <div className="github-account-card">
+                          <img
+                            className="github-account-avatar"
+                            src={githubStatus.account.avatarUrl}
+                            alt=""
+                          />
+                          <div className="github-account-info">
+                            <span className="github-account-name">
+                              {githubStatus.account.name ?? githubStatus.account.login}
+                            </span>
+                            <span className="github-account-login">@{githubStatus.account.login}</span>
+                          </div>
+                          <a
+                            className="github-profile-link"
+                            href={githubStatus.account.profileUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="github-empty-state">
+                          <Github size={22} />
+                          <span>Connect GitHub to enable Veloca version management authorization.</span>
+                        </div>
+                      )}
+
+                      {githubBinding && (
+                        <div className="github-device-code">
+                          <span className="github-device-code-label">Verification Code</span>
+                          <strong>{githubBinding.userCode}</strong>
+                          <button className="secondary-action" type="button" onClick={openGitHubVerificationPage}>
+                            <ExternalLink size={14} />
+                            Open GitHub
+                          </button>
+                        </div>
+                      )}
+
+                      {!githubStatus.configured && (
+                        <div className="settings-warning">
+                          Set VELOCA_GITHUB_CLIENT_ID in .env before binding a GitHub account.
+                        </div>
+                      )}
+
+                      <div className="account-actions">
+                        {githubStatus.connected ? (
+                          <button
+                            className="secondary-action danger"
+                            type="button"
+                            disabled={githubAuthLoading}
+                            onClick={unbindGitHubAccount}
+                          >
+                            <Unlink size={15} />
+                            Unbind GitHub
+                          </button>
+                        ) : (
+                          <button
+                            className="primary-action"
+                            type="button"
+                            disabled={!githubStatus.configured || githubAuthLoading}
+                            onClick={bindGitHubAccount}
+                          >
+                            {githubAuthLoading ? <RefreshCw className="spinning" size={15} /> : <Github size={15} />}
+                            {githubAuthLoading ? 'Waiting for Authorization' : 'Bind GitHub'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </section>

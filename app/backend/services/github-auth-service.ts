@@ -1,0 +1,339 @@
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { safeStorage } from 'electron';
+import { deleteSetting, getSetting, setSetting } from './settings-store';
+
+export interface GitHubAccountProfile {
+  avatarUrl: string;
+  connectedAt: number;
+  id: number;
+  login: string;
+  name: string | null;
+  profileUrl: string;
+}
+
+export interface GitHubAuthStatus {
+  account: GitHubAccountProfile | null;
+  connected: boolean;
+  configured: boolean;
+}
+
+export interface GitHubDeviceBinding {
+  expiresAt: number;
+  interval: number;
+  scope: string;
+  sessionId: string;
+  userCode: string;
+  verificationUri: string;
+}
+
+interface PendingGitHubBinding {
+  clientId: string;
+  deviceCode: string;
+  expiresAt: number;
+  interval: number;
+  scope: string;
+}
+
+interface GitHubDeviceCodeResponse {
+  device_code?: string;
+  error?: string;
+  error_description?: string;
+  expires_in?: number;
+  interval?: number;
+  user_code?: string;
+  verification_uri?: string;
+}
+
+interface GitHubTokenResponse {
+  access_token?: string;
+  error?: string;
+  error_description?: string;
+  interval?: number;
+  scope?: string;
+  token_type?: string;
+}
+
+interface GitHubUserResponse {
+  avatar_url?: string;
+  html_url?: string;
+  id?: number;
+  login?: string;
+  name?: string | null;
+}
+
+const githubClientIdEnv = 'VELOCA_GITHUB_CLIENT_ID';
+const githubAccountKey = 'github.account';
+const githubTokenKey = 'github.token';
+const githubScope = 'read:user';
+const githubDeviceGrantType = 'urn:ietf:params:oauth:grant-type:device_code';
+const pendingBindings = new Map<string, PendingGitHubBinding>();
+
+let envLoaded = false;
+
+function loadLocalEnv(): void {
+  if (envLoaded) {
+    return;
+  }
+
+  envLoaded = true;
+  const envPath = join(process.cwd(), '.env');
+
+  if (!existsSync(envPath)) {
+    return;
+  }
+
+  const lines = readFileSync(envPath, 'utf-8').split(/\r?\n/);
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine || trimmedLine.startsWith('#')) {
+      continue;
+    }
+
+    const separatorIndex = trimmedLine.indexOf('=');
+
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const key = trimmedLine.slice(0, separatorIndex).trim();
+    const rawValue = trimmedLine.slice(separatorIndex + 1).trim();
+    const value = rawValue.replace(/^["']|["']$/g, '');
+
+    if (!process.env[key]) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function getGitHubClientId(): string | null {
+  loadLocalEnv();
+  return process.env[githubClientIdEnv]?.trim() || null;
+}
+
+function getRequiredGitHubClientId(): string {
+  const clientId = getGitHubClientId();
+
+  if (!clientId) {
+    throw new Error(`${githubClientIdEnv} is required before binding a GitHub account.`);
+  }
+
+  return clientId;
+}
+
+function getStoredGitHubAccount(): GitHubAccountProfile | null {
+  const storedAccount = getSetting(githubAccountKey);
+
+  if (!storedAccount) {
+    return null;
+  }
+
+  try {
+    const account = JSON.parse(storedAccount) as Partial<GitHubAccountProfile>;
+
+    if (
+      typeof account.id !== 'number' ||
+      typeof account.login !== 'string' ||
+      typeof account.avatarUrl !== 'string' ||
+      typeof account.profileUrl !== 'string' ||
+      typeof account.connectedAt !== 'number'
+    ) {
+      return null;
+    }
+
+    return {
+      avatarUrl: account.avatarUrl,
+      connectedAt: account.connectedAt,
+      id: account.id,
+      login: account.login,
+      name: typeof account.name === 'string' ? account.name : null,
+      profileUrl: account.profileUrl
+    };
+  } catch {
+    return null;
+  }
+}
+
+function assertSecureCredentialStorage(): void {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure credential storage is unavailable on this device.');
+  }
+}
+
+function storeGitHubToken(token: string): void {
+  assertSecureCredentialStorage();
+  setSetting(githubTokenKey, safeStorage.encryptString(token).toString('base64'));
+}
+
+function storeGitHubAccount(account: GitHubAccountProfile): void {
+  setSetting(githubAccountKey, JSON.stringify(account));
+}
+
+function buildFormBody(values: Record<string, string>): URLSearchParams {
+  const body = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(values)) {
+    body.set(key, value);
+  }
+
+  return body;
+}
+
+async function postGitHubForm<T>(url: string, values: Record<string, string>): Promise<T> {
+  const response = await fetch(url, {
+    body: buildFormBody(values),
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Veloca'
+    },
+    method: 'POST'
+  });
+
+  const payload = (await response.json()) as T & { error?: string; error_description?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.error || `GitHub request failed with ${response.status}.`);
+  }
+
+  return payload;
+}
+
+async function fetchGitHubUser(accessToken: string): Promise<GitHubAccountProfile> {
+  const response = await fetch('https://api.github.com/user', {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${accessToken}`,
+      'User-Agent': 'Veloca',
+      'X-GitHub-Api-Version': '2022-11-28'
+    }
+  });
+
+  const user = (await response.json()) as GitHubUserResponse;
+
+  if (!response.ok || typeof user.id !== 'number' || typeof user.login !== 'string') {
+    throw new Error('Unable to validate the authorized GitHub account.');
+  }
+
+  return {
+    avatarUrl: typeof user.avatar_url === 'string' ? user.avatar_url : '',
+    connectedAt: Date.now(),
+    id: user.id,
+    login: user.login,
+    name: typeof user.name === 'string' ? user.name : null,
+    profileUrl: typeof user.html_url === 'string' ? user.html_url : `https://github.com/${user.login}`
+  };
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export function getGitHubAuthStatus(): GitHubAuthStatus {
+  const account = getStoredGitHubAccount();
+
+  return {
+    account,
+    connected: Boolean(account),
+    configured: Boolean(getGitHubClientId())
+  };
+}
+
+export async function startGitHubBinding(): Promise<GitHubDeviceBinding> {
+  const clientId = getRequiredGitHubClientId();
+  assertSecureCredentialStorage();
+
+  const payload = await postGitHubForm<GitHubDeviceCodeResponse>('https://github.com/login/device/code', {
+    client_id: clientId,
+    scope: githubScope
+  });
+
+  if (
+    !payload.device_code ||
+    !payload.user_code ||
+    !payload.verification_uri ||
+    typeof payload.expires_in !== 'number'
+  ) {
+    throw new Error(payload.error_description || payload.error || 'GitHub did not return a valid device code.');
+  }
+
+  const sessionId = randomUUID();
+  const interval = typeof payload.interval === 'number' && payload.interval > 0 ? payload.interval : 5;
+  const expiresAt = Date.now() + payload.expires_in * 1000;
+
+  pendingBindings.set(sessionId, {
+    clientId,
+    deviceCode: payload.device_code,
+    expiresAt,
+    interval,
+    scope: githubScope
+  });
+
+  return {
+    expiresAt,
+    interval,
+    scope: githubScope,
+    sessionId,
+    userCode: payload.user_code,
+    verificationUri: payload.verification_uri
+  };
+}
+
+export async function completeGitHubBinding(sessionId: string): Promise<GitHubAuthStatus> {
+  const pendingBinding = pendingBindings.get(sessionId);
+
+  if (!pendingBinding) {
+    throw new Error('GitHub binding session is no longer available.');
+  }
+
+  let interval = pendingBinding.interval;
+
+  try {
+    while (Date.now() < pendingBinding.expiresAt) {
+      await wait(interval * 1000);
+
+      const tokenResponse = await postGitHubForm<GitHubTokenResponse>('https://github.com/login/oauth/access_token', {
+        client_id: pendingBinding.clientId,
+        device_code: pendingBinding.deviceCode,
+        grant_type: githubDeviceGrantType
+      });
+
+      if (tokenResponse.access_token) {
+        const account = await fetchGitHubUser(tokenResponse.access_token);
+
+        storeGitHubToken(tokenResponse.access_token);
+        storeGitHubAccount(account);
+        pendingBindings.delete(sessionId);
+
+        return getGitHubAuthStatus();
+      }
+
+      if (tokenResponse.error === 'authorization_pending') {
+        continue;
+      }
+
+      if (tokenResponse.error === 'slow_down') {
+        interval = typeof tokenResponse.interval === 'number' ? tokenResponse.interval : interval + 5;
+        continue;
+      }
+
+      throw new Error(tokenResponse.error_description || tokenResponse.error || 'GitHub authorization failed.');
+    }
+
+    throw new Error('GitHub authorization expired. Please start binding again.');
+  } finally {
+    pendingBindings.delete(sessionId);
+  }
+}
+
+export function unbindGitHubAccount(): GitHubAuthStatus {
+  deleteSetting(githubTokenKey);
+  deleteSetting(githubAccountKey);
+
+  return getGitHubAuthStatus();
+}

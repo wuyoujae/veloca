@@ -19,6 +19,12 @@ import {
   type ThemeMode
 } from '../services/settings-store';
 import {
+  completeGitHubBinding,
+  getGitHubAuthStatus,
+  startGitHubBinding,
+  unbindGitHubAccount
+} from '../services/github-auth-service';
+import {
   createAgentSession,
   inheritAgentSessions,
   listAgentSessions,
@@ -113,6 +119,26 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:get-auto-save', () => getAutoSave());
   ipcMain.handle('settings:set-auto-save', (_event, enabled: boolean) => {
     return setAutoSave(Boolean(enabled));
+  });
+  ipcMain.handle('github:get-status', () => getGitHubAuthStatus());
+  ipcMain.handle('github:start-binding', async () => {
+    const binding = await startGitHubBinding();
+    await shell.openExternal(binding.verificationUri);
+
+    return binding;
+  });
+  ipcMain.handle('github:complete-binding', (_event, sessionId: string) => {
+    return completeGitHubBinding(sessionId);
+  });
+  ipcMain.handle('github:unbind', () => {
+    return unbindGitHubAccount();
+  });
+  ipcMain.handle('github:open-verification-url', async (_event, url: string) => {
+    if (url !== 'https://github.com/login/device') {
+      throw new Error('Only the GitHub device verification URL can be opened.');
+    }
+
+    await shell.openExternal(url);
   });
   ipcMain.handle('agent:send-message', (_event, request: AgentSendMessageRequest) => {
     return sendAgentMessage(request, {

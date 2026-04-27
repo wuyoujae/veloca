@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ThemeMode } from '../services/settings-store';
+import type { GitHubAuthStatus, GitHubDeviceBinding } from '../services/github-auth-service';
 import type {
   AgentInheritSessionsResult,
   AgentRuntimeContext,
@@ -67,6 +68,14 @@ contextBridge.exposeInMainWorld('veloca', {
   },
   app: {
     platform: process.platform
+  },
+  github: {
+    getStatus: () => ipcRenderer.invoke('github:get-status') as Promise<GitHubAuthStatus>,
+    startBinding: () => ipcRenderer.invoke('github:start-binding') as Promise<GitHubDeviceBinding>,
+    completeBinding: (sessionId: string) =>
+      ipcRenderer.invoke('github:complete-binding', sessionId) as Promise<GitHubAuthStatus>,
+    unbind: () => ipcRenderer.invoke('github:unbind') as Promise<GitHubAuthStatus>,
+    openVerificationUrl: (url: string) => ipcRenderer.invoke('github:open-verification-url', url) as Promise<void>
   },
   agent: {
     listSessions: (context?: AgentRuntimeContext) =>

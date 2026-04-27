@@ -58,6 +58,30 @@ interface SaveMarkdownFileAsResult {
   snapshot: WorkspaceSnapshot;
 }
 
+interface GitHubAccountProfile {
+  avatarUrl: string;
+  connectedAt: number;
+  id: number;
+  login: string;
+  name: string | null;
+  profileUrl: string;
+}
+
+interface GitHubAuthStatus {
+  account: GitHubAccountProfile | null;
+  connected: boolean;
+  configured: boolean;
+}
+
+interface GitHubDeviceBinding {
+  expiresAt: number;
+  interval: number;
+  scope: string;
+  sessionId: string;
+  userCode: string;
+  verificationUri: string;
+}
+
 type AgentUiModel = 'lite' | 'pro' | 'ultra';
 type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
 
@@ -192,6 +216,13 @@ declare global {
       };
       app: {
         platform: NodeJS.Platform;
+      };
+      github: {
+        getStatus: () => Promise<GitHubAuthStatus>;
+        startBinding: () => Promise<GitHubDeviceBinding>;
+        completeBinding: (sessionId: string) => Promise<GitHubAuthStatus>;
+        unbind: () => Promise<GitHubAuthStatus>;
+        openVerificationUrl: (url: string) => Promise<void>;
       };
       agent: {
         listSessions: (context?: AgentRuntimeContext) => Promise<AgentStoredSession[]>;
