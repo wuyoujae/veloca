@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { safeStorage } from 'electron';
+import { net, safeStorage } from 'electron';
 import { deleteSetting, getSetting, setSetting } from './settings-store';
 
 export interface GitHubAccountProfile {
@@ -183,7 +183,7 @@ function buildFormBody(values: Record<string, string>): URLSearchParams {
 }
 
 async function postGitHubForm<T>(url: string, values: Record<string, string>): Promise<T> {
-  const response = await fetch(url, {
+  const response = await net.fetch(url, {
     body: buildFormBody(values),
     headers: {
       Accept: 'application/json',
@@ -203,7 +203,7 @@ async function postGitHubForm<T>(url: string, values: Record<string, string>): P
 }
 
 async function fetchGitHubUser(accessToken: string): Promise<GitHubAccountProfile> {
-  const response = await fetch('https://api.github.com/user', {
+  const response = await net.fetch('https://api.github.com/user', {
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${accessToken}`,
