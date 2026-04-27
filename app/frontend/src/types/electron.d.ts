@@ -102,6 +102,15 @@ interface VersionManagedChange {
   workspaceFolderId: string;
 }
 
+interface VersionWorkspaceConfig {
+  displayName: string;
+  managedFileCount: number;
+  shadowPrefix: string;
+  sourceRootPath: string;
+  status: number;
+  workspaceFolderId: string;
+}
+
 interface VersionManagerStatus {
   changes: VersionManagedChange[];
   github: GitHubAuthStatus;
@@ -109,6 +118,7 @@ interface VersionManagerStatus {
   pendingChangeCount: number;
   repository: VersionRepositoryStatus | null;
   shadowRepositoryReady: boolean;
+  workspaceConfigs: VersionWorkspaceConfig[];
 }
 
 interface VersionSyncResult {

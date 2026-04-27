@@ -58,6 +58,7 @@ import {
   ensureVersionRepository,
   getVersionManagerStatus,
   listManagedChanges,
+  markWorkspaceVersionConfigRemoved,
   syncMarkdownFile
 } from '../services/version-manager-service';
 
@@ -283,6 +284,7 @@ function registerIpcHandlers(): void {
     return getWorkspaceSnapshot();
   });
   ipcMain.handle('workspace:remove-folder', (_event, workspaceFolderId: string) => {
+    markWorkspaceVersionConfigRemoved(workspaceFolderId);
     return removeWorkspaceFolder(workspaceFolderId);
   });
   ipcMain.handle('workspace:reveal', (_event, filePath: string) => {

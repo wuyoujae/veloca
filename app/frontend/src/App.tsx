@@ -235,6 +235,15 @@ interface VersionManagedChange {
   workspaceFolderId: string;
 }
 
+interface VersionWorkspaceConfig {
+  displayName: string;
+  managedFileCount: number;
+  shadowPrefix: string;
+  sourceRootPath: string;
+  status: number;
+  workspaceFolderId: string;
+}
+
 interface VersionManagerStatus {
   changes: VersionManagedChange[];
   github: GitHubAuthStatus;
@@ -242,6 +251,7 @@ interface VersionManagerStatus {
   pendingChangeCount: number;
   repository: VersionRepositoryStatus | null;
   shadowRepositoryReady: boolean;
+  workspaceConfigs: VersionWorkspaceConfig[];
 }
 
 type SplitPanePaths = [string, string];
@@ -276,7 +286,8 @@ const createEmptyVersionManagerStatus = (github: GitHubAuthStatus = emptyGitHubS
   managedFileCount: 0,
   pendingChangeCount: 0,
   repository: null,
-  shadowRepositoryReady: false
+  shadowRepositoryReady: false,
+  workspaceConfigs: []
 });
 
 const emptyWorkspace: WorkspaceSnapshot = {
@@ -4108,6 +4119,34 @@ function GitVersionPanel({
           <span>Pending</span>
           <strong>{status.pendingChangeCount}</strong>
         </div>
+      </div>
+
+      <div className="git-directory-section">
+        <div className="git-change-list-header">
+          <span>Managed Directories</span>
+          <span>{status.workspaceConfigs.length}</span>
+        </div>
+
+        {status.workspaceConfigs.length > 0 ? (
+          <div className="git-directory-list">
+            {status.workspaceConfigs.map((config) => (
+              <div className="git-directory-item" key={config.workspaceFolderId}>
+                <div className="git-directory-title">
+                  <Folder size={14} />
+                  <span>{config.displayName}</span>
+                  <strong>{config.managedFileCount}</strong>
+                </div>
+                <span className="git-directory-path">{config.sourceRootPath}</span>
+                <span className="git-directory-prefix">workspaces/{config.shadowPrefix}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="git-empty-state compact">
+            <Folder size={17} />
+            <span>Save a local markdown file to create its managed directory prefix.</span>
+          </div>
+        )}
       </div>
 
       {repository && (

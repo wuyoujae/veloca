@@ -121,7 +121,7 @@ Available environment variables:
 
 Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Header-level new files start as untitled in-memory tabs and are written only after the user chooses a destination through Veloca's workspace-scoped save dialog. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
 
-Version management data is stored under Electron's user data directory at `version-manager/repo`. This shadow repository contains copies of Veloca-saved local filesystem markdown files under `workspaces/<workspaceFolderId>/files/` plus a workspace `manifest.json`. Database-backed workspace files are intentionally skipped. Veloca also records repository metadata in `version_repositories` and managed markdown mappings in `version_managed_files`; both tables use UUID IDs and numeric status values.
+Version management data is stored under Electron's user data directory at `version-manager/repo`. This shadow repository contains copies of Veloca-saved local filesystem markdown files under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/` plus a workspace `manifest.json`. The directory prefix is generated once per filesystem workspace, stored locally, and shown read-only in the Git tab. Database-backed workspace files are intentionally skipped. Veloca records repository metadata in `version_repositories`, workspace directory prefixes in `version_workspace_configs`, and managed markdown mappings in `version_managed_files`; these tables use UUID IDs and numeric status values.
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
@@ -180,7 +180,7 @@ Manual acceptance checks:
 30. Click `Create Repository` and confirm GitHub has a private repository named `veloca-version-manager`.
 31. Edit and save a local filesystem `.md` file, then confirm the `Git` tab lists a Veloca markdown change.
 32. Confirm the original workspace folder does not gain a new `.git` folder and an existing user `.git` status is not changed by Veloca.
-33. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceFolderId>/files/`.
+33. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/`.
 34. Click `Settings` in the sidebar.
 35. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
 36. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.

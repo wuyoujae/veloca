@@ -20,19 +20,28 @@ version-manager/
   repo/
     .git/
     workspaces/
-      <workspaceFolderId>/
+      <workspaceSlug>-<shortWorkspaceId>/
         manifest.json
         files/
           <relativePath>.md
 ```
 
-The shadow repository is the only directory where Git is initialized. Local workspace files are copied into `workspaces/<workspaceFolderId>/files/` so multiple workspaces can contain the same relative file names without colliding.
+The shadow repository is the only directory where Git is initialized. Local workspace files are copied into `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/` so multiple workspaces can contain the same relative file names without colliding while still being readable in GitHub.
+
+The workspace prefix is generated once and then kept stable:
+
+- `displayName` uses the local workspace folder name.
+- The slug keeps Unicode letters and numbers, including Chinese names, and converts whitespace or path-unsafe characters to `-`.
+- The suffix starts with the first 8 normalized characters of `workspaceFolderId`.
+- If a prefix conflicts, Veloca expands the suffix to 12 characters, then to the full normalized workspace ID.
+- v1 shows this prefix as read-only and does not allow users to edit it.
 
 `manifest.json` records the source mapping for each managed workspace:
 
 - `workspaceFolderId`
 - `sourceRootPath`
 - `displayName`
+- `shadowPrefix`
 - `managedFiles[]`
 - `sourcePath`
 - `relativePath`
@@ -69,12 +78,29 @@ Veloca uses `isomorphic-git` and Electron `net.fetch`; it does not depend on the
 After `saveMarkdownFile` or `saveMarkdownFileAs` succeeds for a filesystem `.md` file:
 
 1. The backend validates that the saved path belongs to an active filesystem workspace.
-2. The saved markdown content is copied into the shadow repository.
-3. `version_managed_files` is inserted or updated with the source path, relative path, shadow path, workspace ID, and content hash.
-4. The workspace `manifest.json` is regenerated.
-5. The Git tab can list the resulting shadow repository changes.
+2. Veloca creates or reuses the workspace version config and stable `shadowPrefix`.
+3. The saved markdown content is copied into the shadow repository.
+4. `version_managed_files` is inserted or updated with the source path, relative path, shadow path, workspace ID, and content hash.
+5. The workspace `manifest.json` is regenerated.
+6. The Git tab can list the resulting shadow repository changes.
+
+If an older local shadow path used `workspaces/<workspaceFolderId>/...`, the next status or sync pass lazily moves it to `workspaces/<workspaceSlug>-<shortWorkspaceId>/...` and updates the local mapping. This creates a Git rename in the shadow repository without touching the user's project directory.
 
 Database workspace saves return early and do not write into the shadow repository.
+
+## Directory Prefix Configuration
+
+`version_workspace_configs` stores the generated directory prefix for each filesystem workspace:
+
+- `id`: UUID primary key.
+- `workspace_folder_id`: filesystem workspace ID.
+- `source_root_path`: workspace root path.
+- `display_name`: workspace display name when the config is refreshed.
+- `shadow_prefix`: stable directory prefix, such as `日常-a1b2c3d4`.
+- `status`: `0 = active`, `1 = removed`.
+- `created_at`, `updated_at`: millisecond timestamps.
+
+Removing a workspace marks its config and managed-file mappings as removed locally. Veloca does not delete existing GitHub history or proactively remove already pushed files.
 
 ## Database Tables
 
@@ -87,6 +113,16 @@ Database workspace saves return early and do not write into the shadow repositor
 - `remote_url`: Git remote URL.
 - `html_url`: GitHub web URL.
 - `local_path`: shadow repository path.
+- `status`: `0 = active`, `1 = removed`.
+- `created_at`, `updated_at`: millisecond timestamps.
+
+`version_workspace_configs` stores stable workspace directory prefixes:
+
+- `id`: UUID primary key.
+- `workspace_folder_id`: filesystem workspace ID.
+- `source_root_path`: workspace root path.
+- `display_name`: workspace display name.
+- `shadow_prefix`: path segment used under `workspaces/`.
 - `status`: `0 = active`, `1 = removed`.
 - `created_at`, `updated_at`: millisecond timestamps.
 
@@ -113,6 +149,7 @@ The sidebar Git tab shows only Veloca version-management state:
 - GitHub binding and permission readiness.
 - Whether the private repository has been created or reused.
 - Shadow repository local path.
+- Managed directory prefixes for filesystem workspaces.
 - Managed file count.
 - Pending Veloca markdown changes.
 - Commit message input and `Commit & Push` action.
@@ -131,7 +168,10 @@ The Git tab does not display or inspect the user's original project Git reposito
 - Bind a GitHub account with `repo` scope.
 - Rebind when using an older token without version-management permission.
 - Create or reuse the private `veloca-version-manager` repository.
-- Save a local filesystem `.md` file and confirm it appears under the shadow repository.
+- Save a local filesystem `.md` file and confirm it appears under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/`.
+- Confirm a Chinese workspace name produces a readable prefix such as `日常-a1b2c3d4`.
+- Save files from two same-name workspaces and confirm their prefixes do not collide.
 - Save a database workspace markdown file and confirm it is skipped.
 - Confirm user workspace `.git` state is unchanged.
+- Confirm an old `workspaces/<workspaceFolderId>/...` shadow path migrates to the generated prefix on status or sync.
 - Commit and push from the Git tab, then confirm the private GitHub repository receives the shadow file path.

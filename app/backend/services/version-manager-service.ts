@@ -4,6 +4,8 @@ import fs, {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync
 } from 'node:fs';
@@ -36,6 +38,15 @@ export interface VersionManagedChange {
   workspaceFolderId: string;
 }
 
+export interface VersionWorkspaceConfig {
+  displayName: string;
+  managedFileCount: number;
+  shadowPrefix: string;
+  sourceRootPath: string;
+  status: number;
+  workspaceFolderId: string;
+}
+
 export interface VersionManagerStatus {
   changes: VersionManagedChange[];
   github: GitHubAuthStatus;
@@ -43,6 +54,7 @@ export interface VersionManagerStatus {
   pendingChangeCount: number;
   repository: VersionRepositoryStatus | null;
   shadowRepositoryReady: boolean;
+  workspaceConfigs: VersionWorkspaceConfig[];
 }
 
 export interface VersionSyncResult {
@@ -80,6 +92,15 @@ interface VersionManagedFileRow {
   workspace_folder_id: string;
 }
 
+interface VersionWorkspaceConfigRow {
+  display_name: string;
+  managed_file_count?: number;
+  shadow_prefix: string;
+  source_root_path: string;
+  status: number;
+  workspace_folder_id: string;
+}
+
 interface GitHubRepositoryResponse {
   clone_url?: string;
   html_url?: string;
@@ -106,6 +127,22 @@ function getShadowRepositoryPath(): string {
 
 function normalizeTreePath(value: string): string {
   return value.split(sep).join('/').replace(/^\/+/, '');
+}
+
+function normalizeWorkspaceSlug(value: string): string {
+  const slug = value
+    .normalize('NFKC')
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return slug || 'workspace';
+}
+
+function getWorkspaceIdSegment(workspaceFolderId: string, length?: number): string {
+  const normalizedId = workspaceFolderId.replace(/-/g, '');
+  return length ? normalizedId.slice(0, length) : normalizedId;
 }
 
 function getContentHash(content: string): string {
@@ -139,11 +176,115 @@ function findWorkspaceFolderForPath(filePath: string): WorkspaceFolderRow | null
   );
 }
 
+function mapWorkspaceConfigRow(row: VersionWorkspaceConfigRow): VersionWorkspaceConfig {
+  return {
+    displayName: row.display_name,
+    managedFileCount: row.managed_file_count ?? 0,
+    shadowPrefix: row.shadow_prefix,
+    sourceRootPath: row.source_root_path,
+    status: row.status,
+    workspaceFolderId: row.workspace_folder_id
+  };
+}
+
+function getWorkspaceConfigByWorkspaceId(workspaceFolderId: string): VersionWorkspaceConfig | null {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT workspace_folder_id, source_root_path, display_name, shadow_prefix, status
+      FROM version_workspace_configs
+      WHERE workspace_folder_id = ?
+      LIMIT 1
+      `
+    )
+    .get(workspaceFolderId) as VersionWorkspaceConfigRow | undefined;
+
+  return row ? mapWorkspaceConfigRow(row) : null;
+}
+
+function getWorkspaceConfigByPrefix(shadowPrefix: string): VersionWorkspaceConfig | null {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT workspace_folder_id, source_root_path, display_name, shadow_prefix, status
+      FROM version_workspace_configs
+      WHERE shadow_prefix = ?
+      LIMIT 1
+      `
+    )
+    .get(shadowPrefix) as VersionWorkspaceConfigRow | undefined;
+
+  return row ? mapWorkspaceConfigRow(row) : null;
+}
+
+function generateWorkspaceShadowPrefix(workspaceFolder: WorkspaceFolderRow): string {
+  const slug = normalizeWorkspaceSlug(workspaceFolder.name || basename(workspaceFolder.folder_path));
+  const segmentLengths = [8, 12, undefined];
+
+  for (const segmentLength of segmentLengths) {
+    const candidate = `${slug}-${getWorkspaceIdSegment(workspaceFolder.id, segmentLength)}`;
+    const existingConfig = getWorkspaceConfigByPrefix(candidate);
+
+    if (!existingConfig || existingConfig.workspaceFolderId === workspaceFolder.id) {
+      return candidate;
+    }
+  }
+
+  throw new Error('Unable to generate a unique Veloca version directory prefix.');
+}
+
+function ensureWorkspaceVersionConfig(workspaceFolder: WorkspaceFolderRow): VersionWorkspaceConfig {
+  const existingConfig = getWorkspaceConfigByWorkspaceId(workspaceFolder.id);
+  const now = Date.now();
+
+  if (existingConfig) {
+    getDatabase()
+      .prepare(
+        `
+        UPDATE version_workspace_configs
+        SET source_root_path = ?, display_name = ?, status = 0, updated_at = ?
+        WHERE workspace_folder_id = ?
+        `
+      )
+      .run(workspaceFolder.folder_path, workspaceFolder.name, now, workspaceFolder.id);
+
+    return {
+      ...existingConfig,
+      displayName: workspaceFolder.name,
+      sourceRootPath: workspaceFolder.folder_path,
+      status: 0
+    };
+  }
+
+  const shadowPrefix = generateWorkspaceShadowPrefix(workspaceFolder);
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO version_workspace_configs (
+        id, workspace_folder_id, source_root_path, display_name, shadow_prefix, status, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+      `
+    )
+    .run(randomUUID(), workspaceFolder.id, workspaceFolder.folder_path, workspaceFolder.name, shadowPrefix, now, now);
+
+  return {
+    displayName: workspaceFolder.name,
+    managedFileCount: 0,
+    shadowPrefix,
+    sourceRootPath: workspaceFolder.folder_path,
+    status: 0,
+    workspaceFolderId: workspaceFolder.id
+  };
+}
+
 function getManagedMarkdownTarget(filePath: string): {
   content: string;
   contentHash: string;
   relativePath: string;
   resolvedPath: string;
+  shadowPrefix: string;
   shadowPath: string;
   sourceRootPath: string;
   workspaceFolderId: string;
@@ -170,13 +311,16 @@ function getManagedMarkdownTarget(filePath: string): {
 
   const relativePath = normalizeTreePath(relative(folder.folder_path, resolvedPath));
   const content = readFileSync(resolvedPath, 'utf8');
-  const shadowPath = `workspaces/${folder.id}/files/${relativePath}`;
+  const config = ensureWorkspaceVersionConfig(folder);
+  migrateWorkspaceShadowPrefixIfNeeded(folder.id);
+  const shadowPath = getWorkspaceFileShadowPath(config.shadowPrefix, relativePath);
 
   return {
     content,
     contentHash: getContentHash(content),
     relativePath,
     resolvedPath,
+    shadowPrefix: config.shadowPrefix,
     shadowPath,
     sourceRootPath: folder.folder_path,
     workspaceFolderId: folder.id
@@ -444,6 +588,19 @@ function getManagedFileRows(): VersionManagedFileRow[] {
     .all() as VersionManagedFileRow[];
 }
 
+function getManagedFileRowsByWorkspaceId(workspaceFolderId: string): VersionManagedFileRow[] {
+  return getDatabase()
+    .prepare(
+      `
+      SELECT workspace_folder_id, source_root_path, source_path, relative_path, shadow_path, content_hash
+      FROM version_managed_files
+      WHERE status = 0 AND workspace_folder_id = ?
+      ORDER BY relative_path ASC
+      `
+    )
+    .all(workspaceFolderId) as VersionManagedFileRow[];
+}
+
 function getManagedFileCount(): number {
   const row = getDatabase()
     .prepare('SELECT COUNT(*) AS count FROM version_managed_files WHERE status = 0')
@@ -452,31 +609,187 @@ function getManagedFileCount(): number {
   return row.count;
 }
 
-function getWorkspaceManifestPath(workspaceFolderId: string): string {
+function getWorkspaceFileShadowPath(shadowPrefix: string, relativePath: string): string {
+  return `workspaces/${shadowPrefix}/files/${relativePath}`;
+}
+
+function getWorkspaceManifestPath(shadowPrefix: string): string {
+  return `workspaces/${shadowPrefix}/manifest.json`;
+}
+
+function getLegacyWorkspaceFileShadowPath(workspaceFolderId: string, relativePath: string): string {
+  return `workspaces/${workspaceFolderId}/files/${relativePath}`;
+}
+
+function getLegacyWorkspaceManifestPath(workspaceFolderId: string): string {
   return `workspaces/${workspaceFolderId}/manifest.json`;
 }
 
-function writeWorkspaceManifest(workspaceFolderId: string): void {
-  const rows = getManagedFileRows().filter((row) => row.workspace_folder_id === workspaceFolderId);
+function getShadowRepositoryAbsolutePath(shadowPath: string): string {
+  return join(getShadowRepositoryPath(), ...shadowPath.split('/'));
+}
 
-  if (!rows.length) {
+function moveShadowPathIfPresent(sourceShadowPath: string, targetShadowPath: string): void {
+  if (sourceShadowPath === targetShadowPath) {
     return;
   }
 
-  const sourceRootPath = rows[0].source_root_path;
+  const sourcePath = getShadowRepositoryAbsolutePath(sourceShadowPath);
+
+  if (!existsSync(sourcePath)) {
+    return;
+  }
+
+  const targetPath = getShadowRepositoryAbsolutePath(targetShadowPath);
+  mkdirSync(dirname(targetPath), { recursive: true });
+
+  if (existsSync(targetPath)) {
+    rmSync(sourcePath, { force: true });
+    return;
+  }
+
+  renameSync(sourcePath, targetPath);
+}
+
+function ensureWorkspaceConfigsForManagedRows(): void {
+  const foldersById = new Map(getActiveWorkspaceFolders().map((folder) => [folder.id, folder]));
+  const workspaceIds = Array.from(new Set(getManagedFileRows().map((row) => row.workspace_folder_id)));
+
+  for (const workspaceFolderId of workspaceIds) {
+    const folder = foldersById.get(workspaceFolderId);
+
+    if (!folder) {
+      continue;
+    }
+
+    ensureWorkspaceVersionConfig(folder);
+    migrateWorkspaceShadowPrefixIfNeeded(workspaceFolderId);
+  }
+}
+
+export function markWorkspaceVersionConfigRemoved(workspaceFolderId: string): void {
+  const now = Date.now();
+
+  getDatabase()
+    .prepare(
+      `
+      UPDATE version_workspace_configs
+      SET status = 1, updated_at = ?
+      WHERE workspace_folder_id = ?
+      `
+    )
+    .run(now, workspaceFolderId);
+
+  getDatabase()
+    .prepare(
+      `
+      UPDATE version_managed_files
+      SET status = 1, updated_at = ?
+      WHERE workspace_folder_id = ?
+      `
+    )
+    .run(now, workspaceFolderId);
+}
+
+export function listWorkspaceVersionConfigs(): VersionWorkspaceConfig[] {
+  ensureWorkspaceConfigsForManagedRows();
+
+  const rows = getDatabase()
+    .prepare(
+      `
+      SELECT
+        config.workspace_folder_id,
+        config.source_root_path,
+        config.display_name,
+        config.shadow_prefix,
+        config.status,
+        COUNT(file.id) AS managed_file_count
+      FROM version_workspace_configs config
+      INNER JOIN workspace_folders folder
+        ON folder.id = config.workspace_folder_id
+       AND folder.status = 0
+      LEFT JOIN version_managed_files file
+        ON file.workspace_folder_id = config.workspace_folder_id
+       AND file.status = 0
+      WHERE config.status = 0
+      GROUP BY
+        config.workspace_folder_id,
+        config.source_root_path,
+        config.display_name,
+        config.shadow_prefix,
+        config.status
+      ORDER BY config.display_name ASC, config.created_at ASC
+      `
+    )
+    .all() as VersionWorkspaceConfigRow[];
+
+  return rows.map(mapWorkspaceConfigRow);
+}
+
+function migrateWorkspaceShadowPrefixIfNeeded(workspaceFolderId: string): void {
+  const config = getWorkspaceConfigByWorkspaceId(workspaceFolderId);
+
+  if (!config || config.status !== 0) {
+    return;
+  }
+
+  const rows = getManagedFileRowsByWorkspaceId(workspaceFolderId);
+  let changed = false;
+
+  for (const row of rows) {
+    const nextShadowPath = getWorkspaceFileShadowPath(config.shadowPrefix, row.relative_path);
+
+    if (row.shadow_path === nextShadowPath) {
+      continue;
+    }
+
+    moveShadowPathIfPresent(row.shadow_path, nextShadowPath);
+    moveShadowPathIfPresent(getLegacyWorkspaceFileShadowPath(workspaceFolderId, row.relative_path), nextShadowPath);
+
+    getDatabase()
+      .prepare(
+        `
+        UPDATE version_managed_files
+        SET shadow_path = ?, updated_at = ?
+        WHERE source_path = ?
+        `
+      )
+      .run(nextShadowPath, Date.now(), row.source_path);
+
+    changed = true;
+  }
+
+  const nextManifestPath = getWorkspaceManifestPath(config.shadowPrefix);
+
+  moveShadowPathIfPresent(getLegacyWorkspaceManifestPath(workspaceFolderId), nextManifestPath);
+
+  if (changed || rows.length) {
+    writeWorkspaceManifest(workspaceFolderId);
+  }
+}
+
+function writeWorkspaceManifest(workspaceFolderId: string): void {
+  const config = getWorkspaceConfigByWorkspaceId(workspaceFolderId);
+  const rows = getManagedFileRows().filter((row) => row.workspace_folder_id === workspaceFolderId);
+
+  if (!config || !rows.length) {
+    return;
+  }
+
   const manifest = {
-    displayName: basename(sourceRootPath),
+    displayName: config.displayName,
     managedFiles: rows.map((row) => ({
       lastContentHash: row.content_hash,
       relativePath: row.relative_path,
       shadowPath: row.shadow_path,
       sourcePath: row.source_path
     })),
-    sourceRootPath,
+    shadowPrefix: config.shadowPrefix,
+    sourceRootPath: config.sourceRootPath,
     updatedAt: Date.now(),
     workspaceFolderId
   };
-  const manifestPath = join(getShadowRepositoryPath(), ...getWorkspaceManifestPath(workspaceFolderId).split('/'));
+  const manifestPath = getShadowRepositoryAbsolutePath(getWorkspaceManifestPath(config.shadowPrefix));
 
   mkdirSync(dirname(manifestPath), { recursive: true });
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
@@ -536,31 +849,49 @@ function getStatusKind(row: StatusRow): VersionManagedChange['kind'] {
   return 'modified';
 }
 
-function mapStatusRow(row: StatusRow, managedFiles: VersionManagedFileRow[]): VersionManagedChange {
+function mapStatusRow(
+  row: StatusRow,
+  managedFiles: VersionManagedFileRow[],
+  workspaceConfigs: VersionWorkspaceConfig[]
+): VersionManagedChange {
   const [shadowPath] = row;
-  const managedFile = managedFiles.find((file) => file.shadow_path === shadowPath);
-  const workspaceMatch = /^workspaces\/([^/]+)\//.exec(shadowPath);
-  const workspaceFolderId = managedFile?.workspace_folder_id ?? workspaceMatch?.[1] ?? '';
+  const managedFile = managedFiles.find(
+    (file) =>
+      file.shadow_path === shadowPath ||
+      getLegacyWorkspaceFileShadowPath(file.workspace_folder_id, file.relative_path) === shadowPath
+  );
+  const config = workspaceConfigs.find(
+    (item) =>
+      getWorkspaceManifestPath(item.shadowPrefix) === shadowPath ||
+      getLegacyWorkspaceManifestPath(item.workspaceFolderId) === shadowPath
+  );
+  const workspaceMatch = /^workspaces\/([^/]+)\/files\/(.+)$/.exec(shadowPath);
+  const workspaceFolderId = managedFile?.workspace_folder_id ?? config?.workspaceFolderId ?? '';
 
   return {
     filePath: managedFile?.source_path ?? '',
     kind: getStatusKind(row),
-    relativePath: managedFile?.relative_path ?? 'manifest.json',
+    relativePath: managedFile?.relative_path ?? (workspaceMatch ? workspaceMatch[2] : 'manifest.json'),
     shadowPath,
     workspaceFolderId
   };
 }
 
 export async function listManagedChanges(): Promise<VersionManagedChange[]> {
+  ensureWorkspaceConfigsForManagedRows();
+
   if (!isLocalGitRepositoryReady()) {
     return [];
   }
 
   const managedFiles = getManagedFileRows();
+  const workspaceConfigs = listWorkspaceVersionConfigs();
   const filepaths = Array.from(
     new Set([
       ...managedFiles.map((file) => file.shadow_path),
-      ...managedFiles.map((file) => getWorkspaceManifestPath(file.workspace_folder_id))
+      ...managedFiles.map((file) => getLegacyWorkspaceFileShadowPath(file.workspace_folder_id, file.relative_path)),
+      ...workspaceConfigs.map((config) => getWorkspaceManifestPath(config.shadowPrefix)),
+      ...workspaceConfigs.map((config) => getLegacyWorkspaceManifestPath(config.workspaceFolderId))
     ])
   );
 
@@ -576,13 +907,16 @@ export async function listManagedChanges(): Promise<VersionManagedChange[]> {
 
   return matrix
     .filter((row) => row[1] !== row[2] || row[2] !== row[3])
-    .map((row) => mapStatusRow(row, managedFiles));
+    .map((row) => mapStatusRow(row, managedFiles, workspaceConfigs));
 }
 
 export async function getVersionManagerStatus(): Promise<VersionManagerStatus> {
+  ensureWorkspaceConfigsForManagedRows();
+
   const github = await getGitHubAuthStatus();
   const repository = mapRepositoryRow(getRepositoryRow());
   const changes = await listManagedChanges();
+  const workspaceConfigs = listWorkspaceVersionConfigs();
 
   return {
     changes,
@@ -590,7 +924,8 @@ export async function getVersionManagerStatus(): Promise<VersionManagerStatus> {
     managedFileCount: getManagedFileCount(),
     pendingChangeCount: changes.length,
     repository,
-    shadowRepositoryReady: isLocalGitRepositoryReady()
+    shadowRepositoryReady: isLocalGitRepositoryReady(),
+    workspaceConfigs
   };
 }
 
@@ -651,6 +986,15 @@ export async function commitAndPushVersionChanges(message: string): Promise<Vers
   const commitMessage = message.trim() || 'Update Veloca markdown versions';
 
   for (const change of changes) {
+    if (change.kind === 'deleted') {
+      await git.remove({
+        dir: getShadowRepositoryPath(),
+        filepath: change.shadowPath,
+        fs
+      });
+      continue;
+    }
+
     await git.add({
       dir: getShadowRepositoryPath(),
       filepath: change.shadowPath,

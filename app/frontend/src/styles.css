@@ -562,7 +562,11 @@ button {
 .git-commit-box,
 .git-change-list,
 .git-change-list-header,
-.git-change-item {
+.git-change-item,
+.git-directory-section,
+.git-directory-list,
+.git-directory-item,
+.git-directory-title {
   display: flex;
 }
 
@@ -640,7 +644,10 @@ button {
 
 .git-repository-title span,
 .git-repository-path,
-.git-change-name {
+.git-change-name,
+.git-directory-title span,
+.git-directory-path,
+.git-directory-prefix {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -709,6 +716,62 @@ button {
   color: var(--foreground);
   font-size: 18px;
   line-height: 1;
+}
+
+.git-directory-section {
+  min-height: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.git-directory-list {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.git-directory-item {
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--muted) 24%, transparent);
+}
+
+.git-directory-title {
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.git-directory-title svg {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.git-directory-title span {
+  flex: 1;
+}
+
+.git-directory-title strong {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.git-directory-path,
+.git-directory-prefix {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.git-directory-prefix {
+  color: var(--info);
 }
 
 .git-commit-box {
