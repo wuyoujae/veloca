@@ -1702,8 +1702,9 @@ export function App(): JSX.Element {
 
     if (renderedHandle) {
       const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
+      const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
 
-      if (latestRenderedMarkdown !== documentContentRef.current) {
+      if (!shouldSkipEmptyFlush && latestRenderedMarkdown !== documentContentRef.current) {
         updateTabDocumentContent(activeTabPath, latestRenderedMarkdown);
       }
     }
@@ -5578,9 +5579,12 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
     if (inserted || documentChanged) {
       const nextMarkdown = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
-      lastEditorContentRef.current = nextMarkdown;
-      contentRef.current = nextMarkdown;
-      onChangeRef.current(nextMarkdown);
+
+      if (nextMarkdown.trim() || !currentEditor.state.doc.textContent.trim()) {
+        lastEditorContentRef.current = nextMarkdown;
+        contentRef.current = nextMarkdown;
+        onChangeRef.current(nextMarkdown);
+      }
     }
 
     logAiInsertDebug('MarkdownEditor handle finished insert command', {
