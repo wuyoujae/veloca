@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react';
@@ -20,6 +21,7 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   ArrowUpToLine,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -28,19 +30,25 @@ import {
   Copy,
   Database,
   ExternalLink,
+  FileMinus2,
+  FilePlus2,
   FileText,
   FilePlus,
   Folder,
   FolderPlus,
+  GitCompare,
   GitBranch,
   Grid3X3,
   Info,
+  ListTree,
   LoaderCircle,
+  Minus,
   MoreHorizontal,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Plus,
   Save,
   MoreVertical,
   Settings,
@@ -48,6 +56,7 @@ import {
   Sun,
   Table2,
   Trash2,
+  Undo2,
   X
 } from 'lucide-react';
 import { marked } from 'marked';
@@ -80,7 +89,7 @@ import {
 } from './agent-palette';
 
 type ThemeMode = 'dark' | 'light';
-type SidebarTab = 'files' | 'outline';
+type SidebarTab = 'files' | 'outline' | 'git';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
@@ -198,6 +207,10 @@ const saveActionSuccessDurationMs = 1200;
 const defaultDocumentViewMode: DocumentViewMode = 'rendered';
 const sourceCursorMarkerPrefix = 'VELOCASOURCECURSOR';
 const untitledFilePathPrefix = 'veloca-unsaved://';
+const sidebarDefaultWidth = 300;
+const sidebarMinimumWidth = 148;
+const sidebarMaximumWidth = 420;
+const sidebarTextMinimumWidth = 292;
 
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
@@ -624,7 +637,9 @@ function relaxSelectionAfterCanvasClose(rangeOverride?: Range | null): boolean {
 export function App(): JSX.Element {
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
+  const [sidebarWidth, setSidebarWidth] = useState(sidebarDefaultWidth);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarResizing, setIsSidebarResizing] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceSnapshot>(emptyWorkspace);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [openTabs, setOpenTabs] = useState<OpenEditorTab[]>([]);
@@ -689,6 +704,15 @@ export function App(): JSX.Element {
   const activeDocumentViewMode = activeTabPath
     ? documentViewModesByPath[activeTabPath] ?? defaultDocumentViewMode
     : defaultDocumentViewMode;
+  const isSidebarTabCompact = sidebarWidth < sidebarTextMinimumWidth;
+  const sidebarClassName = [
+    'sidebar',
+    isSidebarCollapsed ? 'collapsed' : '',
+    isSidebarTabCompact ? 'compact' : '',
+    isSidebarResizing ? 'resizing' : ''
+  ]
+    .filter(Boolean)
+    .join(' ');
   const openTabByPath = useMemo(() => {
     return new Map(openTabs.map((tab) => [tab.file.path, tab]));
   }, [openTabs]);
@@ -1082,6 +1106,51 @@ export function App(): JSX.Element {
 
   const applyTheme = (nextTheme: ThemeMode) => {
     document.documentElement.dataset.theme = nextTheme;
+  };
+
+  const startSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    setIsSidebarResizing(true);
+
+    const resizeSidebar = (moveEvent: PointerEvent) => {
+      setSidebarWidth(clampNumber(startWidth + moveEvent.clientX - startX, sidebarMinimumWidth, sidebarMaximumWidth));
+    };
+
+    const stopResize = () => {
+      setIsSidebarResizing(false);
+      window.removeEventListener('pointermove', resizeSidebar);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', resizeSidebar);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  };
+
+  const resizeSidebarWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.key === 'Home') {
+      setSidebarWidth(sidebarMinimumWidth);
+      return;
+    }
+
+    if (event.key === 'End') {
+      setSidebarWidth(sidebarMaximumWidth);
+      return;
+    }
+
+    const direction = event.key === 'ArrowRight' ? 1 : -1;
+    setSidebarWidth((currentWidth) => clampNumber(currentWidth + direction * 16, sidebarMinimumWidth, sidebarMaximumWidth));
   };
 
   const updateTheme = async (nextTheme: ThemeMode) => {
@@ -2724,7 +2793,11 @@ export function App(): JSX.Element {
       <header className="titlebar" aria-label="Window title bar" />
 
       <div className="app-layout">
-        <aside className={isSidebarCollapsed ? 'sidebar collapsed' : 'sidebar'} aria-hidden={isSidebarCollapsed}>
+        <aside
+          className={sidebarClassName}
+          style={isSidebarCollapsed ? undefined : { minWidth: sidebarWidth, width: sidebarWidth }}
+          aria-hidden={isSidebarCollapsed}
+        >
           <div className="sidebar-header">
             <div className="sidebar-header-controls">
               <span className="sidebar-header-spacer" aria-hidden="true" />
@@ -2732,16 +2805,30 @@ export function App(): JSX.Element {
                 <button
                   className={sidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
                   type="button"
+                  title="Files"
                   onClick={() => setSidebarTab('files')}
                 >
-                  Files
+                  <FileText size={14} />
+                  <span className="tab-trigger-label">Files</span>
                 </button>
                 <button
                   className={sidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
                   type="button"
+                  title="Outline"
                   onClick={() => setSidebarTab('outline')}
                 >
-                  Outline
+                  <ListTree size={14} />
+                  <span className="tab-trigger-label">Outline</span>
+                </button>
+                <button
+                  className={sidebarTab === 'git' ? 'tab-trigger active' : 'tab-trigger'}
+                  type="button"
+                  title="Git version management"
+                  onClick={() => setSidebarTab('git')}
+                >
+                  <GitBranch size={14} />
+                  <span className="tab-trigger-label">Git</span>
+                  <span className="tab-status-dot" aria-hidden="true" />
                 </button>
               </div>
               <button
@@ -2772,13 +2859,15 @@ export function App(): JSX.Element {
                 onFileSelect={readMarkdownFile}
                 onFolderToggle={toggleFolder}
               />
-            ) : (
+            ) : sidebarTab === 'outline' ? (
               <OutlinePanel
                 activeFile={activeFile}
                 activeHeadingId={activeHeadingId}
                 sections={sections}
                 onHeadingSelect={selectHeading}
               />
+            ) : (
+              <GitVersionPanel />
             )}
           </div>
 
@@ -2788,6 +2877,19 @@ export function App(): JSX.Element {
               <span>Settings</span>
             </button>
           </div>
+          <div
+            className="sidebar-resize-handle"
+            role="separator"
+            tabIndex={0}
+            aria-label="Resize sidebar"
+            aria-orientation="vertical"
+            aria-valuemax={sidebarMaximumWidth}
+            aria-valuemin={sidebarMinimumWidth}
+            aria-valuenow={sidebarWidth}
+            onDoubleClick={() => setSidebarWidth(sidebarDefaultWidth)}
+            onKeyDown={resizeSidebarWithKeyboard}
+            onPointerDown={startSidebarResize}
+          />
         </aside>
 
         {isSidebarCollapsed && (
@@ -3504,6 +3606,114 @@ function FileTree({
           />
         ))}
     </nav>
+  );
+}
+
+function GitVersionPanel(): JSX.Element {
+  return (
+    <section className="git-panel" aria-label="Git version management">
+      <div className="git-commit-box">
+        <textarea className="git-textarea" placeholder="Message (Cmd+Enter to commit)" />
+        <button className="git-commit-btn" type="button">
+          <Check size={15} />
+          <span>Commit</span>
+        </button>
+      </div>
+
+      <div className="git-scroll-area">
+        <div className="git-group-header">
+          <span className="git-group-title">
+            <ChevronDown size={14} />
+            Staged Changes
+            <span className="git-badge-count">1</span>
+          </span>
+        </div>
+
+        <div className="git-item">
+          <span className="git-item-left">
+            <FileText size={14} />
+            <span className="git-item-name">architecture.md</span>
+            <span className="git-item-dir">docs/</span>
+          </span>
+          <span className="git-item-right">
+            <span className="git-actions">
+              <button className="git-action-btn" type="button" title="Unstage Changes">
+                <Minus size={14} />
+              </button>
+            </span>
+            <span className="git-status-badge status-m">M</span>
+          </span>
+        </div>
+
+        <div className="git-group-header with-actions">
+          <span className="git-group-title">
+            <ChevronDown size={14} />
+            Changes
+            <span className="git-badge-count">3</span>
+          </span>
+          <span className="git-actions">
+            <button className="git-action-btn" type="button" title="Discard All Changes">
+              <Undo2 size={14} />
+            </button>
+            <button className="git-action-btn" type="button" title="Stage All Changes">
+              <Plus size={14} />
+            </button>
+          </span>
+        </div>
+
+        <div className="git-item active">
+          <span className="git-item-left">
+            <GitCompare size={14} />
+            <span className="git-item-name">manifesto.md</span>
+            <span className="git-item-dir">docs/</span>
+          </span>
+          <span className="git-item-right">
+            <span className="git-actions">
+              <button className="git-action-btn" type="button" title="Discard Changes">
+                <Undo2 size={14} />
+              </button>
+              <button className="git-action-btn" type="button" title="Stage Changes">
+                <Plus size={14} />
+              </button>
+            </span>
+            <span className="git-status-badge status-m">M</span>
+          </span>
+        </div>
+
+        <div className="git-item">
+          <span className="git-item-left">
+            <FilePlus2 className="git-added-icon" size={14} />
+            <span className="git-item-name">new_feature.md</span>
+          </span>
+          <span className="git-item-right">
+            <span className="git-actions">
+              <button className="git-action-btn" type="button" title="Stage Changes">
+                <Plus size={14} />
+              </button>
+            </span>
+            <span className="git-status-badge status-u">U</span>
+          </span>
+        </div>
+
+        <div className="git-item">
+          <span className="git-item-left">
+            <FileMinus2 className="git-deleted-icon" size={14} />
+            <span className="git-item-name">old_config.json</span>
+          </span>
+          <span className="git-item-right">
+            <span className="git-actions">
+              <button className="git-action-btn" type="button" title="Restore">
+                <Undo2 size={14} />
+              </button>
+              <button className="git-action-btn" type="button" title="Stage Changes">
+                <Plus size={14} />
+              </button>
+            </span>
+            <span className="git-status-badge status-d">D</span>
+          </span>
+        </div>
+      </div>
+    </section>
   );
 }
 
