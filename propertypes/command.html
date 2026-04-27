@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - Editor & Slash Command Prototype</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* VELOCA - ULTRA PREMIUM SHADCN LIGHT */
+        :root {
+            --bg: #ffffff;
+            --fg: #09090b;
+            --surface: #f4f4f5;
+            --surface-hover: #e4e4e7;
+            --border: #e4e4e7;
+            --border-strong: #d4d4d8;
+            --text-body: #3f3f46;
+            --text-muted: #71717a;
+            
+            --radius-lg: 1rem; 
+            --radius-md: 0.5rem; 
+            --radius-sm: 0.25rem;  
+
+            --ring: rgba(59, 130, 246, 0.15);
+            --ring-border: #3b82f6;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--fg); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+        /* ==========================================
+           1. 模拟编辑器正文
+           ========================================== */
+        .editor-header { border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+        
+        .editor-container { flex: 1; overflow-y: auto; padding: 60px 0 120px 0; display: flex; justify-content: center; position: relative; }
+        
+        .markdown-body { width: 100%; max-width: 800px; outline: none; font-size: 16px; line-height: 1.7; color: var(--text-body); padding-bottom: 200px; }
+        .markdown-body p { margin-bottom: 1em; position: relative; }
+        .markdown-body h1 { font-size: 2.25rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 1em; color: var(--fg); }
+        .markdown-body[data-placeholder]:empty::before { content: attr(data-placeholder); color: #a1a1aa; pointer-events: none; position: absolute; }
+
+        /* ==========================================
+           2. SLASH COMMAND MENU (斜杠菜单)
+           ========================================== */
+        .slash-menu {
+            position: absolute;
+            width: 320px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            box-shadow: 0 12px 32px -4px rgba(0,0,0,0.1), 0 4px 12px -4px rgba(0,0,0,0.05);
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1000;
+            padding: 6px;
+            /* 弹出动画 */
+            opacity: 0; transform: translateY(4px) scale(0.98);
+            transition: opacity 0.15s, transform 0.15s;
+        }
+        .slash-menu.show { display: flex; opacity: 1; transform: translateY(0) scale(1); }
+
+        .slash-menu-title { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 6px 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        .slash-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 8px 10px; border-radius: var(--radius-sm);
+            cursor: pointer; color: var(--fg); transition: background 0.1s;
+        }
+        .slash-item.active { background: var(--surface); }
+        
+        .slash-icon-wrapper {
+            display: flex; align-items: center; justify-content: center;
+            width: 28px; height: 28px; background: #ffffff; border: 1px solid var(--border);
+            border-radius: 6px; color: var(--text-body); box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .slash-item.active .slash-icon-wrapper { border-color: var(--border-strong); color: var(--fg); }
+
+        .slash-text { display: flex; flex-direction: column; flex: 1; }
+        .slash-name { font-size: 13px; font-weight: 500; line-height: 1.2; }
+        .slash-desc { font-size: 12px; color: var(--text-muted); line-height: 1.4; margin-top: 2px; }
+
+        .slash-shortcut {
+            font-size: 12px; color: var(--text-muted); background: var(--bg); border: 1px solid var(--border);
+            padding: 2px 6px; border-radius: 4px; display: none;
+        }
+        .slash-item.active .slash-shortcut { display: block; } /* 仅激活时显示回车提示 */
+
+        /* ==========================================
+           3. MERMAID EDITOR COMPONENT
+           ========================================== */
+        .mermaid-block {
+            margin: 24px 0;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            background: var(--bg);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.02);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            user-select: none; /* 防止 contenteditable 破坏结构 */
+        }
+        
+        .mermaid-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+        }
+        .mermaid-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: #0284c7;
+        }
+        .mermaid-actions { display: flex; gap: 4px; }
+        .mermaid-btn { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: transparent; border: none; border-radius: 4px; color: var(--text-muted); cursor: pointer; }
+        .mermaid-btn:hover { background: var(--border); color: var(--fg); }
+
+        .mermaid-body {
+            display: flex;
+            height: 300px;
+        }
+
+        /* 左侧代码区 */
+        .mermaid-code {
+            flex: 1; border-right: 1px solid var(--border); background: #fafafa;
+            padding: 16px; position: relative;
+        }
+        .mermaid-textarea {
+            width: 100%; height: 100%; border: none; outline: none; background: transparent; resize: none;
+            font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.6; color: var(--text-body);
+        }
+
+        /* 右侧渲染区 (带有高级点阵图背景) */
+        .mermaid-preview {
+            flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+            background-color: var(--bg);
+            /* ✨ 高级感的 Dot Grid 背景 ✨ */
+            background-image: radial-gradient(#e4e4e7 1px, transparent 0);
+            background-size: 16px 16px;
+            background-position: -8px -8px;
+        }
+
+        /* 模拟渲染出一个精美的流程图 */
+        .mock-flowchart { display: flex; flex-direction: column; align-items: center; gap: 24px; pointer-events: none; }
+        .mock-node { padding: 10px 20px; background: var(--bg); border: 2px solid var(--border-strong); border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--fg); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .mock-node.primary { border-color: #3b82f6; color: #1d4ed8; background: #eff6ff; }
+        .mock-arrow { width: 2px; height: 24px; background: var(--border-strong); position: relative; }
+        .mock-arrow::after { content: ''; position: absolute; bottom: -4px; left: -4px; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid var(--border-strong); }
+
+    </style>
+</head>
+<body>
+
+    <div class="editor-header">
+        <i data-lucide="feather" style="width: 16px; height: 16px; margin-right: 8px;"></i>
+        Veloca Editor / slash_demo.md
+    </div>
+
+    <div class="editor-container" id="editorContainer">
+        <!-- Markdown 编辑区 -->
+        <div class="markdown-body" id="editor" contenteditable="true" data-placeholder="Type '/' for commands...">
+            <h1>System Architecture</h1>
+            <p>Welcome to Veloca. Try typing a slash command below to insert a component.</p>
+            <p><br></p> <!-- 空行占位 -->
+        </div>
+
+        <!-- THE SLASH MENU POPOVER -->
+        <div class="slash-menu" id="slashMenu">
+            <div class="slash-menu-title">Basic Blocks</div>
+            
+            <div class="slash-item" data-cmd="text">
+                <div class="slash-icon-wrapper"><i data-lucide="type" style="width: 14px; height: 14px;"></i></div>
+                <div class="slash-text">
+                    <span class="slash-name">Text</span>
+                    <span class="slash-desc">Just start writing with plain text.</span>
+                </div>
+            </div>
+
+            <div class="slash-item active" data-cmd="mermaid">
+                <div class="slash-icon-wrapper"><i data-lucide="git-merge" style="width: 14px; height: 14px; color: #0284c7;"></i></div>
+                <div class="slash-text">
+                    <span class="slash-name">Mermaid</span>
+                    <span class="slash-desc">Render diagrams and flowcharts.</span>
+                </div>
+                <div class="slash-shortcut">↵</div>
+            </div>
+
+            <div class="slash-item" data-cmd="code">
+                <div class="slash-icon-wrapper"><i data-lucide="code" style="width: 14px; height: 14px;"></i></div>
+                <div class="slash-text">
+                    <span class="slash-name">Code Block</span>
+                    <span class="slash-desc">Capture a code snippet.</span>
+                </div>
+            </div>
+
+            <div class="slash-menu-title" style="margin-top: 4px;">Advanced</div>
+            
+            <div class="slash-item" data-cmd="agent">
+                <div class="slash-icon-wrapper"><i data-lucide="sparkles" style="width: 14px; height: 14px; color: #9333ea;"></i></div>
+                <div class="slash-text">
+                    <span class="slash-name">Ask Agent</span>
+                    <span class="slash-desc">Invoke AI to generate or edit content.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        const editor = document.getElementById('editor');
+        const slashMenu = document.getElementById('slashMenu');
+        const editorContainer = document.getElementById('editorContainer');
+        const slashItems = Array.from(document.querySelectorAll('.slash-item'));
+
+        let isMenuOpen = false;
+        let slashPosition = null; // 记录 '/' 输入时的 Range
+        let searchString = "";
+
+        /* ==========================================
+           1. 监听编辑器输入，触发 Slash Menu
+           ========================================== */
+        editor.addEventListener('keyup', (e) => {
+            // 避免在方向键/功能键时触发字母逻辑
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape'].includes(e.key)) return;
+
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
+            const range = selection.getRangeAt(0);
+            const node = range.startContainer;
+            
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent;
+                const offset = range.startOffset;
+
+                // 往前找最后一个 '/'
+                const lastSlashIndex = text.lastIndexOf('/', offset - 1);
+
+                if (lastSlashIndex !== -1) {
+                    // '/' 之前必须是空格，或者是行首
+                    const beforeSlash = lastSlashIndex === 0 ? ' ' : text.charAt(lastSlashIndex - 1);
+                    if (beforeSlash === ' ' || beforeSlash === '\n') {
+                        // 提取 '/' 后面的搜索词
+                        searchString = text.substring(lastSlashIndex + 1, offset).toLowerCase();
+                        
+                        // 检查搜索词是否包含空格，包含则中断
+                        if (searchString.includes(' ')) {
+                            closeMenu();
+                            return;
+                        }
+
+                        // 定位菜单
+                        if (!isMenuOpen) {
+                            openMenu(range);
+                        }
+                        
+                        // 执行过滤
+                        filterMenu(searchString);
+                        return;
+                    }
+                }
+            }
+            closeMenu();
+        });
+
+        /* ==========================================
+           2. 拦截特定按键 (上下选择，回车确认)
+           ========================================== */
+        editor.addEventListener('keydown', (e) => {
+            if (!isMenuOpen) return;
+
+            const visibleItems = slashItems.filter(item => item.style.display !== 'none');
+            if (visibleItems.length === 0) return;
+
+            let currentIndex = visibleItems.findIndex(item => item.classList.contains('active'));
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                visibleItems[currentIndex].classList.remove('active');
+                const nextIndex = (currentIndex + 1) % visibleItems.length;
+                visibleItems[nextIndex].classList.add('active');
+            } 
+            else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                visibleItems[currentIndex].classList.remove('active');
+                const prevIndex = (currentIndex - 1 + visibleItems.length) % visibleItems.length;
+                visibleItems[prevIndex].classList.add('active');
+            } 
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                executeCommand(visibleItems[currentIndex].dataset.cmd);
+            }
+            else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeMenu();
+            }
+        });
+
+        /* ==========================================
+           3. 菜单渲染与坐标计算
+           ========================================== */
+        function openMenu(range) {
+            isMenuOpen = true;
+            // 获取光标在视口中的精确坐标
+            const rect = range.getBoundingClientRect();
+            // 计算相对于 editorContainer 的坐标
+            const containerRect = editorContainer.getBoundingClientRect();
+            
+            const top = rect.bottom - containerRect.top + editorContainer.scrollTop + 8;
+            const left = rect.left - containerRect.left + 4;
+
+            slashMenu.style.top = `${top}px`;
+            slashMenu.style.left = `${left}px`;
+            slashMenu.classList.add('show');
+        }
+
+        function closeMenu() {
+            isMenuOpen = false;
+            slashMenu.classList.remove('show');
+            searchString = "";
+            // 恢复所有 item
+            slashItems.forEach(item => item.style.display = 'flex');
+        }
+
+        function filterMenu(query) {
+            let hasVisible = false;
+            slashItems.forEach(item => {
+                const name = item.querySelector('.slash-name').innerText.toLowerCase();
+                if (name.includes(query)) {
+                    item.style.display = 'flex';
+                    hasVisible = true;
+                } else {
+                    item.style.display = 'none';
+                    item.classList.remove('active');
+                }
+            });
+
+            // 自动激活第一个可见项
+            if (hasVisible) {
+                const firstVisible = slashItems.find(item => item.style.display !== 'none');
+                slashItems.forEach(item => item.classList.remove('active'));
+                firstVisible.classList.add('active');
+            } else {
+                closeMenu();
+            }
+        }
+
+        /* ==========================================
+           4. 执行命令：插入 Mermaid 组件
+           ========================================== */
+        function executeCommand(cmd) {
+            closeMenu();
+            
+            // 简单的删除 /xxx 的逻辑
+            document.execCommand('delete', false); // 删掉当前字符
+            // 在实际富文本编辑器中，需要选中光标前的 /xxx 文本并删除，此处用简单插入代替演示
+
+            if (cmd === 'mermaid') {
+                // ✨ 插入我们精心设计的 Mermaid 块 ✨
+                const mermaidHTML = `
+                    <div contenteditable="false" class="mermaid-block">
+                        <div class="mermaid-header">
+                            <div class="mermaid-badge">
+                                <i data-lucide="git-merge" style="width: 14px; height: 14px;"></i> Mermaid
+                            </div>
+                            <div class="mermaid-actions">
+                                <button class="mermaid-btn" title="Copy Code"><i data-lucide="copy" style="width: 14px; height: 14px;"></i></button>
+                                <button class="mermaid-btn" title="Delete"><i data-lucide="trash-2" style="width: 14px; height: 14px;"></i></button>
+                            </div>
+                        </div>
+                        <div class="mermaid-body">
+                            <div class="mermaid-code">
+                                <textarea class="mermaid-textarea" spellcheck="false">
+graph TD
+  A[Client] --> B{Agent Router}
+  B -->|Tools| C[Terminal]
+  B -->|LLM| D[Veloca Core]
+  C --> D
+                                </textarea>
+                            </div>
+                            <div class="mermaid-preview">
+                                <!-- 模拟渲染的 SVG 流程图 -->
+                                <div class="mock-flowchart">
+                                    <div class="mock-node">Client</div>
+                                    <div class="mock-arrow"></div>
+                                    <div class="mock-node primary">Agent Router</div>
+                                    <div class="mock-arrow"></div>
+                                    <div class="mock-node">Veloca Core</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p><br></p>
+                `;
+                
+                // 插入 HTML 并重新初始化 Icon
+                document.execCommand('insertHTML', false, mermaidHTML);
+                lucide.createIcons();
+            }
+        }
+
+        // 允许鼠标点击菜单
+        slashItems.forEach(item => {
+            item.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // 防止失去焦点
+                executeCommand(item.dataset.cmd);
+            });
+            item.addEventListener('mouseenter', () => {
+                slashItems.forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+            });
+        });
+
+    </script>
+</body>
+</html>

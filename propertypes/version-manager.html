@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - The Premium Markdown Editor</title>
+    <!-- 引入 Lucide 图标库 (Shadcn 御用图标) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SHADCN UI DARK THEME SYSTEM 
+         */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+        :root {
+            --background: #09090b;
+            --foreground: #fafafa;
+            --muted: #27272a;
+            --muted-foreground: #a1a1aa;
+            --border: #27272a;
+            --accent: #27272a;
+            --accent-foreground: #fafafa;
+            --radius: 0.5rem;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+            
+            /* Git Status Colors */
+            --git-modified: #eab308; /* Yellow */
+            --git-added: #10b981;    /* Emerald */
+            --git-deleted: #ef4444;  /* Red */
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--background);
+            color: var(--foreground);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+
+        /* --- 顶部标题栏 --- */
+        .titlebar {
+            height: 38px; display: flex; align-items: center; justify-content: space-between;
+            padding: 0 16px; border-bottom: 1px solid var(--border);
+            -webkit-app-region: drag; background: var(--background); z-index: 100;
+        }
+        .titlebar-left { display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600; letter-spacing: -0.02em; }
+        .window-controls { display: flex; gap: 8px; -webkit-app-region: no-drag; }
+        .control-dot { width: 12px; height: 12px; border-radius: 50%; background-color: var(--muted); transition: all 0.2s ease; cursor: pointer; }
+        .control-dot:hover { background-color: var(--foreground); }
+
+        /* --- 主体布局 --- */
+        .app-layout { display: flex; flex: 1; height: calc(100vh - 38px); }
+
+        /* --- 左侧边栏 --- */
+        .sidebar { width: 260px; min-width: 200px; border-right: 1px solid var(--border); display: flex; flex-direction: column; background-color: #09090b; }
+        .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+        
+        /* Tabs 切换 */
+        .tabs-list { display: flex; background-color: var(--muted); padding: 4px; border-radius: var(--radius); }
+        .tab-trigger {
+            flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+            padding: 4px 8px; font-size: 13px; font-weight: 500; color: var(--muted-foreground);
+            background: transparent; border: none; border-radius: calc(var(--radius) - 2px); cursor: pointer; transition: all 0.2s;
+        }
+        .tab-trigger.active { background-color: var(--background); color: var(--foreground); box-shadow: 0 1px 3px rgba(0,0,0,0.5); }
+
+        /* 侧边栏内容视图容器 */
+        .sidebar-content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+        .view-content { display: none; flex-direction: column; height: 100%; overflow-y: auto; }
+        .view-content.active { display: flex; }
+
+        /* --- 文件树视图 (Files) --- */
+        #view-files { padding: 12px; }
+        .tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; color: var(--muted-foreground); border-radius: var(--radius); cursor: pointer; transition: background 0.15s, color 0.15s; margin-bottom: 2px; }
+        .tree-item:hover { background-color: var(--accent); color: var(--accent-foreground); }
+        .tree-item.active { background-color: var(--foreground); color: var(--background); font-weight: 500; }
+        .tree-indent { margin-left: 20px; }
+
+        /* 
+         * ==========================================
+         *  GIT 工作树视图 (Shadcn + VS Code 风格)
+         * ==========================================
+         */
+        
+        /* 提交区域 */
+        .git-commit-box { padding: 16px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 12px; }
+        .git-textarea {
+            width: 100%; min-height: 64px; padding: 8px 10px;
+            background-color: #121214; border: 1px solid var(--border); border-radius: var(--radius);
+            color: var(--foreground); font-family: var(--font-sans); font-size: 13px; line-height: 1.5;
+            resize: vertical; outline: none; transition: border-color 0.2s;
+        }
+        .git-textarea::placeholder { color: var(--muted-foreground); }
+        .git-textarea:focus { border-color: var(--muted-foreground); }
+        
+        /* Shadcn Primary Button */
+        .git-btn {
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            width: 100%; padding: 8px; background-color: var(--foreground); color: var(--background);
+            border: none; border-radius: var(--radius); font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: opacity 0.2s;
+        }
+        .git-btn:hover { opacity: 0.9; }
+
+        /* Git 文件列表容器 */
+        .git-scroll-area { padding: 12px 8px; flex: 1; overflow-y: auto; }
+
+        /* Git 分组标题 (Staged / Changes) */
+        .git-group-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 4px 8px; margin-bottom: 4px;
+            font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+            color: var(--muted-foreground); cursor: pointer; user-select: none;
+        }
+        .git-group-header:hover { color: var(--foreground); }
+        .git-badge-count { background: var(--border); color: var(--foreground); padding: 2px 6px; border-radius: 10px; font-size: 10px; margin-left: 6px; }
+
+        /* Git 文件项 */
+        .git-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 8px; font-size: 13px; color: var(--muted-foreground);
+            border-radius: var(--radius); cursor: pointer; transition: background 0.15s;
+            margin-bottom: 2px;
+        }
+        .git-item:hover, .git-item.active { background-color: var(--accent); color: var(--foreground); }
+        
+        .git-item-left { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+        .git-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500;}
+        .git-item-dir { font-size: 11px; color: #52525b; white-space: nowrap; }
+        
+        .git-item-right { display: flex; align-items: center; gap: 8px; }
+
+        /* Git 操作图标 (Hover 时出现) */
+        .git-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.2s; }
+        .git-item:hover .git-actions, .git-group-header:hover .git-actions { opacity: 1; }
+        .git-action-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 24px; height: 24px; background: transparent; border: none;
+            color: var(--muted-foreground); border-radius: 4px; cursor: pointer; transition: 0.2s;
+        }
+        .git-action-btn:hover { background-color: rgba(255, 255, 255, 0.1); color: var(--foreground); }
+
+        /* 单字母状态徽章 */
+        .git-status-badge {
+            font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+            width: 14px; text-align: center; flex-shrink: 0;
+        }
+        .status-m { color: var(--git-modified); }
+        .status-a, .status-u { color: var(--git-added); }
+        .status-d { color: var(--git-deleted); }
+
+        /* --- 中央编辑器区域 --- */
+        .editor-container { flex: 1; display: flex; flex-direction: column; background-color: var(--background); position: relative; }
+        .editor-header { height: 48px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid transparent; transition: border-color 0.3s; }
+        .editor-container:hover .editor-header { border-bottom: 1px solid var(--border); }
+        .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-foreground); }
+        .editor-actions { display: flex; gap: 12px; }
+        .icon-btn { background: transparent; border: none; color: var(--muted-foreground); cursor: pointer; padding: 6px; border-radius: var(--radius); transition: all 0.2s; display: flex; align-items: center; justify-content: center; }
+        .icon-btn:hover { background-color: var(--accent); color: var(--foreground); }
+        .editor-scroll-area { flex: 1; overflow-y: auto; padding: 40px 0 100px 0; display: flex; justify-content: center; }
+        .markdown-body { width: 100%; max-width: 720px; padding: 0 40px; }
+        .markdown-body h1 { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 24px; line-height: 1.2; }
+        .markdown-body h2 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; margin-top: 48px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        .markdown-body p { font-size: 1rem; line-height: 1.75; color: #d4d4d8; margin-bottom: 20px; }
+        .markdown-body blockquote { border-left: 2px solid var(--foreground); padding-left: 16px; margin: 24px 0; color: var(--muted-foreground); font-style: italic; }
+        .markdown-body code { font-family: var(--font-mono); background-color: var(--muted); padding: 3px 6px; border-radius: 4px; font-size: 0.85em; color: var(--foreground); }
+        .markdown-body pre { background-color: #000000; border: 1px solid var(--border); padding: 16px; border-radius: var(--radius); overflow-x: auto; margin: 24px 0; }
+        .markdown-body pre code { background-color: transparent; padding: 0; font-size: 0.9em; color: #d4d4d8; }
+        .cursor { display: inline-block; width: 2px; height: 1.2em; background-color: var(--foreground); vertical-align: middle; animation: blink 1s step-end infinite; margin-left: 2px; }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* 底部状态栏 */
+        .statusbar { position: absolute; bottom: 0; right: 0; padding: 8px 16px; font-size: 11px; font-family: var(--font-mono); color: var(--muted-foreground); display: flex; gap: 16px; background: linear-gradient(to top, var(--background) 50%, transparent); width: 100%; justify-content: flex-end; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+    <!-- 顶部标题栏 -->
+    <div class="titlebar">
+        <div class="titlebar-left">
+            <i data-lucide="feather" style="width: 14px; height: 14px;"></i>
+            <span>Veloca</span>
+        </div>
+        <div class="window-controls">
+            <div class="control-dot"></div><div class="control-dot"></div><div class="control-dot"></div>
+        </div>
+    </div>
+
+    <div class="app-layout">
+        <!-- 左侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <!-- 增加了 Git 选项 -->
+                <div class="tabs-list">
+                    <button class="tab-trigger active" data-target="view-files">
+                        Files
+                    </button>
+                    <button class="tab-trigger" data-target="view-git">
+                        Git <span style="background: #3b82f6; width: 6px; height: 6px; border-radius: 50%; margin-left: 2px;"></span>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="sidebar-content-wrapper">
+                
+                <!-- 1. 普通文件树视图 (默认显示) -->
+                <div id="view-files" class="view-content active">
+                    <div class="tree-item"><i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i><i data-lucide="folder" style="width: 14px; height: 14px;"></i><span>Project Veloca</span></div>
+                    <div class="tree-item tree-indent"><i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i><i data-lucide="folder" style="width: 14px; height: 14px;"></i><span>docs</span></div>
+                    <div class="tree-item tree-indent active" style="margin-left: 40px;"><i data-lucide="file-text" style="width: 14px; height: 14px;"></i><span>manifesto.md</span></div>
+                    <div class="tree-item tree-indent"><i data-lucide="chevron-right" style="width: 14px; height: 14px;"></i><i data-lucide="folder" style="width: 14px; height: 14px;"></i><span>components</span></div>
+                </div>
+
+                <!-- 2. Git 版本控制视图 (初始隐藏) -->
+                <div id="view-git" class="view-content">
+                    
+                    <!-- 提交输入区 -->
+                    <div class="git-commit-box">
+                        <textarea class="git-textarea" placeholder="Message (Cmd+Enter to commit)"></textarea>
+                        <button class="git-btn">
+                            <i data-lucide="check" style="width: 16px; height: 16px;"></i> Commit
+                        </button>
+                    </div>
+
+                    <!-- Git 文件变更列表 -->
+                    <div class="git-scroll-area">
+                        
+                        <!-- 暂存的更改 -->
+                        <div class="git-group-header">
+                            <div style="display:flex; align-items:center;">
+                                <i data-lucide="chevron-down" style="width: 14px; height: 14px; margin-right: 4px;"></i>
+                                Staged Changes <span class="git-badge-count">1</span>
+                            </div>
+                        </div>
+                        
+                        <div class="git-item">
+                            <div class="git-item-left">
+                                <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                                <span class="git-item-name">architecture.md</span>
+                                <span class="git-item-dir">docs/</span>
+                            </div>
+                            <div class="git-item-right">
+                                <div class="git-actions">
+                                    <button class="git-action-btn" title="Unstage Changes"><i data-lucide="minus" style="width: 14px; height: 14px;"></i></button>
+                                </div>
+                                <span class="git-status-badge status-m">M</span>
+                            </div>
+                        </div>
+
+                        <!-- 未暂存的更改 -->
+                        <div class="git-group-header" style="margin-top: 16px;">
+                            <div style="display:flex; align-items:center;">
+                                <i data-lucide="chevron-down" style="width: 14px; height: 14px; margin-right: 4px;"></i>
+                                Changes <span class="git-badge-count">3</span>
+                            </div>
+                            <!-- Group Hover Actions -->
+                            <div class="git-actions">
+                                <button class="git-action-btn" title="Discard All Changes"><i data-lucide="undo-2" style="width: 14px; height: 14px;"></i></button>
+                                <button class="git-action-btn" title="Stage All Changes"><i data-lucide="plus" style="width: 14px; height: 14px;"></i></button>
+                            </div>
+                        </div>
+                        
+                        <div class="git-item active"> <!-- 激活状态的文件 -->
+                            <div class="git-item-left">
+                                <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                                <span class="git-item-name">manifesto.md</span>
+                                <span class="git-item-dir">docs/</span>
+                            </div>
+                            <div class="git-item-right">
+                                <div class="git-actions">
+                                    <button class="git-action-btn" title="Discard Changes"><i data-lucide="undo-2" style="width: 14px; height: 14px;"></i></button>
+                                    <button class="git-action-btn" title="Stage Changes"><i data-lucide="plus" style="width: 14px; height: 14px;"></i></button>
+                                </div>
+                                <span class="git-status-badge status-m">M</span>
+                            </div>
+                        </div>
+
+                        <div class="git-item">
+                            <div class="git-item-left">
+                                <!-- 新增文件使用绿色 Icon 增加辨识度 -->
+                                <i data-lucide="file-plus-2" style="width: 14px; height: 14px; color: var(--git-added);"></i>
+                                <span class="git-item-name">new_feature.md</span>
+                            </div>
+                            <div class="git-item-right">
+                                <div class="git-actions">
+                                    <button class="git-action-btn" title="Stage Changes"><i data-lucide="plus" style="width: 14px; height: 14px;"></i></button>
+                                </div>
+                                <span class="git-status-badge status-u">U</span>
+                            </div>
+                        </div>
+
+                        <div class="git-item">
+                            <div class="git-item-left">
+                                <!-- 删除文件使用红色 Icon -->
+                                <i data-lucide="file-minus-2" style="width: 14px; height: 14px; color: var(--git-deleted);"></i>
+                                <span class="git-item-name">old_config.json</span>
+                            </div>
+                            <div class="git-item-right">
+                                <div class="git-actions">
+                                    <button class="git-action-btn" title="Restore"><i data-lucide="undo-2" style="width: 14px; height: 14px;"></i></button>
+                                    <button class="git-action-btn" title="Stage Changes"><i data-lucide="plus" style="width: 14px; height: 14px;"></i></button>
+                                </div>
+                                <span class="git-status-badge status-d">D</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+        <!-- 中央编辑器 -->
+        <main class="editor-container">
+            <header class="editor-header">
+                <div class="breadcrumb">
+                    docs <i data-lucide="chevron-right" style="width: 12px; height: 12px;"></i> manifesto.md
+                    <span style="font-family: var(--font-mono); color: var(--git-modified); font-size: 12px; font-weight: 600; margin-left: 6px;">M</span>
+                </div>
+                <div class="editor-actions">
+                    <button class="icon-btn" title="Git: Open Changes"><i data-lucide="git-compare" style="width: 16px; height: 16px;"></i></button>
+                    <button class="icon-btn" title="Search"><i data-lucide="search" style="width: 16px; height: 16px;"></i></button>
+                    <button class="icon-btn" title="Share"><i data-lucide="share" style="width: 16px; height: 16px;"></i></button>
+                </div>
+            </header>
+
+            <div class="editor-scroll-area">
+                <div class="markdown-body">
+                    <h1>Veloca Manifesto</h1>
+                    <p>Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.</p>
+                    <blockquote>
+                        "Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away." — Antoine de Saint-Exupéry
+                    </blockquote>
+                    <h2>Design Language</h2>
+                    <p>We strictly adhere to a monochrome color palette. No gradients, no messy shadows. Just stark <code>#000000</code>, crisp <code>#FFFFFF</code>, and perfectly measured grays for borders.</p>
+                    <pre><code>// Shadcn configuration for Veloca
+const config = {
+  theme: 'dark',
+  radius: '0.5rem',
+  colors: {
+    background: '#09090b',
+    foreground: '#fafafa',
+    border: '#27272a'
+  }
+}</code></pre>
+                    <h2>Typographic Scale</h2>
+                    <p>Like Typora, Veloca is essentially a live-preview markdown editor. However, we bring the premium <strong>Shadcn UI</strong> aesthetic into the text area. Notice the letter spacing on the headings, the font choices (Inter & JetBrains Mono), and the structural line-heights.<span class="cursor"></span></p>
+                </div>
+            </div>
+
+            <!-- 底部状态 -> 增加 Git 分支指示器 -->
+            <div class="statusbar">
+                <span style="display:flex; align-items:center; gap:4px; color: var(--foreground);"><i data-lucide="git-branch" style="width: 12px; height: 12px;"></i> main*</span>
+                <span>124 Words</span>
+                <span>UTF-8</span>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // 侧边栏 View 切换逻辑
+        const tabTriggers = document.querySelectorAll('.tab-trigger');
+        const viewContents = document.querySelectorAll('.view-content');
+
+        tabTriggers.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                // 1. 切换 Tab 激活状态
+                tabTriggers.forEach(t => t.classList.remove('active'));
+                const clickedTab = e.currentTarget;
+                clickedTab.classList.add('active');
+
+                // 2. 切换下方视图显示
+                const targetId = clickedTab.getAttribute('data-target');
+                viewContents.forEach(view => {
+                    if (view.id === targetId) {
+                        view.classList.add('active');
+                    } else {
+                        view.classList.remove('active');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
