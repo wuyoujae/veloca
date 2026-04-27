@@ -1665,6 +1665,31 @@ export function App(): JSX.Element {
     };
   };
 
+  const updateTabProvenanceSnapshot = (filePath: string, content: string, snapshot: JSONContent | null) => {
+    let provenanceMarkdownHash: string | null = null;
+    let provenanceSnapshotJson: string | null = null;
+
+    if (documentSnapshotHasAiProvenance(snapshot)) {
+      provenanceMarkdownHash = hashMarkdownContent(content);
+      provenanceSnapshotJson = JSON.stringify(snapshot);
+    }
+
+    setOpenTabs((current) => {
+      const nextTabs = current.map((tab) =>
+        tab.file.path === filePath
+          ? {
+              ...tab,
+              provenanceMarkdownHash,
+              provenanceSnapshotJson
+            }
+          : tab
+      );
+
+      activeTabRef.current = nextTabs.find((tab) => tab.file.path === filePath) ?? activeTabRef.current;
+      return nextTabs;
+    });
+  };
+
   const getCursorOffsetForViewMode = (filePath: string, mode: DocumentViewMode): number | null => {
     if (mode === 'source') {
       return sourceEditorHandlesRef.current.get(filePath)?.getCursorOffset() ?? null;
@@ -1710,6 +1735,10 @@ export function App(): JSX.Element {
         const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
         const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
         flushedMarkdownLength = latestRenderedMarkdown.length;
+
+        if (!shouldSkipEmptyFlush) {
+          updateTabProvenanceSnapshot(targetPath, latestRenderedMarkdown, renderedHandle.getProvenanceSnapshot());
+        }
 
         if (!shouldSkipEmptyFlush && latestRenderedMarkdown !== documentContentRef.current) {
           updateTabDocumentContent(targetPath, latestRenderedMarkdown);
@@ -1823,6 +1852,8 @@ export function App(): JSX.Element {
       });
       return;
     }
+
+    updateTabProvenanceSnapshot(filePath, handle.getMarkdownContent(), handle.getProvenanceSnapshot());
 
     showToast({
       type: 'success',
