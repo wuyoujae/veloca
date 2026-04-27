@@ -5562,17 +5562,19 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     };
     const inserted = insertAiGeneratedMarkdown(currentEditor, markdown, sourceMessageId);
     const afterSize = currentEditor.state.doc.content.size;
+    const documentChanged = afterSize !== beforeSize;
 
     logAiInsertDebug('MarkdownEditor handle finished insert command', {
       afterSize,
       beforeSelection,
       beforeSize,
+      documentChanged,
       filePath,
       inserted,
       sourceMessageId
     });
 
-    return inserted;
+    return inserted || documentChanged;
   }, [filePath]);
 
   const getProvenanceSnapshot = useCallback((): JSONContent | null => {

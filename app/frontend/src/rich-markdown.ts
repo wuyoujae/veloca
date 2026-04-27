@@ -972,9 +972,22 @@ export const VelocaAiGeneratedBlock = Node.create({
   },
 
   renderMarkdown(node, helpers) {
-    return helpers.renderChildren(node.content ?? [], '\n\n');
+    return helpers.renderChildren(getMarkdownNodeContent(node), '\n\n');
   }
 });
+
+function getMarkdownNodeContent(node: JSONContent | ProseMirrorNode): JSONContent[] {
+  if ('type' in node && typeof node.type === 'string') {
+    return Array.isArray(node.content) ? node.content : [];
+  }
+
+  if ('toJSON' in node && typeof node.toJSON === 'function') {
+    const json = node.toJSON() as JSONContent;
+    return Array.isArray(json.content) ? json.content : [];
+  }
+
+  return [];
+}
 
 export const MermaidNode = Node.create({
   name: 'velocaMermaid',
