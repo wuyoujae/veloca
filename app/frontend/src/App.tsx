@@ -1696,26 +1696,57 @@ export function App(): JSX.Element {
       return;
     }
 
-    const currentMode = getDocumentViewMode(activeTabPath);
+    const targetPath = activeTabPath;
+    const currentMode = getDocumentViewMode(targetPath);
     const nextMode: DocumentViewMode = currentMode === 'rendered' ? 'source' : 'rendered';
-    const renderedHandle = currentMode === 'rendered' ? renderedEditorHandlesRef.current.get(activeTabPath) : null;
+    let cursorOffset: number | null = null;
+    let scrollTop: number | null = null;
+    let flushedMarkdownLength = documentContentRef.current.length;
 
-    if (renderedHandle) {
-      const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
-      const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
+    try {
+      const renderedHandle = currentMode === 'rendered' ? renderedEditorHandlesRef.current.get(targetPath) : null;
 
-      if (!shouldSkipEmptyFlush && latestRenderedMarkdown !== documentContentRef.current) {
-        updateTabDocumentContent(activeTabPath, latestRenderedMarkdown);
+      if (renderedHandle) {
+        const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
+        const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
+        flushedMarkdownLength = latestRenderedMarkdown.length;
+
+        if (!shouldSkipEmptyFlush && latestRenderedMarkdown !== documentContentRef.current) {
+          updateTabDocumentContent(targetPath, latestRenderedMarkdown);
+        }
       }
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Source Toggle Diagnostic',
+        description: `Markdown flush failed: ${error instanceof Error ? error.message : String(error)}`
+      });
     }
 
-    const cursorOffset = getCursorOffsetForViewMode(activeTabPath, currentMode);
-    const scrollTop = getEditorScrollPosition(activeTabPath);
+    try {
+      cursorOffset = getCursorOffsetForViewMode(targetPath, currentMode);
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Source Toggle Diagnostic',
+        description: `Cursor restore failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+
+    try {
+      scrollTop = getEditorScrollPosition(targetPath);
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Source Toggle Diagnostic',
+        description: `Scroll capture failed: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
 
     if (typeof cursorOffset === 'number') {
       cursorRestoreSequenceRef.current += 1;
       setCursorRestoreRequest({
-        filePath: activeTabPath,
+        filePath: targetPath,
         mode: nextMode,
         offset: cursorOffset,
         sequence: cursorRestoreSequenceRef.current
@@ -1724,9 +1755,15 @@ export function App(): JSX.Element {
 
     setDocumentViewModesByPath((current) => ({
       ...current,
-      [activeTabPath]: nextMode
+      [targetPath]: nextMode
     }));
-    restoreEditorScrollPosition(activeTabPath, scrollTop);
+    restoreEditorScrollPosition(targetPath, scrollTop);
+
+    showToast({
+      type: 'info',
+      title: 'Source Toggle Diagnostic',
+      description: `Switch requested: ${currentMode} -> ${nextMode}, markdown chars: ${flushedMarkdownLength}`
+    });
   };
 
   const insertAiAnswerIntoRenderedEditor = (
