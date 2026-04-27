@@ -33,6 +33,7 @@
   - 点击后将当前 AI 回复插入活动富文本编辑器；渲染视图中按当前选区/光标插入，源码视图会先切回渲染视图再插入，避免丢失富文本来源信息；
   - 插入内容会被包裹为 Veloca 内部 `velocaAiGeneratedBlock`，其中每个 AI 生成文字会应用内部 `velocaAiGenerated` mark，并以蓝色文字下划线区分；
   - Markdown 正文保持纯净，保存时不会写入 Veloca 专属语法、HTML 标记或隐藏注释；
+  - 插入成功后会立即把富文本编辑器当前内容序列化回 Markdown 草稿，保证用户马上切换到源码视图时仍能看到刚插入的内容；
   - AI 内容来源和用户编辑痕迹保存到 `document_provenance_snapshots` sidecar 表，只有 sidecar 中的 `markdown_hash` 与当前 Markdown 完全一致时才恢复内部渲染；
   - 用户在 AI 生成块内新增或替换的文字会自动应用内部 `velocaAiEdited` mark，并将对应文字下划线改为黄色；删除内容不会标记剩余原文；
   - 如果文件被外部工具或源码视图直接改写导致 hash 不匹配，Veloca 会放弃恢复 AI 来源样式，避免把普通内容误判为 AI 内容。

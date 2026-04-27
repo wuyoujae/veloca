@@ -5565,6 +5565,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const afterSize = currentEditor.state.doc.content.size;
     const documentChanged = afterSize !== beforeSize;
 
+    if (inserted || documentChanged) {
+      const nextMarkdown = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
+      lastEditorContentRef.current = nextMarkdown;
+      contentRef.current = nextMarkdown;
+      onChangeRef.current(nextMarkdown);
+    }
+
     logAiInsertDebug('MarkdownEditor handle finished insert command', {
       afterSize,
       beforeSelection,
