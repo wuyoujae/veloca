@@ -56,6 +56,17 @@ export interface SaveMarkdownFileAsResult {
   snapshot: WorkspaceSnapshot;
 }
 
+export type DocumentProvenanceWorkspaceType = 'database' | 'filesystem';
+
+export interface DocumentProvenanceSnapshot {
+  documentKey: string;
+  documentPath: string;
+  markdownHash: string;
+  snapshotJson: string;
+  workspaceFolderId: string;
+  workspaceType: DocumentProvenanceWorkspaceType;
+}
+
 interface WorkspaceFolderRow {
   id: string;
   name: string;
@@ -89,6 +100,15 @@ interface VirtualWorkspaceAssetRow {
   byte_size: number;
   binary_content: Buffer;
   created_at: number;
+}
+
+interface DocumentProvenanceSnapshotRow {
+  document_key: string;
+  document_path: string;
+  markdown_hash: string;
+  snapshot_json: string;
+  workspace_folder_id: string;
+  workspace_type: number;
 }
 
 export interface WorkspaceAssetPayload {
@@ -171,6 +191,8 @@ export function createDatabaseWorkspace(name: string): FileOperationResult {
 }
 
 export function removeWorkspaceFolder(workspaceFolderId: string): WorkspaceSnapshot {
+  deactivateWorkspaceFolderProvenance(workspaceFolderId);
+
   getDatabase()
     .prepare(
       `
@@ -315,6 +337,64 @@ export function saveMarkdownFileAs(parentPath: string, name: string, content: st
     },
     snapshot: getWorkspaceSnapshot()
   };
+}
+
+export function readDocumentProvenanceSnapshot(documentKey: string): DocumentProvenanceSnapshot | null {
+  const key = normalizeDocumentProvenanceKey(documentKey);
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT document_key, workspace_type, document_path, workspace_folder_id, markdown_hash, snapshot_json
+      FROM document_provenance_snapshots
+      WHERE document_key = ? AND status = 0
+      `
+    )
+    .get(key) as DocumentProvenanceSnapshotRow | undefined;
+
+  return row ? mapDocumentProvenanceRow(row) : null;
+}
+
+export function saveDocumentProvenanceSnapshot(
+  snapshot: DocumentProvenanceSnapshot
+): DocumentProvenanceSnapshot {
+  const normalized = normalizeDocumentProvenanceSnapshot(snapshot);
+  const now = Date.now();
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO document_provenance_snapshots
+        (id, document_key, workspace_type, document_path, workspace_folder_id, markdown_hash, snapshot_json, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+      ON CONFLICT(document_key) DO UPDATE SET
+        workspace_type = excluded.workspace_type,
+        document_path = excluded.document_path,
+        workspace_folder_id = excluded.workspace_folder_id,
+        markdown_hash = excluded.markdown_hash,
+        snapshot_json = excluded.snapshot_json,
+        status = 0,
+        updated_at = excluded.updated_at
+      `
+    )
+    .run(
+      randomUUID(),
+      normalized.documentKey,
+      getDocumentProvenanceWorkspaceTypeValue(normalized.workspaceType),
+      normalized.documentPath,
+      normalized.workspaceFolderId,
+      normalized.markdownHash,
+      normalized.snapshotJson,
+      now,
+      now
+    );
+
+  return normalized;
+}
+
+export function deleteDocumentProvenanceSnapshot(documentKey: string): void {
+  getDatabase()
+    .prepare('UPDATE document_provenance_snapshots SET status = 1, updated_at = ? WHERE document_key = ? AND status = 0')
+    .run(Date.now(), normalizeDocumentProvenanceKey(documentKey));
 }
 
 export function saveWorkspaceAsset(
@@ -463,6 +543,7 @@ export function renameWorkspaceEntry(filePath: string, name: string): FileOperat
   }
 
   renameSync(sourcePath, targetPath);
+  moveFilesystemDocumentProvenance(sourcePath, targetPath);
 
   return {
     snapshot: getWorkspaceSnapshot(),
@@ -482,6 +563,7 @@ export function duplicateWorkspaceEntry(filePath: string): FileOperationResult {
     recursive: true,
     errorOnExist: true
   });
+  copyFilesystemDocumentProvenance(sourcePath, targetPath);
 
   return {
     snapshot: getWorkspaceSnapshot(),
@@ -509,11 +591,13 @@ export function pasteWorkspaceEntry(
 
   if (mode === 'cut') {
     renameSync(resolvedSourcePath, targetPath);
+    moveFilesystemDocumentProvenance(resolvedSourcePath, targetPath);
   } else {
     cpSync(resolvedSourcePath, targetPath, {
       recursive: true,
       errorOnExist: true
     });
+    copyFilesystemDocumentProvenance(resolvedSourcePath, targetPath);
   }
 
   return {
@@ -537,6 +621,7 @@ export function deleteWorkspaceEntry(filePath: string): WorkspaceSnapshot {
   }
 
   const entry = getDatabaseEntryByPath(filePath);
+  deactivateDatabaseProvenance(entry.id);
   deactivateDatabaseEntry(entry.id);
   return getWorkspaceSnapshot();
 }
@@ -1008,6 +1093,7 @@ function pasteDatabaseEntry(
       .run(target.workspaceId, target.parentId, Date.now(), source.id);
 
     updateDatabaseAssetWorkspace(source.id, target.workspaceId);
+    updateDatabaseProvenanceWorkspace(source.id, target.workspaceId);
 
     return {
       snapshot: getWorkspaceSnapshot(),
@@ -1044,6 +1130,7 @@ function cloneDatabaseEntry(
 
   if (entry.entry_type === 1) {
     cloneDatabaseAssets(entry.id, id, workspaceId);
+    copyDatabaseDocumentProvenance(entry.id, id, workspaceId);
   }
 
   if (entry.entry_type === 0) {
@@ -1455,6 +1542,314 @@ function getAvailablePath(targetPath: string): string {
   }
 
   throw new Error('Unable to create a unique file path.');
+}
+
+function normalizeDocumentProvenanceKey(documentKey: string): string {
+  const key = documentKey.trim();
+
+  if (!key || key.length > 1024) {
+    throw new Error('Invalid provenance document key.');
+  }
+
+  return key;
+}
+
+function normalizeDocumentProvenanceSnapshot(snapshot: DocumentProvenanceSnapshot): DocumentProvenanceSnapshot {
+  const documentKey = normalizeDocumentProvenanceKey(snapshot.documentKey);
+  const documentPath = snapshot.documentPath.trim();
+  const workspaceFolderId = snapshot.workspaceFolderId.trim();
+  const markdownHash = snapshot.markdownHash.trim();
+  const snapshotJson = snapshot.snapshotJson.trim();
+
+  if (!documentPath || !workspaceFolderId || !markdownHash || !snapshotJson) {
+    throw new Error('Incomplete provenance snapshot.');
+  }
+
+  if (snapshot.workspaceType !== 'database' && snapshot.workspaceType !== 'filesystem') {
+    throw new Error('Invalid provenance workspace type.');
+  }
+
+  JSON.parse(snapshotJson);
+
+  return {
+    documentKey,
+    documentPath,
+    markdownHash,
+    snapshotJson,
+    workspaceFolderId,
+    workspaceType: snapshot.workspaceType
+  };
+}
+
+function getDocumentProvenanceWorkspaceTypeValue(workspaceType: DocumentProvenanceWorkspaceType): number {
+  return workspaceType === 'database' ? 2 : 1;
+}
+
+function getDocumentProvenanceWorkspaceTypeLabel(value: number): DocumentProvenanceWorkspaceType {
+  return value === 2 ? 'database' : 'filesystem';
+}
+
+function mapDocumentProvenanceRow(row: DocumentProvenanceSnapshotRow): DocumentProvenanceSnapshot {
+  return {
+    documentKey: row.document_key,
+    documentPath: row.document_path,
+    markdownHash: row.markdown_hash,
+    snapshotJson: row.snapshot_json,
+    workspaceFolderId: row.workspace_folder_id,
+    workspaceType: getDocumentProvenanceWorkspaceTypeLabel(row.workspace_type)
+  };
+}
+
+function getFilesystemDocumentKey(filePath: string): string | null {
+  const folder = findWorkspaceFolderForPath(filePath);
+
+  if (!folder) {
+    return null;
+  }
+
+  return `filesystem:${folder.id}:${relative(folder.path, filePath).split(sep).join('/')}`;
+}
+
+function getFilesystemProvenanceRows(filePath: string, includeChildren: boolean): DocumentProvenanceSnapshotRow[] {
+  if (!includeChildren) {
+    const row = getDatabase()
+      .prepare(
+        `
+        SELECT document_key, workspace_type, document_path, workspace_folder_id, markdown_hash, snapshot_json
+        FROM document_provenance_snapshots
+        WHERE workspace_type = 1 AND document_path = ? AND status = 0
+        `
+      )
+      .get(filePath) as DocumentProvenanceSnapshotRow | undefined;
+
+    return row ? [row] : [];
+  }
+
+  return getDatabase()
+    .prepare(
+      `
+      SELECT document_key, workspace_type, document_path, workspace_folder_id, markdown_hash, snapshot_json
+      FROM document_provenance_snapshots
+      WHERE workspace_type = 1
+        AND status = 0
+        AND (document_path = ? OR document_path LIKE ?)
+      `
+    )
+    .all(filePath, `${filePath}${sep}%`) as DocumentProvenanceSnapshotRow[];
+}
+
+function moveFilesystemDocumentProvenance(sourcePath: string, targetPath: string): void {
+  const targetStats = statSync(targetPath);
+  const rows = getFilesystemProvenanceRows(sourcePath, targetStats.isDirectory());
+
+  if (!rows.length) {
+    return;
+  }
+
+  const update = getDatabase().prepare(
+    `
+    UPDATE document_provenance_snapshots
+    SET document_key = ?, document_path = ?, workspace_folder_id = ?, updated_at = ?
+    WHERE document_key = ? AND status = 0
+    `
+  );
+  const deleteTarget = getDatabase().prepare(
+    'UPDATE document_provenance_snapshots SET status = 1, updated_at = ? WHERE document_key = ? AND status = 0'
+  );
+  const now = Date.now();
+
+  getDatabase().transaction(() => {
+    for (const row of rows) {
+      const nextPath =
+        row.document_path === sourcePath
+          ? targetPath
+          : join(targetPath, relative(sourcePath, row.document_path));
+      const nextKey = getFilesystemDocumentKey(nextPath);
+      const folder = findWorkspaceFolderForPath(nextPath);
+
+      if (!nextKey || !folder) {
+        continue;
+      }
+
+      deleteTarget.run(now, nextKey);
+      update.run(nextKey, nextPath, folder.id, now, row.document_key);
+    }
+  })();
+}
+
+function copyFilesystemDocumentProvenance(sourcePath: string, targetPath: string): void {
+  const targetStats = statSync(targetPath);
+  const rows = getFilesystemProvenanceRows(sourcePath, targetStats.isDirectory());
+
+  if (!rows.length) {
+    return;
+  }
+
+  const upsert = getDatabase().prepare(
+    `
+    INSERT INTO document_provenance_snapshots
+      (id, document_key, workspace_type, document_path, workspace_folder_id, markdown_hash, snapshot_json, status, created_at, updated_at)
+    VALUES (?, ?, 1, ?, ?, ?, ?, 0, ?, ?)
+    ON CONFLICT(document_key) DO UPDATE SET
+      workspace_type = excluded.workspace_type,
+      document_path = excluded.document_path,
+      workspace_folder_id = excluded.workspace_folder_id,
+      markdown_hash = excluded.markdown_hash,
+      snapshot_json = excluded.snapshot_json,
+      status = 0,
+      updated_at = excluded.updated_at
+    `
+  );
+  const now = Date.now();
+
+  getDatabase().transaction(() => {
+    for (const row of rows) {
+      const nextPath =
+        row.document_path === sourcePath
+          ? targetPath
+          : join(targetPath, relative(sourcePath, row.document_path));
+      const nextKey = getFilesystemDocumentKey(nextPath);
+      const folder = findWorkspaceFolderForPath(nextPath);
+
+      if (!nextKey || !folder) {
+        continue;
+      }
+
+      upsert.run(randomUUID(), nextKey, nextPath, folder.id, row.markdown_hash, row.snapshot_json, now, now);
+    }
+  })();
+}
+
+export function deactivateFilesystemDocumentProvenance(filePath: string): void {
+  const rows = getFilesystemProvenanceRows(filePath, statSync(filePath).isDirectory());
+
+  if (!rows.length) {
+    return;
+  }
+
+  const update = getDatabase().prepare(
+    'UPDATE document_provenance_snapshots SET status = 1, updated_at = ? WHERE document_key = ? AND status = 0'
+  );
+  const now = Date.now();
+
+  getDatabase().transaction(() => {
+    rows.forEach((row) => update.run(now, row.document_key));
+  })();
+}
+
+function deactivateWorkspaceFolderProvenance(workspaceFolderId: string): void {
+  getDatabase()
+    .prepare(
+      `
+      UPDATE document_provenance_snapshots
+      SET status = 1, updated_at = ?
+      WHERE workspace_folder_id = ? AND status = 0
+      `
+    )
+    .run(Date.now(), workspaceFolderId);
+}
+
+function getDatabaseDocumentKey(entryId: string): string {
+  return `database:${entryId}`;
+}
+
+function copyDatabaseDocumentProvenance(sourceEntryId: string, targetEntryId: string, workspaceId: string): void {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT document_key, workspace_type, document_path, workspace_folder_id, markdown_hash, snapshot_json
+      FROM document_provenance_snapshots
+      WHERE document_key = ? AND status = 0
+      `
+    )
+    .get(getDatabaseDocumentKey(sourceEntryId)) as DocumentProvenanceSnapshotRow | undefined;
+
+  if (!row) {
+    return;
+  }
+
+  saveDocumentProvenanceSnapshot({
+    documentKey: getDatabaseDocumentKey(targetEntryId),
+    documentPath: getDatabaseEntryPath(targetEntryId),
+    markdownHash: row.markdown_hash,
+    snapshotJson: row.snapshot_json,
+    workspaceFolderId: workspaceId,
+    workspaceType: 'database'
+  });
+}
+
+function updateDatabaseProvenanceWorkspace(entryId: string, workspaceId: string): void {
+  const entry = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE id = ? AND status = 0
+      `
+    )
+    .get(entryId) as VirtualWorkspaceEntryRow | undefined;
+
+  if (!entry) {
+    return;
+  }
+
+  if (entry.entry_type === 1) {
+    getDatabase()
+      .prepare(
+        `
+        UPDATE document_provenance_snapshots
+        SET workspace_folder_id = ?, updated_at = ?
+        WHERE document_key = ? AND status = 0
+        `
+      )
+      .run(workspaceId, Date.now(), getDatabaseDocumentKey(entry.id));
+    return;
+  }
+
+  const children = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE parent_id = ? AND status = 0
+      `
+    )
+    .all(entryId) as VirtualWorkspaceEntryRow[];
+
+  children.forEach((child) => updateDatabaseProvenanceWorkspace(child.id, workspaceId));
+}
+
+function deactivateDatabaseProvenance(entryId: string): void {
+  const entry = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE id = ? AND status = 0
+      `
+    )
+    .get(entryId) as VirtualWorkspaceEntryRow | undefined;
+
+  if (!entry) {
+    return;
+  }
+
+  if (entry.entry_type === 1) {
+    deleteDocumentProvenanceSnapshot(getDatabaseDocumentKey(entry.id));
+    return;
+  }
+
+  const children = getDatabase()
+    .prepare(
+      `
+      SELECT id, workspace_id, parent_id, entry_type, name, content, created_at
+      FROM virtual_workspace_entries
+      WHERE parent_id = ? AND status = 0
+      `
+    )
+    .all(entryId) as VirtualWorkspaceEntryRow[];
+
+  children.forEach((child) => deactivateDatabaseProvenance(child.id));
 }
 
 function getCopyPath(sourcePath: string, targetDirectory: string): string {

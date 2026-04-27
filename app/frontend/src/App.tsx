@@ -11,7 +11,7 @@ import {
   type MouseEvent,
   type PointerEvent as ReactPointerEvent
 } from 'react';
-import type { Editor as TiptapEditor } from '@tiptap/core';
+import type { Editor as TiptapEditor, JSONContent } from '@tiptap/core';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Selection, TextSelection } from '@tiptap/pm/state';
 import { EditorContent, useEditor } from '@tiptap/react';
@@ -65,6 +65,7 @@ import {
   extractFirstMediaUrl,
   getActiveTableInfo,
   hydrateDocumentAssets,
+  insertAiGeneratedMarkdown,
   insertActiveTableColumn,
   insertActiveTableRow,
   insertMermaidBlockFromCommand,
@@ -165,8 +166,19 @@ interface OpenEditorTab {
   file: MarkdownFileContent;
   draftContent: string;
   isUntitled?: boolean;
+  provenanceMarkdownHash?: string | null;
+  provenanceSnapshotJson?: string | null;
   savedContent: string;
   status: SaveStatus;
+}
+
+interface DocumentProvenanceSnapshot {
+  documentKey: string;
+  documentPath: string;
+  markdownHash: string;
+  snapshotJson: string;
+  workspaceFolderId: string;
+  workspaceType: 'database' | 'filesystem';
 }
 
 interface CursorRestoreRequest {
@@ -512,6 +524,64 @@ function getAgentWorkspaceType(activeFile: MarkdownFileContent | null, workspace
 
 function isUntitledFilePath(filePath: string): boolean {
   return filePath.startsWith(untitledFilePathPrefix);
+}
+
+function getDatabaseEntryId(filePath: string): string | null {
+  return filePath.startsWith('veloca-db://entry/') ? filePath.replace('veloca-db://entry/', '') : null;
+}
+
+function getDocumentProvenanceKey(file: MarkdownFileContent): string | null {
+  const databaseEntryId = getDatabaseEntryId(file.path);
+
+  if (databaseEntryId) {
+    return `database:${databaseEntryId}`;
+  }
+
+  if (!file.workspaceFolderId || !file.relativePath || isUntitledFilePath(file.path)) {
+    return null;
+  }
+
+  return `filesystem:${file.workspaceFolderId}:${file.relativePath}`;
+}
+
+function getDocumentProvenanceWorkspaceType(file: MarkdownFileContent): 'database' | 'filesystem' | null {
+  return getDatabaseEntryId(file.path) ? 'database' : file.workspaceFolderId ? 'filesystem' : null;
+}
+
+function hashMarkdownContent(content: string): string {
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function parseProvenanceSnapshot(snapshotJson?: string | null): JSONContent | null {
+  if (!snapshotJson) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(snapshotJson) as JSONContent;
+    return parsed && parsed.type === 'doc' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function documentSnapshotHasAiProvenance(snapshot: JSONContent | null): boolean {
+  if (!snapshot) {
+    return false;
+  }
+
+  if (snapshot.type === 'velocaAiGeneratedBlock' || snapshot.marks?.some((mark) => mark.type === 'velocaAiEdited')) {
+    return true;
+  }
+
+  return Boolean(snapshot.content?.some((child) => documentSnapshotHasAiProvenance(child)));
 }
 
 function getAgentWorkspaceRootPath(
@@ -1497,6 +1567,82 @@ export function App(): JSX.Element {
     });
   };
 
+  const loadDocumentProvenance = async (
+    file: MarkdownFileContent
+  ): Promise<Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>> => {
+    const documentKey = getDocumentProvenanceKey(file);
+
+    if (!documentKey || !window.veloca?.workspace.readProvenance) {
+      return {
+        provenanceMarkdownHash: null,
+        provenanceSnapshotJson: null
+      };
+    }
+
+    const snapshot = await window.veloca.workspace.readProvenance(documentKey);
+    const markdownHash = hashMarkdownContent(file.content);
+
+    if (!snapshot || snapshot.markdownHash !== markdownHash || !parseProvenanceSnapshot(snapshot.snapshotJson)) {
+      return {
+        provenanceMarkdownHash: null,
+        provenanceSnapshotJson: null
+      };
+    }
+
+    return {
+      provenanceMarkdownHash: snapshot.markdownHash,
+      provenanceSnapshotJson: snapshot.snapshotJson
+    };
+  };
+
+  const persistDocumentProvenance = async (
+    file: MarkdownFileContent,
+    content: string,
+    fallback?: Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>,
+    snapshotOverride?: JSONContent | null
+  ): Promise<Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>> => {
+    const documentKey = getDocumentProvenanceKey(file);
+    const workspaceType = getDocumentProvenanceWorkspaceType(file);
+
+    if (!documentKey || !workspaceType || !window.veloca?.workspace) {
+      return {
+        provenanceMarkdownHash: null,
+        provenanceSnapshotJson: null
+      };
+    }
+
+    const markdownHash = hashMarkdownContent(content);
+    const editorSnapshot = snapshotOverride ?? renderedEditorHandlesRef.current.get(file.path)?.getProvenanceSnapshot() ?? null;
+    const fallbackSnapshot =
+      fallback?.provenanceMarkdownHash === markdownHash ? parseProvenanceSnapshot(fallback.provenanceSnapshotJson) : null;
+    const snapshot = editorSnapshot ?? fallbackSnapshot;
+
+    if (!documentSnapshotHasAiProvenance(snapshot)) {
+      await window.veloca.workspace.deleteProvenance(documentKey);
+      return {
+        provenanceMarkdownHash: null,
+        provenanceSnapshotJson: null
+      };
+    }
+
+    const snapshotJson = JSON.stringify(snapshot);
+    const payload: DocumentProvenanceSnapshot = {
+      documentKey,
+      documentPath: file.path,
+      markdownHash,
+      snapshotJson,
+      workspaceFolderId: file.workspaceFolderId,
+      workspaceType
+    };
+
+    await window.veloca.workspace.saveProvenance(payload);
+
+    return {
+      provenanceMarkdownHash: markdownHash,
+      provenanceSnapshotJson: snapshotJson
+    };
+  };
+
   const getCursorOffsetForViewMode = (filePath: string, mode: DocumentViewMode): number | null => {
     if (mode === 'source') {
       return sourceEditorHandlesRef.current.get(filePath)?.getCursorOffset() ?? null;
@@ -1548,6 +1694,75 @@ export function App(): JSX.Element {
       [activeTabPath]: nextMode
     }));
     restoreEditorScrollPosition(activeTabPath, scrollTop);
+  };
+
+  const insertAiAnswerIntoRenderedEditor = (
+    filePath: string,
+    answer: string,
+    messageId: string,
+    cursorOffset?: number | null,
+    attempt = 0
+  ) => {
+    const handle = renderedEditorHandlesRef.current.get(filePath);
+
+    if (!handle) {
+      if (attempt < 6) {
+        window.setTimeout(
+          () => insertAiAnswerIntoRenderedEditor(filePath, answer, messageId, cursorOffset, attempt + 1),
+          50
+        );
+        return;
+      }
+
+      showToast({
+        type: 'info',
+        title: 'Insert Failed',
+        description: 'The rendered editor is not ready yet.'
+      });
+      return;
+    }
+
+    if (typeof cursorOffset === 'number') {
+      handle.focusAtMarkdownOffset(cursorOffset);
+    }
+
+    if (!handle.insertAiGeneratedContent(answer, messageId)) {
+      showToast({
+        type: 'info',
+        title: 'Insert Failed',
+        description: 'The AI response is empty or could not be inserted.'
+      });
+      return;
+    }
+
+    showToast({
+      type: 'success',
+      title: 'Inserted',
+      description: 'The AI response has been inserted into the document.'
+    });
+  };
+
+  const handleInsertAiAnswer = (answer: string, messageId: string) => {
+    if (!activeTabPath || !answer.trim()) {
+      return;
+    }
+
+    const currentMode = getDocumentViewMode(activeTabPath);
+
+    if (currentMode === 'source') {
+      const cursorOffset = sourceEditorHandlesRef.current.get(activeTabPath)?.getCursorOffset() ?? documentContent.length;
+
+      setDocumentViewModesByPath((current) => ({
+        ...current,
+        [activeTabPath]: 'rendered'
+      }));
+      window.requestAnimationFrame(() => {
+        insertAiAnswerIntoRenderedEditor(activeTabPath, answer, messageId, cursorOffset);
+      });
+      return;
+    }
+
+    insertAiAnswerIntoRenderedEditor(activeTabPath, answer, messageId);
   };
 
   const ensureTabGroup = (paths: string[], insertIndex?: number) => {
@@ -1645,6 +1860,7 @@ export function App(): JSX.Element {
 
     try {
       const savedFile = await window.veloca.workspace.saveMarkdown(filePath, content);
+      const provenance = await persistDocumentProvenance(savedFile, content, tab);
 
       setOpenTabs((current) =>
         current.map((currentTab) =>
@@ -1652,6 +1868,7 @@ export function App(): JSX.Element {
             ? {
                 ...currentTab,
                 file: { ...currentTab.file, ...savedFile },
+                ...provenance,
                 savedContent: content,
                 status: currentTab.draftContent === content ? 'saved' : 'unsaved'
               }
@@ -1713,6 +1930,7 @@ export function App(): JSX.Element {
     const sourcePath = sourceTab.file.path;
     const sourceAgentContext = buildAgentRuntimeContext(sourceTab.file, workspace, null);
     const isSavingActiveTab = activeTabRef.current?.file.path === sourcePath;
+    const sourceProvenanceSnapshot = renderedEditorHandlesRef.current.get(sourcePath)?.getProvenanceSnapshot() ?? null;
 
     setSavingLocation(true);
     beginFileSaveAction(sourcePath);
@@ -1727,6 +1945,7 @@ export function App(): JSX.Element {
     try {
       const result = await window.veloca.workspace.saveMarkdownAs(parentPath, fileName, content);
       const savedFile = result.file;
+      const provenance = await persistDocumentProvenance(savedFile, content, sourceTab, sourceProvenanceSnapshot);
       const targetAgentContext = buildAgentRuntimeContext(savedFile, result.snapshot, null);
 
       try {
@@ -1780,6 +1999,7 @@ export function App(): JSX.Element {
                 file: savedFile,
                 draftContent: content,
                 isUntitled: false,
+                ...provenance,
                 savedContent: content,
                 status: 'saved' as SaveStatus
               }
@@ -2198,9 +2418,11 @@ export function App(): JSX.Element {
 
     try {
       const file = await window.veloca.workspace.readMarkdown(filePath);
+      const provenance = await loadDocumentProvenance(file);
       const nextTab: OpenEditorTab = {
         file,
         draftContent: file.content,
+        ...provenance,
         savedContent: file.content,
         status: 'saved'
       };
@@ -2382,12 +2604,14 @@ export function App(): JSX.Element {
     for (const tab of unsavedTabs) {
       try {
         const savedFile = await window.veloca.workspace.saveMarkdown(tab.file.path, tab.draftContent);
+        const provenance = await persistDocumentProvenance(savedFile, tab.draftContent, tab);
         const targetIndex = nextTabs.findIndex((item) => item.file.path === tab.file.path);
 
         if (targetIndex >= 0) {
           nextTabs[targetIndex] = {
             ...nextTabs[targetIndex],
             file: { ...nextTabs[targetIndex].file, ...savedFile },
+            ...provenance,
             savedContent: tab.draftContent,
             status: 'saved'
           };
@@ -3036,6 +3260,8 @@ export function App(): JSX.Element {
               <MarkdownEditor
                 content={paneContent}
                 filePath={tab.file.path}
+                provenanceMarkdownHash={tab.provenanceMarkdownHash}
+                provenanceSnapshotJson={tab.provenanceSnapshotJson}
                 ref={(handle) => {
                   if (handle) {
                     renderedEditorHandlesRef.current.set(tab.file.path, handle);
@@ -3579,6 +3805,8 @@ export function App(): JSX.Element {
                   <MarkdownEditor
                     content={documentContent}
                     filePath={activeFile.path}
+                    provenanceMarkdownHash={activeTab?.provenanceMarkdownHash}
+                    provenanceSnapshotJson={activeTab?.provenanceSnapshotJson}
                     ref={(handle) => {
                       if (handle) {
                         renderedEditorHandlesRef.current.set(activeFile.path, handle);
@@ -3623,6 +3851,7 @@ export function App(): JSX.Element {
 
           <AgentPalette
             context={agentRuntimeContext}
+            onInsertAnswer={handleInsertAiAnswer}
             onCanvasClose={relaxAgentPaletteAfterCanvasClose}
             onCanvasOpen={moveAgentPaletteForCanvasOpen}
             onToast={showToast}
@@ -4427,6 +4656,8 @@ interface MarkdownEditorProps {
   content: string;
   filePath: string;
   onCursorRestoreComplete?: (sequence: number) => void;
+  provenanceMarkdownHash?: string | null;
+  provenanceSnapshotJson?: string | null;
   restoreCursorOffset?: number | null;
   restoreCursorSequence?: number | null;
   theme: ThemeMode;
@@ -4437,6 +4668,8 @@ interface MarkdownEditorProps {
 interface MarkdownEditorHandle {
   focusAtMarkdownOffset: (offset: number) => void;
   getCursorMarkdownOffset: () => number | null;
+  getProvenanceSnapshot: () => JSONContent | null;
+  insertAiGeneratedContent: (markdown: string, sourceMessageId: string) => boolean;
 }
 
 interface SourceMarkdownEditorProps {
@@ -4766,6 +4999,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   content,
   filePath,
   onCursorRestoreComplete,
+  provenanceMarkdownHash,
+  provenanceSnapshotJson,
   restoreCursorOffset,
   restoreCursorSequence,
   theme,
@@ -4775,6 +5010,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const contentRef = useRef(content);
   const activeFilePathRef = useRef(filePath);
   const lastEditorContentRef = useRef(content);
+  const lastProvenanceSnapshotJsonRef = useRef(provenanceSnapshotJson);
   const editorInstanceRef = useRef<ReturnType<typeof useEditor> | null>(null);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const tableControlsRef = useRef<HTMLDivElement | null>(null);
@@ -4787,6 +5023,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const [tableGridHover, setTableGridHover] = useState<TableGridHoverState | null>(null);
   const [slashCommandMenu, setSlashCommandMenu] = useState<SlashCommandMenuState | null>(null);
   const slashCommandMenuRef = useRef<SlashCommandMenuState | null>(null);
+  const provenanceSnapshot = useMemo(() => {
+    return provenanceMarkdownHash === hashMarkdownContent(content)
+      ? parseProvenanceSnapshot(provenanceSnapshotJson)
+      : null;
+  }, [content, provenanceMarkdownHash, provenanceSnapshotJson]);
 
   const updateSlashCommandMenu = useCallback((nextMenu: SlashCommandMenuState | null) => {
     slashCommandMenuRef.current = nextMenu;
@@ -4972,8 +5213,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
   const editor = useEditor(
     {
-      content: transformMarkdownForEditor(content),
-      contentType: 'markdown',
+      content: provenanceSnapshot ?? transformMarkdownForEditor(content),
+      contentType: provenanceSnapshot ? 'json' : 'markdown',
       editorProps: {
         attributes: {
           class: theme === 'dark' ? 'veloca-prosemirror theme-dark' : 'veloca-prosemirror theme-light'
@@ -5101,27 +5342,29 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
     const fileChanged = activeFilePathRef.current !== filePath;
     const isExternalContentChange = content !== lastEditorContentRef.current;
+    const isProvenanceChange = provenanceSnapshotJson !== lastProvenanceSnapshotJsonRef.current;
 
     activeFilePathRef.current = filePath;
+    lastProvenanceSnapshotJsonRef.current = provenanceSnapshotJson;
 
-    if (!fileChanged && !isExternalContentChange) {
+    if (!fileChanged && !isExternalContentChange && !isProvenanceChange) {
       return;
     }
 
-    if (!fileChanged && transformMarkdownFromEditor(editor.getMarkdown()) === content) {
+    if (!fileChanged && !isProvenanceChange && transformMarkdownFromEditor(editor.getMarkdown()) === content) {
       lastEditorContentRef.current = content;
       return;
     }
 
     syncingRef.current = true;
-    editor.commands.setContent(transformMarkdownForEditor(content), {
-      contentType: 'markdown',
+    editor.commands.setContent(provenanceSnapshot ?? transformMarkdownForEditor(content), {
+      contentType: provenanceSnapshot ? 'json' : 'markdown',
       emitUpdate: false
     });
     syncingRef.current = false;
     lastEditorContentRef.current = content;
     void hydrateDocumentAssets(editor, filePath, resolveAssetForEditor);
-  }, [content, editor, filePath]);
+  }, [content, editor, filePath, provenanceSnapshot]);
 
   useEffect(() => {
     if (!editor) {
@@ -5224,13 +5467,31 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     }
   }, []);
 
+  const insertAiGeneratedContent = useCallback((markdown: string, sourceMessageId: string): boolean => {
+    const currentEditor = editorInstanceRef.current;
+
+    if (!currentEditor) {
+      return false;
+    }
+
+    return insertAiGeneratedMarkdown(currentEditor, markdown, sourceMessageId);
+  }, []);
+
+  const getProvenanceSnapshot = useCallback((): JSONContent | null => {
+    const currentEditor = editorInstanceRef.current;
+
+    return currentEditor ? (currentEditor.state.doc.toJSON() as JSONContent) : null;
+  }, []);
+
   useImperativeHandle(
     ref,
     () => ({
       focusAtMarkdownOffset,
-      getCursorMarkdownOffset
+      getCursorMarkdownOffset,
+      getProvenanceSnapshot,
+      insertAiGeneratedContent
     }),
-    [focusAtMarkdownOffset, getCursorMarkdownOffset]
+    [focusAtMarkdownOffset, getCursorMarkdownOffset, getProvenanceSnapshot, insertAiGeneratedContent]
   );
 
   useEffect(() => {

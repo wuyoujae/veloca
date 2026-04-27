@@ -18,6 +18,7 @@ import {
   Copy,
   File,
   FileCode,
+  FileInput,
   FilePenLine,
   FileText,
   FolderTree,
@@ -151,6 +152,7 @@ interface AgentPaletteProps {
   context: AgentRuntimeContext;
   onCanvasClose?: () => void;
   onCanvasOpen?: () => void;
+  onInsertAnswer?: (answer: string, messageId: string) => void;
   onToast?: (toast: { description: string; title: string; type: 'info' | 'success' }) => void;
   position: AgentPaletteAnchor;
   visible: boolean;
@@ -384,6 +386,7 @@ export function AgentPalette({
   context,
   onCanvasClose,
   onCanvasOpen,
+  onInsertAnswer,
   onToast,
   position,
   visible
@@ -1520,6 +1523,14 @@ export function AgentPalette({
                       onClick={() => void copyAnswer(message)}
                     >
                       <Copy size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Insert"
+                      aria-label="Insert AI response"
+                      onClick={() => onInsertAnswer?.(message.answer, message.id)}
+                    >
+                      <FileInput size={14} />
                     </button>
                   </div>
                 )}

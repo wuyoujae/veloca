@@ -58,6 +58,15 @@ interface SaveMarkdownFileAsResult {
   snapshot: WorkspaceSnapshot;
 }
 
+interface DocumentProvenanceSnapshot {
+  documentKey: string;
+  documentPath: string;
+  markdownHash: string;
+  snapshotJson: string;
+  workspaceFolderId: string;
+  workspaceType: 'database' | 'filesystem';
+}
+
 interface GitHubAccountProfile {
   avatarUrl: string;
   connectedAt: number;
@@ -243,6 +252,9 @@ declare global {
           name: string,
           content: string
         ) => Promise<SaveMarkdownFileAsResult>;
+        readProvenance: (documentKey: string) => Promise<DocumentProvenanceSnapshot | null>;
+        saveProvenance: (snapshot: DocumentProvenanceSnapshot) => Promise<DocumentProvenanceSnapshot>;
+        deleteProvenance: (documentKey: string) => Promise<void>;
         saveAsset: (documentPath: string, payload: WorkspaceAssetPayload) => Promise<WorkspaceResolvedAsset>;
         resolveAsset: (documentPath: string, assetPath: string) => Promise<WorkspaceResolvedAsset>;
         readAssetMeta: (documentPath: string, assetPath: string) => Promise<WorkspaceResolvedAsset>;

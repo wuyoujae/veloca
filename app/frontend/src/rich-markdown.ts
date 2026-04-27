@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify';
 import {
   Extension,
   InputRule,
+  Mark,
   mergeAttributes,
   Node,
   textblockTypeInputRule,
@@ -31,7 +32,7 @@ import Typography from '@tiptap/extension-typography';
 import { Markdown } from '@tiptap/markdown';
 import { liftEmptyBlock, splitBlockAs } from '@tiptap/pm/commands';
 import { Fragment, type Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
 import {
   CellSelection,
   TableMap,
@@ -62,6 +63,9 @@ const spacedBacktickCodeBlockInputRegex = /^``` ([a-z]+)[\s\n]$/;
 const tildeCodeBlockInputRegex = /^~~~([a-z]+)?[\s\n]$/;
 const shikiTheme = 'vitesse-light';
 const shikiCodeBlockPluginKey = new PluginKey<DecorationSet>('velocaShikiCodeBlock');
+const aiProvenancePluginKey = new PluginKey('velocaAiProvenance');
+const aiProvenanceInsertMeta = 'velocaAiGeneratedInsert';
+const aiProvenanceAppliedMeta = 'velocaAiEditedMarkApplied';
 let shikiHighlighter: HighlighterCore | null = null;
 let shikiHighlighterPromise: Promise<HighlighterCore> | null = null;
 let mermaidModulePromise: Promise<Mermaid> | null = null;
@@ -79,6 +83,12 @@ type HtmlBlockAttrs = {
 
 type MermaidBlockAttrs = {
   code: string;
+};
+
+type AiGeneratedBlockAttrs = {
+  createdAt: number;
+  provenanceId: string;
+  sourceMessageId: string;
 };
 
 type MediaNodeAttrs = {
@@ -850,6 +860,94 @@ export const HtmlBlockNode = Node.create({
   }
 });
 
+export const VelocaAiEditedMark = Mark.create({
+  name: 'velocaAiEdited',
+  inclusive: false,
+
+  parseHTML() {
+    return [
+      {
+        tag: 'span[data-veloca-ai-edited]'
+      }
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        class: 'veloca-ai-edited-text',
+        'data-veloca-ai-edited': 'true'
+      }),
+      0
+    ];
+  },
+
+  renderMarkdown(node, helpers) {
+    return helpers.renderChildren(node);
+  }
+});
+
+export const VelocaAiGeneratedBlock = Node.create({
+  name: 'velocaAiGeneratedBlock',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+
+  addAttributes() {
+    return {
+      createdAt: {
+        default: 0
+      },
+      provenanceId: {
+        default: ''
+      },
+      sourceMessageId: {
+        default: ''
+      }
+    } satisfies Record<keyof AiGeneratedBlockAttrs, { default: string | number }>;
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'section[data-veloca-ai-generated]',
+        getAttrs: (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return false;
+          }
+
+          return {
+            createdAt: Number.parseInt(element.dataset.velocaAiCreatedAt ?? '0', 10) || 0,
+            provenanceId: element.dataset.velocaAiProvenanceId ?? '',
+            sourceMessageId: element.dataset.velocaAiSourceMessageId ?? ''
+          };
+        }
+      }
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const attrs = HTMLAttributes as AiGeneratedBlockAttrs;
+
+    return [
+      'section',
+      {
+        class: 'veloca-ai-generated-block',
+        'data-veloca-ai-created-at': String(attrs.createdAt ?? 0),
+        'data-veloca-ai-generated': 'true',
+        'data-veloca-ai-provenance-id': attrs.provenanceId ?? '',
+        'data-veloca-ai-source-message-id': attrs.sourceMessageId ?? ''
+      },
+      0
+    ];
+  },
+
+  renderMarkdown(node, helpers) {
+    return helpers.renderChildren(node.content ?? [], '\n\n');
+  }
+});
+
 export const MermaidNode = Node.create({
   name: 'velocaMermaid',
   group: 'block',
@@ -1294,6 +1392,124 @@ const VelocaWritingBehavior = Extension.create({
   }
 });
 
+function createAiProvenancePlugin() {
+  return new Plugin({
+    key: aiProvenancePluginKey,
+    appendTransaction(transactions, _oldState, newState) {
+      if (
+        transactions.some(
+          (transaction) =>
+            transaction.getMeta(aiProvenanceInsertMeta) || transaction.getMeta(aiProvenanceAppliedMeta)
+        )
+      ) {
+        return null;
+      }
+
+      const editedMark = newState.schema.marks.velocaAiEdited;
+
+      if (!editedMark) {
+        return null;
+      }
+
+      const ranges = getInsertedTransactionRanges(transactions);
+
+      if (!ranges.length) {
+        return null;
+      }
+
+      const transaction = newState.tr;
+      let changed = false;
+
+      for (const range of ranges) {
+        const from = Math.max(0, Math.min(range.from, newState.doc.content.size));
+        const to = Math.max(from, Math.min(range.to, newState.doc.content.size));
+
+        if (to <= from || !rangeTouchesAiGeneratedBlock(newState.doc, from, to)) {
+          continue;
+        }
+
+        newState.doc.nodesBetween(from, to, (node, pos) => {
+          if (!node.isText) {
+            return true;
+          }
+
+          const markFrom = Math.max(from, pos);
+          const markTo = Math.min(to, pos + node.nodeSize);
+
+          if (markTo <= markFrom || node.marks.some((mark) => mark.type === editedMark)) {
+            return false;
+          }
+
+          transaction.addMark(markFrom, markTo, editedMark.create());
+          changed = true;
+          return false;
+        });
+      }
+
+      return changed ? transaction.setMeta(aiProvenanceAppliedMeta, true) : null;
+    }
+  });
+}
+
+function getInsertedTransactionRanges(transactions: readonly Transaction[]): Array<{ from: number; to: number }> {
+  const ranges: Array<{ from: number; to: number }> = [];
+
+  for (const transaction of transactions) {
+    transaction.mapping.maps.forEach((map, index) => {
+      map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {
+        if (newEnd <= newStart) {
+          return;
+        }
+
+        const remainingMapping = transaction.mapping.slice(index + 1);
+        ranges.push({
+          from: remainingMapping.map(newStart, 1),
+          to: remainingMapping.map(newEnd, -1)
+        });
+      });
+    });
+  }
+
+  return ranges;
+}
+
+function rangeTouchesAiGeneratedBlock(doc: ProseMirrorNode, from: number, to: number): boolean {
+  let touchesAiBlock = false;
+
+  doc.nodesBetween(from, to, (node) => {
+    if (node.type.name === 'velocaAiGeneratedBlock') {
+      touchesAiBlock = true;
+      return false;
+    }
+
+    return !touchesAiBlock;
+  });
+
+  if (touchesAiBlock) {
+    return true;
+  }
+
+  const safePos = Math.max(0, Math.min(from, doc.content.size));
+  const resolvedPos = doc.resolve(safePos);
+
+  for (let depth = resolvedPos.depth; depth > 0; depth -= 1) {
+    if (resolvedPos.node(depth).type.name === 'velocaAiGeneratedBlock') {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const VelocaAiProvenance = Extension.create({
+  name: 'velocaAiProvenance',
+  priority: 1200,
+
+  addProseMirrorPlugins() {
+    return [createAiProvenancePlugin()];
+  }
+});
+
 const VelocaHardBreak = HardBreak.extend({
   addKeyboardShortcuts() {
     return {
@@ -1385,6 +1601,9 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
     Placeholder.configure({
       placeholder: 'Start writing in Markdown...'
     }),
+    VelocaAiGeneratedBlock,
+    VelocaAiEditedMark,
+    VelocaAiProvenance,
     MermaidNode,
     VelocaCodeBlockShiki.configure({
       HTMLAttributes: {
@@ -1689,6 +1908,11 @@ export function sanitizeHtml(html: string): string {
       'controls',
       'data-callout-type',
       'data-mermaid-code',
+      'data-veloca-ai-created-at',
+      'data-veloca-ai-edited',
+      'data-veloca-ai-generated',
+      'data-veloca-ai-provenance-id',
+      'data-veloca-ai-source-message-id',
       'data-veloca-callout',
       'data-veloca-footnotes',
       'data-veloca-html-block',
@@ -1716,6 +1940,36 @@ export function transformMarkdownFromEditor(content: string): string {
 
 export function renderMarkdownToSafeHtml(content: string): string {
   return sanitizeHtml(renderMarkdownHtml(transformMarkdownForEditor(content)));
+}
+
+export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sourceMessageId: string): boolean {
+  if (!markdown.trim() || !editor.markdown) {
+    return false;
+  }
+
+  const parsed = editor.markdown.parse(transformMarkdownForEditor(markdown));
+  const content = parsed.content?.length ? parsed.content : [{ type: 'paragraph' }];
+  const provenanceId = `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+  return editor
+    .chain()
+    .focus()
+    .insertContent(
+      {
+        type: 'velocaAiGeneratedBlock',
+        attrs: {
+          createdAt: Date.now(),
+          provenanceId,
+          sourceMessageId
+        },
+        content
+      },
+      {
+        updateSelection: true
+      }
+    )
+    .setMeta(aiProvenanceInsertMeta, true)
+    .run();
 }
 
 export async function renderMermaidToSafeSvg(code: string): Promise<string> {

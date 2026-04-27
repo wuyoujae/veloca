@@ -1437,6 +1437,18 @@ button {
   }
 }
 
+@keyframes aiGeneratedBlockEnter {
+  from {
+    opacity: 0.72;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .editor-scroll-area {
   display: flex;
   flex: 1;
@@ -3556,6 +3568,26 @@ button {
 .veloca-editor .ProseMirror p {
   min-height: 1.75em;
   margin: 0 0 1em;
+}
+
+.veloca-editor .ProseMirror .veloca-ai-generated-block {
+  position: relative;
+  margin: 1.2em 0 1.35em;
+  padding: 0 0 0.72em;
+  border-bottom: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
+  animation: aiGeneratedBlockEnter 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.veloca-editor .ProseMirror .veloca-ai-generated-block > :last-child {
+  margin-bottom: 0;
+}
+
+.veloca-editor .ProseMirror .veloca-ai-edited-text {
+  border-radius: 0.18em;
+  background: color-mix(in srgb, #fef08a 62%, transparent);
+  color: #a16207;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .veloca-editor .ProseMirror h1 + p,

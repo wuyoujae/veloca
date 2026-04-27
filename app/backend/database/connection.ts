@@ -106,6 +106,19 @@ export function getDatabase(): Database.Database {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS document_provenance_snapshots (
+      id TEXT PRIMARY KEY,
+      document_key TEXT NOT NULL UNIQUE,
+      workspace_type INTEGER NOT NULL,
+      document_path TEXT NOT NULL,
+      workspace_folder_id TEXT NOT NULL,
+      markdown_hash TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      status INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   return database;

@@ -37,10 +37,13 @@ import {
   addWorkspaceFolders,
   createDatabaseWorkspace,
   createWorkspaceEntry,
+  deactivateFilesystemDocumentProvenance,
   deleteWorkspaceEntry,
+  deleteDocumentProvenanceSnapshot,
   duplicateWorkspaceEntry,
   getWorkspaceSnapshot,
   pasteWorkspaceEntry,
+  readDocumentProvenanceSnapshot,
   readMarkdownFile,
   readWorkspaceAssetBinary,
   readWorkspaceAssetMeta,
@@ -49,8 +52,10 @@ import {
   resolveWorkspaceAsset,
   saveMarkdownFileAs,
   saveMarkdownFile,
+  saveDocumentProvenanceSnapshot,
   saveWorkspaceAsset,
   validateWorkspacePath,
+  type DocumentProvenanceSnapshot,
   type WorkspaceSnapshot
 } from '../services/workspace-service';
 import {
@@ -238,6 +243,15 @@ function registerIpcHandlers(): void {
 
     return result;
   });
+  ipcMain.handle('workspace:read-provenance', (_event, documentKey: string) => {
+    return readDocumentProvenanceSnapshot(documentKey);
+  });
+  ipcMain.handle('workspace:save-provenance', (_event, snapshot: DocumentProvenanceSnapshot) => {
+    return saveDocumentProvenanceSnapshot(snapshot);
+  });
+  ipcMain.handle('workspace:delete-provenance', (_event, documentKey: string) => {
+    deleteDocumentProvenanceSnapshot(documentKey);
+  });
   ipcMain.handle('version-manager:get-status', () => getVersionManagerStatus());
   ipcMain.handle('version-manager:ensure-repository', () => ensureVersionRepository());
   ipcMain.handle('version-manager:sync-markdown-file', (_event, filePath: string) => {
@@ -280,6 +294,7 @@ function registerIpcHandlers(): void {
     }
 
     const resolvedPath = validateWorkspacePath(filePath);
+    deactivateFilesystemDocumentProvenance(resolvedPath);
     await shell.trashItem(resolvedPath);
     return getWorkspaceSnapshot();
   });

@@ -17,6 +17,7 @@ import type {
 } from '../services/agent-service';
 import type {
   FileOperationResult,
+  DocumentProvenanceSnapshot,
   MarkdownFileContent,
   SaveMarkdownFileAsResult,
   WorkspaceAssetPayload,
@@ -43,6 +44,12 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('workspace:save-markdown', filePath, content) as Promise<MarkdownFileContent>,
     saveMarkdownAs: (parentPath: string, name: string, content: string) =>
       ipcRenderer.invoke('workspace:save-markdown-as', parentPath, name, content) as Promise<SaveMarkdownFileAsResult>,
+    readProvenance: (documentKey: string) =>
+      ipcRenderer.invoke('workspace:read-provenance', documentKey) as Promise<DocumentProvenanceSnapshot | null>,
+    saveProvenance: (snapshot: DocumentProvenanceSnapshot) =>
+      ipcRenderer.invoke('workspace:save-provenance', snapshot) as Promise<DocumentProvenanceSnapshot>,
+    deleteProvenance: (documentKey: string) =>
+      ipcRenderer.invoke('workspace:delete-provenance', documentKey) as Promise<void>,
     saveAsset: (documentPath: string, payload: WorkspaceAssetPayload) =>
       ipcRenderer.invoke('workspace:save-asset', documentPath, payload) as Promise<WorkspaceResolvedAsset>,
     resolveAsset: (documentPath: string, assetPath: string) =>
