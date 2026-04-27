@@ -1698,6 +1698,16 @@ export function App(): JSX.Element {
 
     const currentMode = getDocumentViewMode(activeTabPath);
     const nextMode: DocumentViewMode = currentMode === 'rendered' ? 'source' : 'rendered';
+    const renderedHandle = currentMode === 'rendered' ? renderedEditorHandlesRef.current.get(activeTabPath) : null;
+
+    if (renderedHandle) {
+      const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
+
+      if (latestRenderedMarkdown !== documentContentRef.current) {
+        updateTabDocumentContent(activeTabPath, latestRenderedMarkdown);
+      }
+    }
+
     const cursorOffset = getCursorOffsetForViewMode(activeTabPath, currentMode);
     const scrollTop = getEditorScrollPosition(activeTabPath);
 
@@ -4747,6 +4757,7 @@ interface MarkdownEditorProps {
 interface MarkdownEditorHandle {
   focusAtMarkdownOffset: (offset: number) => void;
   getCursorMarkdownOffset: () => number | null;
+  getMarkdownContent: () => string;
   getProvenanceSnapshot: () => JSONContent | null;
   insertAiGeneratedContent: (markdown: string, sourceMessageId: string) => boolean;
 }
@@ -5585,6 +5596,12 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     return inserted || documentChanged;
   }, [filePath]);
 
+  const getMarkdownContent = useCallback((): string => {
+    const currentEditor = editorInstanceRef.current;
+
+    return currentEditor ? transformMarkdownFromEditor(getEditorMarkdown(currentEditor)) : contentRef.current;
+  }, []);
+
   const getProvenanceSnapshot = useCallback((): JSONContent | null => {
     const currentEditor = editorInstanceRef.current;
 
@@ -5596,10 +5613,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     () => ({
       focusAtMarkdownOffset,
       getCursorMarkdownOffset,
+      getMarkdownContent,
       getProvenanceSnapshot,
       insertAiGeneratedContent
     }),
-    [focusAtMarkdownOffset, getCursorMarkdownOffset, getProvenanceSnapshot, insertAiGeneratedContent]
+    [focusAtMarkdownOffset, getCursorMarkdownOffset, getMarkdownContent, getProvenanceSnapshot, insertAiGeneratedContent]
   );
 
   useEffect(() => {
