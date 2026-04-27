@@ -68,10 +68,15 @@ interface AgentAttachmentSummary {
 }
 
 interface AgentRuntimeContext {
+  brainstormSessionKey?: string;
   currentFilePath?: string;
   selectedText?: string;
   workspaceRootPath?: string;
   workspaceType?: AgentWorkspaceType;
+}
+
+interface AgentInheritSessionsResult {
+  movedSessions: number;
 }
 
 interface AgentSendMessageRequest {
@@ -191,6 +196,10 @@ declare global {
       agent: {
         listSessions: (context?: AgentRuntimeContext) => Promise<AgentStoredSession[]>;
         createSession: (context?: AgentRuntimeContext) => Promise<AgentStoredSession>;
+        inheritSessions: (
+          sourceContext?: AgentRuntimeContext,
+          targetContext?: AgentRuntimeContext
+        ) => Promise<AgentInheritSessionsResult>;
         sendMessage: (payload: AgentSendMessageRequest) => Promise<AgentSendMessageResponse>;
         streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => () => void;
         onOpenPalette: (callback: () => void) => () => void;

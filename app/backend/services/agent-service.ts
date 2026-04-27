@@ -17,10 +17,15 @@ export interface AgentAttachmentSummary {
 export type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
 
 export interface AgentRuntimeContext {
+  brainstormSessionKey?: string;
   currentFilePath?: string;
   selectedText?: string;
   workspaceRootPath?: string;
   workspaceType?: AgentWorkspaceType;
+}
+
+export interface AgentInheritSessionsResult {
+  movedSessions: number;
 }
 
 export interface AgentSendMessageRequest {
@@ -133,6 +138,7 @@ const readFileBinarySampleBytes = 8192;
 const agentStorageDirectory = join(process.cwd(), '.veloca', 'storage');
 const agentSessionWorkspaceIndexPath = join(agentStorageDirectory, 'veloca-session-workspaces.json');
 const agentBrainstormWorkspaceKey = 'brainstorm';
+const maxBrainstormSessionKeyLength = 512;
 let envLoaded = false;
 let agentToolCallSequence = 0;
 
@@ -669,13 +675,23 @@ function getWorkspaceType(context?: AgentRuntimeContext): AgentWorkspaceType {
   return 'none';
 }
 
+function getBrainstormWorkspaceKey(context?: AgentRuntimeContext): string {
+  const sessionKey = context?.brainstormSessionKey?.trim();
+
+  if (!sessionKey || sessionKey.includes('\0') || sessionKey.length > maxBrainstormSessionKeyLength) {
+    return agentBrainstormWorkspaceKey;
+  }
+
+  return `${agentBrainstormWorkspaceKey}:${sessionKey}`;
+}
+
 function getAgentSessionWorkspaceScope(context?: AgentRuntimeContext): AgentSessionWorkspaceScope {
   const workspaceType = getWorkspaceType(context);
   const requestedRootPath = context?.workspaceRootPath?.trim();
 
   if (workspaceType === 'none') {
     return {
-      workspaceKey: agentBrainstormWorkspaceKey,
+      workspaceKey: getBrainstormWorkspaceKey(context),
       workspaceType
     };
   }
@@ -5857,6 +5873,47 @@ function getSessionsForWorkspace(scope: AgentSessionWorkspaceScope): StoredAgent
   );
 
   return readStoredSessionSummaries().filter((session) => workspaceSessionIds.has(getStoredSessionId(session)));
+}
+
+export function inheritAgentSessions(
+  sourceContext: AgentRuntimeContext | undefined,
+  targetContext: AgentRuntimeContext | undefined
+): AgentInheritSessionsResult {
+  const sourceScope = getAgentSessionWorkspaceScope(sourceContext);
+  const targetScope = getAgentSessionWorkspaceScope(targetContext);
+
+  if (sourceScope.workspaceType !== 'none') {
+    throw new Error('Only standalone brainstorm Agent sessions can be inherited.');
+  }
+
+  if (targetScope.workspaceType === 'none') {
+    throw new Error('A saved workspace root is required to inherit Agent sessions.');
+  }
+
+  const records = readAgentSessionWorkspaceRecords();
+  let movedSessions = 0;
+  const now = new Date().toISOString();
+  const nextRecords = records.map((record) => {
+    if (getStoredWorkspaceRecordKey(record) !== sourceScope.workspaceKey) {
+      return record;
+    }
+
+    movedSessions += 1;
+
+    return {
+      ...record,
+      updated_at: now,
+      workspace_key: targetScope.workspaceKey,
+      workspace_root_path: targetScope.workspaceRootPath,
+      workspace_type: targetScope.workspaceType
+    };
+  });
+
+  if (movedSessions > 0) {
+    writeAgentSessionWorkspaceRecords(nextRecords);
+  }
+
+  return { movedSessions };
 }
 
 export function createAgentSession(context?: AgentRuntimeContext): AgentStoredSession {

@@ -453,6 +453,8 @@ function buildAgentRuntimeContext(
   const selectedText = selectionRange?.toString().trim();
 
   return {
+    brainstormSessionKey:
+      workspaceType === 'none' && activeFile && isUntitledFilePath(activeFile.path) ? activeFile.path : undefined,
     currentFilePath: workspaceType === 'none' ? undefined : activeFile?.path,
     selectedText: selectedText || undefined,
     workspaceRootPath: workspaceType === 'none' ? undefined : workspaceRootPath,
@@ -1375,6 +1377,8 @@ export function App(): JSX.Element {
     const content =
       activeTabRef.current?.file.path === sourceTab.file.path ? documentContentRef.current : sourceTab.draftContent;
     const sourcePath = sourceTab.file.path;
+    const sourceAgentContext = buildAgentRuntimeContext(sourceTab.file, workspace, null);
+    const isSavingActiveTab = activeTabRef.current?.file.path === sourcePath;
 
     setSavingLocation(true);
     beginFileSaveAction(sourcePath);
@@ -1382,13 +1386,24 @@ export function App(): JSX.Element {
       current.map((tab) => (tab.file.path === sourcePath ? { ...tab, status: 'saving' } : tab))
     );
 
-    if (activeTabRef.current?.file.path === sourcePath) {
+    if (isSavingActiveTab) {
       setSaveStatus('saving');
     }
 
     try {
       const result = await window.veloca.workspace.saveMarkdownAs(parentPath, fileName, content);
       const savedFile = result.file;
+      const targetAgentContext = buildAgentRuntimeContext(savedFile, result.snapshot, null);
+
+      try {
+        await window.veloca.agent.inheritSessions(sourceAgentContext, targetAgentContext);
+      } catch {
+        showToast({
+          type: 'info',
+          title: 'Agent History Not Moved',
+          description: 'The file was saved, but its temporary Agent session could not be inherited.'
+        });
+      }
 
       setWorkspace(result.snapshot);
       openWorkspaceRoots(result.snapshot.tree);
@@ -1446,6 +1461,9 @@ export function App(): JSX.Element {
       setActiveTabPath(savedFile.path);
       setDocumentContent(content);
       setSaveStatus('saved');
+      if (isSavingActiveTab) {
+        setAgentRuntimeContext(targetAgentContext);
+      }
       ensureTabGroup([savedFile.path]);
       setSaveLocationDialog(null);
       completeFileSaveAction(sourcePath);

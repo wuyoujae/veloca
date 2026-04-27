@@ -56,6 +56,7 @@ export interface AgentPaletteAnchor {
 export type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
 
 export interface AgentRuntimeContext {
+  brainstormSessionKey?: string;
   currentFilePath?: string;
   selectedText?: string;
   workspaceRootPath?: string;

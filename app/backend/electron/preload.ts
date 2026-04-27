@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { ThemeMode } from '../services/settings-store';
 import type {
+  AgentInheritSessionsResult,
   AgentRuntimeContext,
   AgentSendMessageRequest,
   AgentSendMessageResponse,
@@ -72,6 +73,12 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('agent:list-sessions', context) as Promise<AgentStoredSession[]>,
     createSession: (context?: AgentRuntimeContext) =>
       ipcRenderer.invoke('agent:create-session', context) as Promise<AgentStoredSession>,
+    inheritSessions: (sourceContext?: AgentRuntimeContext, targetContext?: AgentRuntimeContext) =>
+      ipcRenderer.invoke(
+        'agent:inherit-sessions',
+        sourceContext,
+        targetContext
+      ) as Promise<AgentInheritSessionsResult>,
     sendMessage: (payload: AgentSendMessageRequest) =>
       ipcRenderer.invoke('agent:send-message', payload) as Promise<AgentSendMessageResponse>,
     streamMessage: (payload: AgentSendMessageRequest, callback: (event: AgentStreamEvent) => void) => {

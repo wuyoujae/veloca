@@ -20,6 +20,7 @@ import {
 } from '../services/settings-store';
 import {
   createAgentSession,
+  inheritAgentSessions,
   listAgentSessions,
   sendAgentMessage,
   streamAgentMessage,
@@ -124,6 +125,16 @@ function registerIpcHandlers(): void {
   ipcMain.handle('agent:create-session', (_event, context: AgentRuntimeContext | undefined) => {
     return createAgentSession(context);
   });
+  ipcMain.handle(
+    'agent:inherit-sessions',
+    (
+      _event,
+      sourceContext: AgentRuntimeContext | undefined,
+      targetContext: AgentRuntimeContext | undefined
+    ) => {
+      return inheritAgentSessions(sourceContext, targetContext);
+    }
+  );
   ipcMain.on('agent:send-message-stream', (event, requestId: string, request: AgentSendMessageRequest) => {
     if (!requestId || typeof requestId !== 'string') {
       return;
