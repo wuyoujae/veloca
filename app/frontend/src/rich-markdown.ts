@@ -888,6 +888,34 @@ export const VelocaAiEditedMark = Mark.create({
   }
 });
 
+export const VelocaAiGeneratedMark = Mark.create({
+  name: 'velocaAiGenerated',
+  inclusive: false,
+
+  parseHTML() {
+    return [
+      {
+        tag: 'span[data-veloca-ai-generated-text]'
+      }
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        class: 'veloca-ai-generated-text',
+        'data-veloca-ai-generated-text': 'true'
+      }),
+      0
+    ];
+  },
+
+  renderMarkdown(node, helpers) {
+    return helpers.renderChildren(node);
+  }
+});
+
 export const VelocaAiGeneratedBlock = Node.create({
   name: 'velocaAiGeneratedBlock',
   group: 'block',
@@ -1406,6 +1434,7 @@ function createAiProvenancePlugin() {
       }
 
       const editedMark = newState.schema.marks.velocaAiEdited;
+      const generatedMark = newState.schema.marks.velocaAiGenerated;
 
       if (!editedMark) {
         return null;
@@ -1438,6 +1467,10 @@ function createAiProvenancePlugin() {
 
           if (markTo <= markFrom || node.marks.some((mark) => mark.type === editedMark)) {
             return false;
+          }
+
+          if (generatedMark) {
+            transaction.removeMark(markFrom, markTo, generatedMark);
           }
 
           transaction.addMark(markFrom, markTo, editedMark.create());
@@ -1602,6 +1635,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       placeholder: 'Start writing in Markdown...'
     }),
     VelocaAiGeneratedBlock,
+    VelocaAiGeneratedMark,
     VelocaAiEditedMark,
     VelocaAiProvenance,
     MermaidNode,
@@ -1911,6 +1945,7 @@ export function sanitizeHtml(html: string): string {
       'data-veloca-ai-created-at',
       'data-veloca-ai-edited',
       'data-veloca-ai-generated',
+      'data-veloca-ai-generated-text',
       'data-veloca-ai-provenance-id',
       'data-veloca-ai-source-message-id',
       'data-veloca-callout',
@@ -1948,7 +1983,7 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
   }
 
   const parsed = editor.markdown.parse(transformMarkdownForEditor(markdown));
-  const content = parsed.content?.length ? parsed.content : [{ type: 'paragraph' }];
+  const content = markAiGeneratedContent(parsed.content?.length ? parsed.content : [{ type: 'paragraph' }]);
   const provenanceId = `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
   return editor
@@ -1970,6 +2005,31 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
     )
     .setMeta(aiProvenanceInsertMeta, true)
     .run();
+}
+
+function markAiGeneratedContent(content: JSONContent[]): JSONContent[] {
+  return content.map((node) => markAiGeneratedNode(node));
+}
+
+function markAiGeneratedNode(node: JSONContent): JSONContent {
+  if (node.type === 'text') {
+    return {
+      ...node,
+      marks: [
+        ...(node.marks ?? []).filter((mark) => mark.type !== 'velocaAiEdited' && mark.type !== 'velocaAiGenerated'),
+        { type: 'velocaAiGenerated' }
+      ]
+    };
+  }
+
+  if (!node.content?.length) {
+    return node;
+  }
+
+  return {
+    ...node,
+    content: node.content.map((child) => markAiGeneratedNode(child))
+  };
 }
 
 export async function renderMermaidToSafeSvg(code: string): Promise<string> {

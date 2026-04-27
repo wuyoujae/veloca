@@ -31,10 +31,10 @@
 - AI 回复内容复用编辑器侧 `rich-markdown` 的 Markdown 渲染与 HTML 清洗能力，支持段落、列表、标题、引用、代码块、Mermaid 图表和表格等基础 Markdown；AI 回复完成后才会在回复下方显示复制按钮，用于复制原始 AI 回复文本。
 - AI 回复完成后，复制按钮右侧提供 `Insert` 按钮：
   - 点击后将当前 AI 回复插入活动富文本编辑器；渲染视图中按当前选区/光标插入，源码视图会先切回渲染视图再插入，避免丢失富文本来源信息；
-  - 插入内容会被包裹为 Veloca 内部 `velocaAiGeneratedBlock`，编辑器内使用底部横线区分 AI 生成内容；
+  - 插入内容会被包裹为 Veloca 内部 `velocaAiGeneratedBlock`，其中每个 AI 生成文字会应用内部 `velocaAiGenerated` mark，并以蓝色文字下划线区分；
   - Markdown 正文保持纯净，保存时不会写入 Veloca 专属语法、HTML 标记或隐藏注释；
   - AI 内容来源和用户编辑痕迹保存到 `document_provenance_snapshots` sidecar 表，只有 sidecar 中的 `markdown_hash` 与当前 Markdown 完全一致时才恢复内部渲染；
-  - 用户在 AI 生成块内新增或替换的文字会自动应用内部 `velocaAiEdited` mark，并以黄色样式显示；删除内容不会标记剩余原文；
+  - 用户在 AI 生成块内新增或替换的文字会自动应用内部 `velocaAiEdited` mark，并将对应文字下划线改为黄色；删除内容不会标记剩余原文；
   - 如果文件被外部工具或源码视图直接改写导致 hash 不匹配，Veloca 会放弃恢复 AI 来源样式，避免把普通内容误判为 AI 内容。
 - 画布浮动按钮有两种互斥状态：当用户离开最新对话纸张时，底部显示 `Back to latest`；当用户仍在最新对话但上滑打断流式自动贴底时，底部显示仅含图标的恢复自动滚动按钮。
 - 用户发送新消息或点击 `Back to latest` 会进入自动贴底状态；流式输出期间会持续滚动到最新内容底部，用户上滑会打断该状态，用户滚到画布底部或点击恢复按钮会重新进入该状态。

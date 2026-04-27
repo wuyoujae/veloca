@@ -566,10 +566,36 @@ function parseProvenanceSnapshot(snapshotJson?: string | null): JSONContent | nu
 
   try {
     const parsed = JSON.parse(snapshotJson) as JSONContent;
-    return parsed && parsed.type === 'doc' ? parsed : null;
+    return parsed && parsed.type === 'doc' ? normalizeAiGeneratedSnapshot(parsed) : null;
   } catch {
     return null;
   }
+}
+
+function normalizeAiGeneratedSnapshot(node: JSONContent, insideAiBlock = false): JSONContent {
+  const nextInsideAiBlock = insideAiBlock || node.type === 'velocaAiGeneratedBlock';
+
+  if (nextInsideAiBlock && node.type === 'text') {
+    const marks = node.marks ?? [];
+    const isEdited = marks.some((mark) => mark.type === 'velocaAiEdited');
+    const hasGenerated = marks.some((mark) => mark.type === 'velocaAiGenerated');
+
+    if (!isEdited && !hasGenerated) {
+      return {
+        ...node,
+        marks: [...marks, { type: 'velocaAiGenerated' }]
+      };
+    }
+  }
+
+  if (!node.content?.length) {
+    return node;
+  }
+
+  return {
+    ...node,
+    content: node.content.map((child) => normalizeAiGeneratedSnapshot(child, nextInsideAiBlock))
+  };
 }
 
 function documentSnapshotHasAiProvenance(snapshot: JSONContent | null): boolean {
@@ -577,7 +603,10 @@ function documentSnapshotHasAiProvenance(snapshot: JSONContent | null): boolean 
     return false;
   }
 
-  if (snapshot.type === 'velocaAiGeneratedBlock' || snapshot.marks?.some((mark) => mark.type === 'velocaAiEdited')) {
+  if (
+    snapshot.type === 'velocaAiGeneratedBlock' ||
+    snapshot.marks?.some((mark) => mark.type === 'velocaAiEdited' || mark.type === 'velocaAiGenerated')
+  ) {
     return true;
   }
 

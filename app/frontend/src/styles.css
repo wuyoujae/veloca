@@ -3573,8 +3573,7 @@ button {
 .veloca-editor .ProseMirror .veloca-ai-generated-block {
   position: relative;
   margin: 1.2em 0 1.35em;
-  padding: 0 0 0.72em;
-  border-bottom: 1px solid color-mix(in srgb, var(--info) 45%, var(--border));
+  padding: 0;
   animation: aiGeneratedBlockEnter 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3582,12 +3581,19 @@ button {
   margin-bottom: 0;
 }
 
+.veloca-editor .ProseMirror .veloca-ai-generated-text,
 .veloca-editor .ProseMirror .veloca-ai-edited-text {
-  border-radius: 0.18em;
-  background: color-mix(in srgb, #fef08a 62%, transparent);
-  color: #a16207;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.2em;
+}
+
+.veloca-editor .ProseMirror .veloca-ai-generated-text {
+  text-decoration-color: color-mix(in srgb, var(--info) 78%, var(--foreground));
+}
+
+.veloca-editor .ProseMirror .veloca-ai-edited-text {
+  text-decoration-color: #eab308;
 }
 
 .veloca-editor .ProseMirror h1 + p,
