@@ -271,6 +271,7 @@ const sidebarDefaultWidth = 300;
 const sidebarMinimumWidth = 148;
 const sidebarMaximumWidth = 420;
 const sidebarTextMinimumWidth = 292;
+const versionManagerSidebarTabVisible = false;
 const emptyGitHubStatus: GitHubAuthStatus = {
   account: null,
   connected: false,
@@ -789,6 +790,7 @@ export function App(): JSX.Element {
   const activeDocumentViewMode = activeTabPath
     ? documentViewModesByPath[activeTabPath] ?? defaultDocumentViewMode
     : defaultDocumentViewMode;
+  const visibleSidebarTab = sidebarTab === 'git' && !versionManagerSidebarTabVisible ? 'files' : sidebarTab;
   const isSidebarTabCompact = sidebarWidth < sidebarTextMinimumWidth;
   const sidebarClassName = [
     'sidebar',
@@ -3069,7 +3071,7 @@ export function App(): JSX.Element {
               <span className="sidebar-header-spacer" aria-hidden="true" />
               <div className="tabs-list sidebar-tabs-list">
                 <button
-                  className={sidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
+                  className={visibleSidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
                   type="button"
                   title="Files"
                   onClick={() => setSidebarTab('files')}
@@ -3078,7 +3080,7 @@ export function App(): JSX.Element {
                   <span className="tab-trigger-label">Files</span>
                 </button>
                 <button
-                  className={sidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
+                  className={visibleSidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
                   type="button"
                   title="Outline"
                   onClick={() => setSidebarTab('outline')}
@@ -3086,16 +3088,18 @@ export function App(): JSX.Element {
                   <ListTree size={14} />
                   <span className="tab-trigger-label">Outline</span>
                 </button>
-                <button
-                  className={sidebarTab === 'git' ? 'tab-trigger active' : 'tab-trigger'}
-                  type="button"
-                  title="Git version management"
-                  onClick={() => setSidebarTab('git')}
-                >
-                  <GitBranch size={14} />
-                  <span className="tab-trigger-label">Git</span>
-                  {versionStatus.pendingChangeCount > 0 && <span className="tab-status-dot" aria-hidden="true" />}
-                </button>
+                {versionManagerSidebarTabVisible && (
+                  <button
+                    className={visibleSidebarTab === 'git' ? 'tab-trigger active' : 'tab-trigger'}
+                    type="button"
+                    title="Git version management"
+                    onClick={() => setSidebarTab('git')}
+                  >
+                    <GitBranch size={14} />
+                    <span className="tab-trigger-label">Git</span>
+                    {versionStatus.pendingChangeCount > 0 && <span className="tab-status-dot" aria-hidden="true" />}
+                  </button>
+                )}
               </div>
               <button
                 className="sidebar-toggle-btn"
@@ -3109,7 +3113,7 @@ export function App(): JSX.Element {
           </div>
 
           <div className="sidebar-content">
-            {sidebarTab === 'files' ? (
+            {visibleSidebarTab === 'files' ? (
               <FileTree
                 activeFilePath={activeFile?.path ?? ''}
                 editingNode={editingNode}
@@ -3125,7 +3129,7 @@ export function App(): JSX.Element {
                 onFileSelect={readMarkdownFile}
                 onFolderToggle={toggleFolder}
               />
-            ) : sidebarTab === 'outline' ? (
+            ) : visibleSidebarTab === 'outline' ? (
               <OutlinePanel
                 activeFile={activeFile}
                 activeHeadingId={activeHeadingId}
