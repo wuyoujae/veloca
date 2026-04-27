@@ -393,7 +393,7 @@ Session content still stays in the third-party local-file store, but Veloca owns
 .veloca/storage/veloca-session-workspaces.json
 ```
 
-The sidecar maps `session_id` to a normalized workspace key. Filesystem workspaces use the registered real path; database workspaces use the registered `veloca-db://root/{workspaceId}` root. Sessions without a matching sidecar record are not listed for any workspace and cannot be sent through the Veloca IPC API.
+The sidecar maps `session_id` to a normalized workspace key. Filesystem workspaces use the registered real path; database workspaces use the registered `veloca-db://root/{workspaceId}` root. When the Agent palette is opened from an untitled file or any state without a valid workspace root, Veloca sends an empty workspace context and stores the conversation under the standalone `brainstorm` scope. Brainstorm sessions are intentionally separate from every real workspace and do not expose workspace tools or directory context. Sessions without a matching sidecar record are not listed for any workspace and cannot be sent through the Veloca IPC API.
 
 `otherone-agent` does not currently store Veloca UI metadata such as the selected Lite / Pro / Ultra badge, upload attachment UI state, or Web Search toggle separately. Persisted history therefore restores the durable user/assistant text from local memory and treats attachment chips as per-turn runtime context until a dedicated metadata layer is added.
 

@@ -132,6 +132,7 @@ const maxWriteFileBytes = 10 * 1024 * 1024;
 const readFileBinarySampleBytes = 8192;
 const agentStorageDirectory = join(process.cwd(), '.veloca', 'storage');
 const agentSessionWorkspaceIndexPath = join(agentStorageDirectory, 'veloca-session-workspaces.json');
+const agentBrainstormWorkspaceKey = 'brainstorm';
 let envLoaded = false;
 let agentToolCallSequence = 0;
 
@@ -674,7 +675,7 @@ function getAgentSessionWorkspaceScope(context?: AgentRuntimeContext): AgentSess
 
   if (workspaceType === 'none') {
     return {
-      workspaceKey: 'none',
+      workspaceKey: agentBrainstormWorkspaceKey,
       workspaceType
     };
   }

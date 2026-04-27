@@ -447,13 +447,15 @@ function buildAgentRuntimeContext(
   workspace: WorkspaceSnapshot,
   selectionRange: Range | null
 ): AgentRuntimeContext {
-  const workspaceType = getAgentWorkspaceType(activeFile, workspace);
+  const candidateWorkspaceType = getAgentWorkspaceType(activeFile, workspace);
+  const workspaceRootPath = getAgentWorkspaceRootPath(activeFile, workspace, candidateWorkspaceType);
+  const workspaceType = workspaceRootPath ? candidateWorkspaceType : 'none';
   const selectedText = selectionRange?.toString().trim();
 
   return {
-    currentFilePath: activeFile?.path,
+    currentFilePath: workspaceType === 'none' ? undefined : activeFile?.path,
     selectedText: selectedText || undefined,
-    workspaceRootPath: getAgentWorkspaceRootPath(activeFile, workspace, workspaceType),
+    workspaceRootPath: workspaceType === 'none' ? undefined : workspaceRootPath,
     workspaceType
   };
 }
