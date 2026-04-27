@@ -41,7 +41,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
-  Sparkles,
   Save,
   MoreVertical,
   Settings,
@@ -188,24 +187,12 @@ interface SaveLocationOption {
 
 type SplitPanePaths = [string, string];
 type EditorTabGroup = string[];
-type EditorMode = 'standard' | 'agent' | 'prompt';
 type TabDropIntent = 'insert-left' | 'insert-right' | 'merge';
 
 interface TabDropCue {
   groupIndex: number;
   intent: TabDropIntent;
 }
-
-interface EditorModeOption {
-  id: EditorMode;
-  name: string;
-}
-
-const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
-  { id: 'standard', name: 'Standard Markdown' },
-  { id: 'agent', name: 'Agent Mode' },
-  { id: 'prompt', name: 'Prompt Engineering' }
-];
 
 const saveActionSuccessDurationMs = 1200;
 const defaultDocumentViewMode: DocumentViewMode = 'rendered';
@@ -640,10 +627,8 @@ export function App(): JSX.Element {
   const [tabGroups, setTabGroups] = useState<EditorTabGroup[]>([]);
   const [activeTabPath, setActiveTabPath] = useState<string | null>(null);
   const [activeGroupKey, setActiveGroupKey] = useState<string | null>(null);
-  const [activeEditorMode, setActiveEditorMode] = useState<EditorMode>('agent');
   const [documentViewModesByPath, setDocumentViewModesByPath] = useState<Record<string, DocumentViewMode>>({});
   const [cursorRestoreRequest, setCursorRestoreRequest] = useState<CursorRestoreRequest | null>(null);
-  const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [agentPaletteOpen, setAgentPaletteOpen] = useState(false);
   const [agentPaletteAnchor, setAgentPaletteAnchor] = useState<AgentPaletteAnchor>(() => getDefaultAgentPaletteAnchor());
@@ -688,8 +673,6 @@ export function App(): JSX.Element {
   const splitEditorGridRef = useRef<HTMLDivElement>(null);
   const agentSelectionRangeRef = useRef<Range | null>(null);
   const workspaceChangedHandlerRef = useRef<(snapshot: WorkspaceSnapshot) => void>(() => {});
-  const modeMenuButtonRef = useRef<HTMLButtonElement>(null);
-  const modeMenuRef = useRef<HTMLDivElement>(null);
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
 
@@ -710,23 +693,6 @@ export function App(): JSX.Element {
       .map((group) => normalizeTabGroup(group.filter((path) => openTabByPath.has(path))))
       .filter((group) => group.length > 0);
   }, [openTabByPath, tabGroups]);
-  const activeEditorModeLabel = useMemo(
-    () => EDITOR_MODE_OPTIONS.find((option) => option.id === activeEditorMode)?.name ?? 'Agent Mode',
-    [activeEditorMode]
-  );
-
-  const renderModeIcon = (modeId: EditorMode) => {
-    if (modeId === 'agent') {
-      return <Sparkles className="editor-mode-menu-icon agent" size={14} />;
-    }
-
-    if (modeId === 'prompt') {
-      return <Pencil className="editor-mode-menu-icon prompt" size={14} />;
-    }
-
-    return <FileText className="editor-mode-menu-icon standard" size={14} />;
-  };
-
   const sections = useMemo(() => {
     return parseMarkdownSections(documentContent, activeFile?.name ?? 'Untitled');
   }, [activeFile?.name, documentContent]);
@@ -793,7 +759,6 @@ export function App(): JSX.Element {
     setAgentRuntimeContext(buildAgentRuntimeContext(activeFile, workspace, selectionRange));
     applyAgentSelectionHighlight(selectionRange);
     setAgentPaletteOpen(true);
-    setIsModeMenuOpen(false);
     setIsHeaderMenuOpen(false);
     setContextMenu(null);
     setAgentPaletteAnchor(getAgentPaletteAnchor(selectionRange));
@@ -1003,7 +968,6 @@ export function App(): JSX.Element {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setSettingsOpen(false);
-        setIsModeMenuOpen(false);
         setIsHeaderMenuOpen(false);
         setAgentPaletteOpen(false);
       }
@@ -1056,16 +1020,8 @@ export function App(): JSX.Element {
       const target = (event.target as Node | null) ?? null;
 
       if (!target) {
-        setIsModeMenuOpen(false);
         setIsHeaderMenuOpen(false);
         setContextMenu(null);
-        return;
-      }
-
-      if (
-        modeMenuButtonRef.current &&
-        (modeMenuButtonRef.current.contains(target) || modeMenuRef.current?.contains(target))
-      ) {
         return;
       }
 
@@ -1076,7 +1032,6 @@ export function App(): JSX.Element {
         return;
       }
 
-      setIsModeMenuOpen(false);
       setIsHeaderMenuOpen(false);
       setContextMenu(null);
     };
@@ -1308,7 +1263,6 @@ export function App(): JSX.Element {
       null;
 
     setIsHeaderMenuOpen(false);
-    setIsModeMenuOpen(false);
     setSaveLocationDialog({
       fileName: tab.file.name || 'Untitled.md',
       filePath: tab.file.path,
@@ -2105,11 +2059,6 @@ export function App(): JSX.Element {
     } else {
       setSaveStatus('saved');
     }
-  };
-
-  const setEditorMode = (nextMode: EditorMode) => {
-    setActiveEditorMode(nextMode);
-    setIsModeMenuOpen(false);
   };
 
   const enableSplitView = (
@@ -3096,21 +3045,6 @@ export function App(): JSX.Element {
               </button>
 
               <button
-                ref={modeMenuButtonRef}
-                className={`editor-action-btn editor-action-btn-mode ${isModeMenuOpen ? 'is-open' : ''}`}
-                title="Switch editor mode"
-                type="button"
-                onClick={() => {
-                  setIsHeaderMenuOpen(false);
-                  setIsModeMenuOpen((current) => !current);
-                }}
-              >
-                <Sparkles className="editor-action-icon" size={13} />
-                <span>{activeEditorModeLabel}</span>
-                <ChevronDown className="editor-action-caret" size={12} />
-              </button>
-
-              <button
                 className="editor-action-btn"
                 title="New File"
                 type="button"
@@ -3125,39 +3059,11 @@ export function App(): JSX.Element {
                 title="More Actions"
                 type="button"
                 onClick={() => {
-                  setIsModeMenuOpen(false);
                   setIsHeaderMenuOpen((current) => !current);
                 }}
               >
                 <MoreVertical className="editor-action-icon" size={14} />
               </button>
-
-              {isModeMenuOpen && (
-                <div className="editor-header-menu editor-mode-menu" ref={modeMenuRef}>
-                  {EDITOR_MODE_OPTIONS.map((mode) => {
-                    const selected = mode.id === activeEditorMode;
-
-                      return (
-                        <button
-                          key={mode.id}
-                          className={`editor-header-menu-item${selected ? ' is-selected' : ''}`}
-                          type="button"
-                          onClick={() => setEditorMode(mode.id)}
-                        >
-                          <span className="editor-header-menu-label">
-                            <span className="editor-header-menu-icon">{renderModeIcon(mode.id)}</span>
-                            <span className="editor-header-menu-text">{mode.name}</span>
-                          </span>
-                          {selected ? (
-                          <span className="editor-header-menu-mark" />
-                        ) : (
-                          <span className="editor-header-menu-empty" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
 
               {isHeaderMenuOpen && (
                 <div className="editor-header-menu editor-action-menu" ref={headerMenuRef}>
