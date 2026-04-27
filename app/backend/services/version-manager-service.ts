@@ -937,6 +937,7 @@ function mapStatusRow(
 
 export async function listManagedChanges(): Promise<VersionManagedChange[]> {
   ensureWorkspaceConfigsForManagedRows();
+  repairDefaultBranchRef();
 
   if (!isLocalGitRepositoryReady()) {
     return [];
