@@ -10,6 +10,7 @@ import type {
 import type {
   FileOperationResult,
   MarkdownFileContent,
+  SaveMarkdownFileAsResult,
   WorkspaceAssetPayload,
   WorkspaceResolvedAsset,
   WorkspaceSnapshot
@@ -32,6 +33,8 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('workspace:read-markdown', filePath) as Promise<MarkdownFileContent>,
     saveMarkdown: (filePath: string, content: string) =>
       ipcRenderer.invoke('workspace:save-markdown', filePath, content) as Promise<MarkdownFileContent>,
+    saveMarkdownAs: (parentPath: string, name: string, content: string) =>
+      ipcRenderer.invoke('workspace:save-markdown-as', parentPath, name, content) as Promise<SaveMarkdownFileAsResult>,
     saveAsset: (documentPath: string, payload: WorkspaceAssetPayload) =>
       ipcRenderer.invoke('workspace:save-asset', documentPath, payload) as Promise<WorkspaceResolvedAsset>,
     resolveAsset: (documentPath: string, assetPath: string) =>

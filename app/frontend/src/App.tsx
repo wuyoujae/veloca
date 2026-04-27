@@ -26,6 +26,7 @@ import {
   Clipboard,
   Code2,
   Copy,
+  Database,
   ExternalLink,
   FileText,
   FilePlus,
@@ -158,6 +159,7 @@ interface EditingNodeState {
 interface OpenEditorTab {
   file: MarkdownFileContent;
   draftContent: string;
+  isUntitled?: boolean;
   savedContent: string;
   status: SaveStatus;
 }
@@ -167,6 +169,21 @@ interface CursorRestoreRequest {
   mode: DocumentViewMode;
   offset: number;
   sequence: number;
+}
+
+interface SaveLocationDialogState {
+  fileName: string;
+  filePath: string;
+  selectedFolderPath: string | null;
+}
+
+interface SaveLocationOption {
+  depth: number;
+  id: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  source: 'database' | 'filesystem';
 }
 
 type SplitPanePaths = [string, string];
@@ -193,6 +210,7 @@ const EDITOR_MODE_OPTIONS: EditorModeOption[] = [
 const saveActionSuccessDurationMs = 1200;
 const defaultDocumentViewMode: DocumentViewMode = 'rendered';
 const sourceCursorMarkerPrefix = 'VELOCASOURCECURSOR';
+const untitledFilePathPrefix = 'veloca-unsaved://';
 
 const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
@@ -396,6 +414,10 @@ function getAgentWorkspaceType(activeFile: MarkdownFileContent | null, workspace
     return 'none';
   }
 
+  if (isUntitledFilePath(activeFile.path)) {
+    return 'none';
+  }
+
   const activeNode = findNodeByPath(workspace.tree, activeFile.path);
 
   if (activeNode?.source === 'database' || activeFile.path.startsWith('veloca-db://')) {
@@ -407,6 +429,10 @@ function getAgentWorkspaceType(activeFile: MarkdownFileContent | null, workspace
   }
 
   return 'none';
+}
+
+function isUntitledFilePath(filePath: string): boolean {
+  return filePath.startsWith(untitledFilePathPrefix);
 }
 
 function getAgentWorkspaceRootPath(
@@ -635,6 +661,8 @@ export function App(): JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState<NameDialogState | null>(null);
   const [nameDialogValue, setNameDialogValue] = useState('');
+  const [saveLocationDialog, setSaveLocationDialog] = useState<SaveLocationDialogState | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
   const [editingNode, setEditingNode] = useState<EditingNodeState | null>(null);
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
@@ -702,6 +730,10 @@ export function App(): JSX.Element {
   const sections = useMemo(() => {
     return parseMarkdownSections(documentContent, activeFile?.name ?? 'Untitled');
   }, [activeFile?.name, documentContent]);
+
+  const saveLocationOptions = useMemo(() => {
+    return getSaveLocationOptions(workspace.tree);
+  }, [workspace.tree]);
 
   const wordCount = useMemo(() => {
     return documentContent.trim().split(/\s+/).filter(Boolean).length;
@@ -1269,9 +1301,25 @@ export function App(): JSX.Element {
     scrollTabIntoView(tab.file.path);
   };
 
-  const saveCurrentDocument = async () => {
+  const requestSaveLocation = (tab: OpenEditorTab) => {
+    const defaultFolderPath =
+      saveLocationOptions.find((option) => option.path === saveLocationDialog?.selectedFolderPath)?.path ??
+      saveLocationOptions[0]?.path ??
+      null;
+
+    setIsHeaderMenuOpen(false);
+    setIsModeMenuOpen(false);
+    setSaveLocationDialog({
+      fileName: tab.file.name || 'Untitled.md',
+      filePath: tab.file.path,
+      selectedFolderPath: defaultFolderPath
+    });
+  };
+
+  const saveCurrentDocument = async (options: { promptForLocation?: boolean } = {}) => {
     const tab = activeTabRef.current;
     const content = documentContentRef.current;
+    const shouldPromptForLocation = options.promptForLocation ?? true;
 
     if (!tab || !window.veloca) {
       setSaveStatus('saved');
@@ -1279,6 +1327,14 @@ export function App(): JSX.Element {
     }
 
     const filePath = tab.file.path;
+
+    if (tab.isUntitled || isUntitledFilePath(filePath)) {
+      if (shouldPromptForLocation) {
+        requestSaveLocation(tab);
+      }
+
+      return false;
+    }
 
     if (saveActionStatesRef.current[filePath] === 'saving') {
       return false;
@@ -1341,9 +1397,134 @@ export function App(): JSX.Element {
     }
   };
 
+  const submitSaveLocation = async () => {
+    if (!saveLocationDialog || !window.veloca || savingLocation) {
+      return;
+    }
+
+    const fileName = saveLocationDialog.fileName.trim();
+    const parentPath = saveLocationDialog.selectedFolderPath;
+
+    if (!fileName || !parentPath) {
+      return;
+    }
+
+    const sourceTab = openTabs.find((tab) => tab.file.path === saveLocationDialog.filePath);
+
+    if (!sourceTab) {
+      setSaveLocationDialog(null);
+      return;
+    }
+
+    const content =
+      activeTabRef.current?.file.path === sourceTab.file.path ? documentContentRef.current : sourceTab.draftContent;
+    const sourcePath = sourceTab.file.path;
+
+    setSavingLocation(true);
+    beginFileSaveAction(sourcePath);
+    setOpenTabs((current) =>
+      current.map((tab) => (tab.file.path === sourcePath ? { ...tab, status: 'saving' } : tab))
+    );
+
+    if (activeTabRef.current?.file.path === sourcePath) {
+      setSaveStatus('saving');
+    }
+
+    try {
+      const result = await window.veloca.workspace.saveMarkdownAs(parentPath, fileName, content);
+      const savedFile = result.file;
+
+      setWorkspace(result.snapshot);
+      openWorkspaceRoots(result.snapshot.tree);
+      openTabPathsRef.current = new Set(
+        [...openTabPathsRef.current].map((path) => (path === sourcePath ? savedFile.path : path))
+      );
+
+      setTabGroups((current) =>
+        current.map((group) => normalizeTabGroup(group.map((path) => (path === sourcePath ? savedFile.path : path))))
+      );
+
+      const nextActiveGroup = splitPanePaths?.includes(sourcePath)
+        ? normalizeTabGroup(splitPanePaths.map((path) => (path === sourcePath ? savedFile.path : path)))
+        : [savedFile.path];
+
+      if (splitPanePaths?.includes(sourcePath)) {
+        const nextSplitPanePaths = splitPanePaths.map((path) =>
+          path === sourcePath ? savedFile.path : path
+        ) as SplitPanePaths;
+
+        setSplitPanePaths(nextSplitPanePaths);
+      }
+
+      setDocumentViewModesByPath((current) => {
+        const next = { ...current };
+
+        if (current[sourcePath]) {
+          next[savedFile.path] = current[sourcePath];
+          delete next[sourcePath];
+        }
+
+        return next;
+      });
+
+      setOpenTabs((current) => {
+        const nextTabs = current.map((tab) =>
+          tab.file.path === sourcePath
+            ? {
+                ...tab,
+                file: savedFile,
+                draftContent: content,
+                isUntitled: false,
+                savedContent: content,
+                status: 'saved' as SaveStatus
+              }
+            : tab
+        );
+
+        activeTabRef.current = nextTabs.find((tab) => tab.file.path === savedFile.path) ?? activeTabRef.current;
+        return nextTabs;
+      });
+
+      documentContentRef.current = content;
+      setActiveGroupKey(getTabGroupKey(nextActiveGroup));
+      setActiveTabPath(savedFile.path);
+      setDocumentContent(content);
+      setSaveStatus('saved');
+      ensureTabGroup([savedFile.path]);
+      setSaveLocationDialog(null);
+      completeFileSaveAction(sourcePath);
+      clearFileSaveAction(sourcePath);
+      showToast({
+        type: 'success',
+        title: 'File Saved',
+        description: savedFile.relativePath
+      });
+    } catch {
+      clearFileSaveAction(sourcePath);
+      setOpenTabs((current) =>
+        current.map((tab) => (tab.file.path === sourcePath ? { ...tab, status: 'failed' } : tab))
+      );
+
+      if (activeTabRef.current?.file.path === sourcePath) {
+        setSaveStatus('failed');
+      }
+
+      showToast({
+        type: 'info',
+        title: 'Save Failed',
+        description: 'Choose a workspace folder and a valid markdown file name.'
+      });
+    } finally {
+      setSavingLocation(false);
+    }
+  };
+
   const updateTabDocumentContent = (filePath: string, content: string) => {
     const targetTab = openTabs.find((tab) => tab.file.path === filePath);
-    const nextStatus: SaveStatus = targetTab && content === targetTab.savedContent ? 'saved' : 'unsaved';
+    const nextStatus: SaveStatus =
+      targetTab && !targetTab.isUntitled && !isUntitledFilePath(filePath) && content === targetTab.savedContent
+        ? 'saved'
+        : 'unsaved';
 
     if (nextStatus === 'unsaved' && saveActionStatesRef.current[filePath] === 'success') {
       clearFileSaveAction(filePath);
@@ -1360,7 +1541,11 @@ export function App(): JSX.Element {
           ? {
               ...tab,
               draftContent: content,
-              status: (content === tab.savedContent ? 'saved' : 'unsaved') as SaveStatus
+              status: (
+                !tab.isUntitled && !isUntitledFilePath(tab.file.path) && content === tab.savedContent
+                  ? 'saved'
+                  : 'unsaved'
+              ) as SaveStatus
             }
           : tab
       );
@@ -1620,6 +1805,10 @@ export function App(): JSX.Element {
 
     return openTabs
       .map((tab) => {
+        if (tab.isUntitled || isUntitledFilePath(tab.file.path)) {
+          return tab;
+        }
+
         if (tab.file.path === renamedFromPath && renamedTarget) {
           return {
             ...tab,
@@ -1731,7 +1920,7 @@ export function App(): JSX.Element {
       return;
     }
 
-    if (targetTab.status === 'unsaved') {
+    if (targetTab.status === 'unsaved' || targetTab.isUntitled || isUntitledFilePath(targetTab.file.path)) {
       const shouldDiscard = window.confirm(
         `Discard unsaved changes to "${targetTab.file.name}" before closing?`
       );
@@ -1793,7 +1982,9 @@ export function App(): JSX.Element {
       return;
     }
 
-    const hasUnsavedChanges = openTabs.some((tab) => tab.status === 'unsaved');
+    const hasUnsavedChanges = openTabs.some(
+      (tab) => tab.status === 'unsaved' || tab.isUntitled || isUntitledFilePath(tab.file.path)
+    );
 
     if (hasUnsavedChanges && !window.confirm('Close all tabs and discard all unsaved changes?')) {
       return;
@@ -1815,35 +2006,35 @@ export function App(): JSX.Element {
     setTabDropCue(null);
   };
 
-  const createNewMarkdownFile = async () => {
-    if (!window.veloca) {
-      return;
-    }
-
-    if (!workspace.folders.length) {
+  const createNewMarkdownFile = () => {
+    if (!saveLocationOptions.length) {
       showToast({
         type: 'info',
         title: 'No workspace',
-        description: 'Open a workspace folder before creating new files.'
+        description: 'Open or create a workspace before creating new files.'
       });
       return;
     }
 
-    try {
-      const result = await window.veloca.workspace.createEntry(workspace.folders[0].path, 'file', 'Untitled.md');
+    const filePath = `${untitledFilePathPrefix}${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const nextTab: OpenEditorTab = {
+      file: {
+        path: filePath,
+        name: 'Untitled.md',
+        content: '',
+        relativePath: 'Unsaved',
+        workspaceFolderId: ''
+      },
+      draftContent: '',
+      isUntitled: true,
+      savedContent: '',
+      status: 'unsaved'
+    };
 
-      await refreshWorkspaceAfterOperation(result.snapshot, result.path);
-
-      if (result.path) {
-        await readMarkdownFile(result.path);
-      }
-    } catch {
-      showToast({
-        type: 'info',
-        title: 'Create Failed',
-        description: 'Unable to create a new markdown file.'
-      });
-    }
+    openTabPathsRef.current = new Set([...openTabPathsRef.current, filePath]);
+    setOpenTabs((current) => [...current, nextTab]);
+    ensureTabGroup([filePath]);
+    activateEditorTab(nextTab, [filePath]);
   };
 
   const saveAllOpenTabs = async () => {
@@ -1851,14 +2042,30 @@ export function App(): JSX.Element {
       return;
     }
 
-    const unsavedTabs = openTabs.filter((tab) => tab.status === 'unsaved');
+    const untitledTabs = openTabs.filter(
+      (tab) => tab.status === 'unsaved' && (tab.isUntitled || isUntitledFilePath(tab.file.path))
+    );
+    const unsavedTabs = openTabs.filter(
+      (tab) => tab.status === 'unsaved' && !tab.isUntitled && !isUntitledFilePath(tab.file.path)
+    );
 
     if (!unsavedTabs.length) {
+      if (untitledTabs.length) {
+        showToast({
+          type: 'info',
+          title: 'Save Location Required',
+          description: 'Untitled files need to be saved individually first.'
+        });
+      }
       return;
     }
 
     setOpenTabs((current) =>
-      current.map((tab) => (tab.status === 'unsaved' ? { ...tab, status: 'saving' } : tab))
+      current.map((tab) =>
+        tab.status === 'unsaved' && !tab.isUntitled && !isUntitledFilePath(tab.file.path)
+          ? { ...tab, status: 'saving' }
+          : tab
+      )
     );
 
     const nextTabs = [...openTabs];
@@ -2461,7 +2668,7 @@ export function App(): JSX.Element {
 
     clearSaveTimer();
     saveTimerRef.current = setTimeout(() => {
-      void saveCurrentDocument();
+      void saveCurrentDocument({ promptForLocation: false });
     }, 800);
 
     return clearSaveTimer;
@@ -3237,6 +3444,29 @@ export function App(): JSX.Element {
         />
       )}
 
+      {saveLocationDialog && (
+        <SaveLocationDialog
+          fileName={saveLocationDialog.fileName}
+          folders={saveLocationOptions}
+          saving={savingLocation}
+          selectedFolderPath={saveLocationDialog.selectedFolderPath}
+          onCancel={() => {
+            if (!savingLocation) {
+              setSaveLocationDialog(null);
+            }
+          }}
+          onFileNameChange={(fileName) =>
+            setSaveLocationDialog((current) => (current ? { ...current, fileName } : current))
+          }
+          onFolderSelect={(folderPath) =>
+            setSaveLocationDialog((current) =>
+              current ? { ...current, selectedFolderPath: folderPath } : current
+            )
+          }
+          onSubmit={() => void submitSaveLocation()}
+        />
+      )}
+
       <div className="toast-viewport" aria-live="polite">
         {toasts.map((toast) => (
           <div className={`toast ${toast.type}`} key={toast.id}>
@@ -3992,6 +4222,15 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       createRichEditorExtensions({
         onFileDrop: async (currentEditor, files, pos) => {
           if (!window.veloca || files.length === 0) {
+            return;
+          }
+
+          if (isUntitledFilePath(activeFilePathRef.current)) {
+            onToastRef.current({
+              type: 'info',
+              title: 'Save File First',
+              description: 'Choose a workspace location before attaching media.'
+            });
             return;
           }
 
@@ -4806,6 +5045,17 @@ interface NameDialogProps {
   onSubmit: () => void;
 }
 
+interface SaveLocationDialogProps {
+  fileName: string;
+  folders: SaveLocationOption[];
+  saving: boolean;
+  selectedFolderPath: string | null;
+  onCancel: () => void;
+  onFileNameChange: (fileName: string) => void;
+  onFolderSelect: (folderPath: string) => void;
+  onSubmit: () => void;
+}
+
 function NameDialog({
   description,
   name,
@@ -5017,6 +5267,99 @@ function FolderStarPlusIcon({ size }: FolderStarIconProps): JSX.Element {
       <path d="M20 14.5v5" />
       <path d="M17.5 17h5" />
     </svg>
+  );
+}
+
+function SaveLocationDialog({
+  fileName,
+  folders,
+  saving,
+  selectedFolderPath,
+  onCancel,
+  onFileNameChange,
+  onFolderSelect,
+  onSubmit
+}: SaveLocationDialogProps): JSX.Element {
+  const selectedFolder = folders.find((folder) => folder.path === selectedFolderPath);
+  const canSave = Boolean(fileName.trim() && selectedFolderPath && !saving);
+
+  return (
+    <div className="save-location-overlay" onMouseDown={onCancel}>
+      <form
+        className="save-location-dialog"
+        aria-label="Save new markdown file"
+        onMouseDown={(event) => event.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault();
+
+          if (canSave) {
+            onSubmit();
+          }
+        }}
+      >
+        <div className="save-location-header">
+          <FilePlus size={17} />
+          <div>
+            <h2>Save New File</h2>
+            <p>Choose a folder inside the current Veloca workspace.</p>
+          </div>
+        </div>
+
+        <label className="save-location-label" htmlFor="save-location-file-name">
+          File name
+        </label>
+        <input
+          id="save-location-file-name"
+          className="name-dialog-input"
+          value={fileName}
+          autoFocus
+          disabled={saving}
+          placeholder="Untitled.md"
+          onChange={(event) => onFileNameChange(event.currentTarget.value)}
+        />
+
+        <div className="save-location-section-title">Workspace folder</div>
+        <div className="save-location-list" role="listbox" aria-label="Workspace folders">
+          {folders.map((folder) => {
+            const selected = folder.path === selectedFolderPath;
+            const Icon = folder.source === 'database' ? Database : Folder;
+
+            return (
+              <button
+                aria-selected={selected}
+                className={`save-location-option${selected ? ' selected' : ''}`}
+                key={folder.id}
+                role="option"
+                style={{ paddingLeft: `${12 + folder.depth * 16}px` }}
+                type="button"
+                disabled={saving}
+                onClick={() => onFolderSelect(folder.path)}
+              >
+                <Icon size={15} />
+                <span className="save-location-option-copy">
+                  <span className="save-location-option-name">{folder.name}</span>
+                  <span className="save-location-option-path">{folder.relativePath || folder.name}</span>
+                </span>
+                {selected ? <CheckCircle2 size={15} /> : null}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="save-location-summary">
+          {selectedFolder ? selectedFolder.relativePath || selectedFolder.name : 'No workspace folder selected'}
+        </div>
+
+        <div className="name-dialog-actions">
+          <button className="dialog-secondary-action" type="button" disabled={saving} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="dialog-primary-action" type="submit" disabled={!canSave}>
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -5336,4 +5679,33 @@ function findNodeByPath(nodes: WorkspaceTreeNode[], filePath: string): Workspace
   }
 
   return null;
+}
+
+function getSaveLocationOptions(nodes: WorkspaceTreeNode[]): SaveLocationOption[] {
+  const options: SaveLocationOption[] = [];
+
+  const visit = (items: WorkspaceTreeNode[], depth: number, parentLabel = '') => {
+    for (const node of items) {
+      if (node.type !== 'folder') {
+        continue;
+      }
+
+      const relativePath = parentLabel ? `${parentLabel}/${node.name}` : node.name;
+      options.push({
+        depth,
+        id: node.id,
+        name: node.name,
+        path: node.path,
+        relativePath,
+        source: node.source
+      });
+
+      if (node.children?.length) {
+        visit(node.children, depth + 1, relativePath);
+      }
+    }
+  };
+
+  visit(nodes, 0);
+  return options;
 }

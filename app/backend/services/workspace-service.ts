@@ -51,6 +51,11 @@ export interface FileOperationResult {
   path?: string;
 }
 
+export interface SaveMarkdownFileAsResult {
+  file: MarkdownFileContent;
+  snapshot: WorkspaceSnapshot;
+}
+
 interface WorkspaceFolderRow {
   id: string;
   name: string;
@@ -276,6 +281,39 @@ export function saveMarkdownFile(filePath: string, content: string): MarkdownFil
     content,
     relativePath: relative(folder.path, resolvedPath).split(sep).join('/'),
     workspaceFolderId: folder.id
+  };
+}
+
+export function saveMarkdownFileAs(parentPath: string, name: string, content: string): SaveMarkdownFileAsResult {
+  if (isDatabasePath(parentPath)) {
+    return saveDatabaseMarkdownFileAs(parentPath, name, content);
+  }
+
+  const parentDirectory = resolveExistingWorkspaceDirectory(parentPath);
+  const safeName = normalizeEntryName(name, 'file');
+
+  if (!isMarkdownFile(safeName)) {
+    throw new Error('Only markdown files can be saved.');
+  }
+
+  const targetPath = getAvailablePath(join(parentDirectory, safeName));
+  const folder = findWorkspaceFolderForPath(parentDirectory);
+
+  if (!folder) {
+    throw new Error('The selected folder is outside the current workspace.');
+  }
+
+  writeFileSync(targetPath, content, { encoding: 'utf8', flag: 'wx' });
+
+  return {
+    file: {
+      path: targetPath,
+      name: basename(targetPath),
+      content,
+      relativePath: relative(folder.path, targetPath).split(sep).join('/'),
+      workspaceFolderId: folder.id
+    },
+    snapshot: getWorkspaceSnapshot()
   };
 }
 
@@ -828,6 +866,76 @@ function createDatabaseEntry(
     snapshot: getWorkspaceSnapshot(),
     path: getDatabaseEntryPath(id)
   };
+}
+
+function saveDatabaseMarkdownFileAs(parentPath: string, name: string, content: string): SaveMarkdownFileAsResult {
+  const parent = getDatabaseFolderTarget(parentPath);
+  const normalizedName = normalizeEntryName(name, 'file');
+
+  if (!isMarkdownFile(normalizedName)) {
+    throw new Error('Only markdown files can be saved.');
+  }
+
+  const safeName = getAvailableDatabaseEntryName(parent.workspaceId, parent.parentId, normalizedName);
+  const now = Date.now();
+  const id = randomUUID();
+
+  getDatabase()
+    .prepare(
+      `
+      INSERT INTO virtual_workspace_entries
+        (id, workspace_id, parent_id, entry_type, name, content, status, created_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, ?, 0, ?, ?)
+      `
+    )
+    .run(id, parent.workspaceId, parent.parentId, safeName, content, now, now);
+
+  const entry = getDatabaseEntryByPath(getDatabaseEntryPath(id));
+
+  return {
+    file: {
+      path: getDatabaseEntryPath(id),
+      name: entry.name,
+      content,
+      relativePath: getDatabaseRelativePath(entry),
+      workspaceFolderId: entry.workspace_id
+    },
+    snapshot: getWorkspaceSnapshot()
+  };
+}
+
+function getAvailableDatabaseEntryName(workspaceId: string, parentId: string | null, name: string): string {
+  if (!databaseEntryNameExists(workspaceId, parentId, name)) {
+    return name;
+  }
+
+  const extension = extname(name);
+  const nameWithoutExtension = extension ? basename(name, extension) : name;
+
+  for (let index = 1; index < 1000; index += 1) {
+    const candidateName = `${nameWithoutExtension} ${index}${extension}`;
+
+    if (!databaseEntryNameExists(workspaceId, parentId, candidateName)) {
+      return candidateName;
+    }
+  }
+
+  throw new Error('Unable to create a unique database file name.');
+}
+
+function databaseEntryNameExists(workspaceId: string, parentId: string | null, name: string): boolean {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT id
+      FROM virtual_workspace_entries
+      WHERE workspace_id = ? AND parent_id IS ? AND name = ? AND status = 0
+      LIMIT 1
+      `
+    )
+    .get(workspaceId, parentId, name) as { id: string } | undefined;
+
+  return Boolean(row);
 }
 
 function renameDatabaseEntry(filePath: string, name: string): FileOperationResult {

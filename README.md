@@ -30,6 +30,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - VS Code-style workspace roots where multiple folders can be added.
 - Database-backed workspace roots for quick projects that do not need a system folder.
 - Recursive `.md` file discovery from added folders.
+- Header-level untitled file creation with an in-app save-location picker limited to current workspace folders.
 - Custom file tree context menu for common system-level operations.
 - TipTap-powered rich markdown editor with Veloca-native styling.
 - Per-file source/rendered view switching for editable raw Markdown and Typora-like rich preview.
@@ -113,7 +114,7 @@ Available environment variables:
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
 
-Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
+Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Header-level new files start as untitled in-memory tabs and are written only after the user chooses a destination through Veloca's workspace-scoped save dialog. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
@@ -151,33 +152,36 @@ Manual acceptance checks:
 9. Right-click a folder and try `New File` or `New Folder`; confirm a default item appears in the tree and enters inline rename mode.
 10. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
 11. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
-12. Select a markdown file and edit headings, paragraphs, lists, blockquotes, tables, task lists, Mermaid diagrams, formulas, and code blocks in the TipTap editor.
-13. Click the code icon to switch the active file into Source Mode, confirm the raw Markdown is editable, make a small change, and confirm the status bar shows `Unsaved`.
-14. Click the document icon to return to rendered mode and confirm the same content is shown in the rich editor.
-15. Open a second markdown file and confirm it still starts in rendered mode even if the first file is in Source Mode.
-16. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
-17. Wait for Auto Save and confirm the status bar returns to `Saved`.
-18. Select a different file, then return to the edited file and confirm the saved content is still present.
-19. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
-20. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
-21. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
-22. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
-23. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
-24. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
-25. Click `Settings` in the sidebar.
-26. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-27. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
-28. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+12. Click the editor header `New File` button and confirm an untitled tab opens without immediately appearing in the file tree.
+13. Type content in the untitled tab, click `Save`, choose a workspace folder from the in-app save dialog, and confirm the file appears under that workspace folder.
+14. Repeat the untitled save flow with a database-backed workspace folder and confirm the file is stored in the database workspace.
+15. Select a markdown file and edit headings, paragraphs, lists, blockquotes, tables, task lists, Mermaid diagrams, formulas, and code blocks in the TipTap editor.
+16. Click the code icon to switch the active file into Source Mode, confirm the raw Markdown is editable, make a small change, and confirm the status bar shows `Unsaved`.
+17. Click the document icon to return to rendered mode and confirm the same content is shown in the rich editor.
+18. Open a second markdown file and confirm it still starts in rendered mode even if the first file is in Source Mode.
+19. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
+20. Wait for Auto Save and confirm the status bar returns to `Saved`.
+21. Select a different file, then return to the edited file and confirm the saved content is still present.
+22. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
+23. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
+24. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
+25. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
+26. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
+27. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
+28. Click `Settings` in the sidebar.
+29. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
+30. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
+31. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
 Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
 
 ## Usage Examples
 
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Use the editor header's code/document toggle to switch the active file between rendered mode and editable raw Markdown source mode; this view preference is tracked independently for each open file. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams and empty 2 × 2 tables can be inserted from the editor slash command menu by typing `/`, `/m`, or `/t`; saved Mermaid diagrams still use the standard Markdown `mermaid` fenced code block format.
+At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Use the editor header's `New File` button to create an untitled in-memory tab, then save it into a local or database workspace folder through Veloca's save-location dialog. Use the editor header's code/document toggle to switch the active file between rendered mode and editable raw Markdown source mode; this view preference is tracked independently for each open file. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams and empty 2 × 2 tables can be inserted from the editor slash command menu by typing `/`, `/m`, or `/t`; saved Mermaid diagrams still use the standard Markdown `mermaid` fenced code block format.
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, and outline interactions.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, and outline interactions.
 - Next: markdown export and search.
 - Later: plugin or extension system if product requirements justify it.
 

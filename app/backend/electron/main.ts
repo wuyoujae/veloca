@@ -40,6 +40,7 @@ import {
   removeWorkspaceFolder,
   renameWorkspaceEntry,
   resolveWorkspaceAsset,
+  saveMarkdownFileAs,
   saveMarkdownFile,
   saveWorkspaceAsset,
   validateWorkspacePath,
@@ -172,6 +173,9 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('workspace:save-markdown', (_event, filePath: string, content: string) => {
     return saveMarkdownFile(filePath, content);
+  });
+  ipcMain.handle('workspace:save-markdown-as', (_event, parentPath: string, name: string, content: string) => {
+    return saveMarkdownFileAs(parentPath, name, content);
   });
   ipcMain.handle('workspace:save-asset', (_event, documentPath: string, payload) => {
     return saveWorkspaceAsset(documentPath, payload);

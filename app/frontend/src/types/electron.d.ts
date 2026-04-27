@@ -53,6 +53,11 @@ interface FileOperationResult {
   path?: string;
 }
 
+interface SaveMarkdownFileAsResult {
+  file: MarkdownFileContent;
+  snapshot: WorkspaceSnapshot;
+}
+
 type AgentUiModel = 'lite' | 'pro' | 'ultra';
 type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
 
@@ -153,6 +158,11 @@ declare global {
         createDatabaseWorkspace: (name: string) => Promise<FileOperationResult>;
         readMarkdown: (filePath: string) => Promise<MarkdownFileContent>;
         saveMarkdown: (filePath: string, content: string) => Promise<MarkdownFileContent>;
+        saveMarkdownAs: (
+          parentPath: string,
+          name: string,
+          content: string
+        ) => Promise<SaveMarkdownFileAsResult>;
         saveAsset: (documentPath: string, payload: WorkspaceAssetPayload) => Promise<WorkspaceResolvedAsset>;
         resolveAsset: (documentPath: string, assetPath: string) => Promise<WorkspaceResolvedAsset>;
         readAssetMeta: (documentPath: string, assetPath: string) => Promise<WorkspaceResolvedAsset>;
