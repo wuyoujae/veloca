@@ -21,7 +21,6 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   ArrowUpToLine,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -30,26 +29,21 @@ import {
   Copy,
   Database,
   ExternalLink,
-  FileMinus2,
-  FilePlus2,
   FileText,
   FilePlus,
   Folder,
   FolderPlus,
-  GitCompare,
   GitBranch,
   Github,
   Grid3X3,
   Info,
   ListTree,
   LoaderCircle,
-  Minus,
   MoreHorizontal,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
-  Plus,
   RefreshCw,
   Save,
   MoreVertical,
@@ -58,7 +52,6 @@ import {
   Sun,
   Table2,
   Trash2,
-  Undo2,
   Unlink,
   X
 } from 'lucide-react';
@@ -3828,106 +3821,9 @@ function FileTree({
 function GitVersionPanel(): JSX.Element {
   return (
     <section className="git-panel" aria-label="Git version management">
-      <div className="git-commit-box">
-        <textarea className="git-textarea" placeholder="Message (Cmd+Enter to commit)" />
-        <button className="git-commit-btn" type="button">
-          <Check size={15} />
-          <span>Commit</span>
-        </button>
-      </div>
-
-      <div className="git-scroll-area">
-        <div className="git-group-header">
-          <span className="git-group-title">
-            <ChevronDown size={14} />
-            Staged Changes
-            <span className="git-badge-count">1</span>
-          </span>
-        </div>
-
-        <div className="git-item">
-          <span className="git-item-left">
-            <FileText size={14} />
-            <span className="git-item-name">architecture.md</span>
-            <span className="git-item-dir">docs/</span>
-          </span>
-          <span className="git-item-right">
-            <span className="git-actions">
-              <button className="git-action-btn" type="button" title="Unstage Changes">
-                <Minus size={14} />
-              </button>
-            </span>
-            <span className="git-status-badge status-m">M</span>
-          </span>
-        </div>
-
-        <div className="git-group-header with-actions">
-          <span className="git-group-title">
-            <ChevronDown size={14} />
-            Changes
-            <span className="git-badge-count">3</span>
-          </span>
-          <span className="git-actions">
-            <button className="git-action-btn" type="button" title="Discard All Changes">
-              <Undo2 size={14} />
-            </button>
-            <button className="git-action-btn" type="button" title="Stage All Changes">
-              <Plus size={14} />
-            </button>
-          </span>
-        </div>
-
-        <div className="git-item active">
-          <span className="git-item-left">
-            <GitCompare size={14} />
-            <span className="git-item-name">manifesto.md</span>
-            <span className="git-item-dir">docs/</span>
-          </span>
-          <span className="git-item-right">
-            <span className="git-actions">
-              <button className="git-action-btn" type="button" title="Discard Changes">
-                <Undo2 size={14} />
-              </button>
-              <button className="git-action-btn" type="button" title="Stage Changes">
-                <Plus size={14} />
-              </button>
-            </span>
-            <span className="git-status-badge status-m">M</span>
-          </span>
-        </div>
-
-        <div className="git-item">
-          <span className="git-item-left">
-            <FilePlus2 className="git-added-icon" size={14} />
-            <span className="git-item-name">new_feature.md</span>
-          </span>
-          <span className="git-item-right">
-            <span className="git-actions">
-              <button className="git-action-btn" type="button" title="Stage Changes">
-                <Plus size={14} />
-              </button>
-            </span>
-            <span className="git-status-badge status-u">U</span>
-          </span>
-        </div>
-
-        <div className="git-item">
-          <span className="git-item-left">
-            <FileMinus2 className="git-deleted-icon" size={14} />
-            <span className="git-item-name">old_config.json</span>
-          </span>
-          <span className="git-item-right">
-            <span className="git-actions">
-              <button className="git-action-btn" type="button" title="Restore">
-                <Undo2 size={14} />
-              </button>
-              <button className="git-action-btn" type="button" title="Stage Changes">
-                <Plus size={14} />
-              </button>
-            </span>
-            <span className="git-status-badge status-d">D</span>
-          </span>
-        </div>
+      <div className="git-empty-state">
+        <GitBranch size={20} />
+        <span>GitHub authorization is ready. Repository version management is not connected yet.</span>
       </div>
     </section>
   );
