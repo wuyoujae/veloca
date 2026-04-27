@@ -3592,6 +3592,14 @@ button {
   text-decoration-color: color-mix(in srgb, var(--info) 78%, var(--foreground));
 }
 
+.veloca-editor .ProseMirror .veloca-ai-generated-block pre code,
+.veloca-editor .ProseMirror .veloca-ai-generated-block pre code * {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.2em;
+  text-decoration-color: color-mix(in srgb, var(--info) 78%, var(--foreground));
+}
+
 .veloca-editor .ProseMirror .veloca-ai-edited-text {
   text-decoration-color: #eab308;
 }

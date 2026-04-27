@@ -1464,8 +1464,13 @@ function createAiProvenancePlugin() {
 
           const markFrom = Math.max(from, pos);
           const markTo = Math.min(to, pos + node.nodeSize);
+          const parent = newState.doc.resolve(pos).parent;
 
-          if (markTo <= markFrom || node.marks.some((mark) => mark.type === editedMark)) {
+          if (
+            markTo <= markFrom ||
+            !parent.type.allowsMarkType(editedMark) ||
+            node.marks.some((mark) => mark.type === editedMark)
+          ) {
             return false;
           }
 
@@ -2062,11 +2067,15 @@ function runAiGeneratedInsert(
 }
 
 function markAiGeneratedContent(content: JSONContent[]): JSONContent[] {
-  return content.map((node) => markAiGeneratedNode(node));
+  return content.map((node) => markAiGeneratedNode(node, true));
 }
 
-function markAiGeneratedNode(node: JSONContent): JSONContent {
+function markAiGeneratedNode(node: JSONContent, marksAllowed: boolean): JSONContent {
   if (node.type === 'text') {
+    if (!marksAllowed) {
+      return node;
+    }
+
     return {
       ...node,
       marks: [
@@ -2080,9 +2089,11 @@ function markAiGeneratedNode(node: JSONContent): JSONContent {
     return node;
   }
 
+  const childMarksAllowed = marksAllowed && node.type !== 'codeBlock';
+
   return {
     ...node,
-    content: node.content.map((child) => markAiGeneratedNode(child))
+    content: node.content.map((child) => markAiGeneratedNode(child, childMarksAllowed))
   };
 }
 
