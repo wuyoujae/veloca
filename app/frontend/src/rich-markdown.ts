@@ -977,16 +977,21 @@ export const VelocaAiGeneratedBlock = Node.create({
 });
 
 function getMarkdownNodeContent(node: JSONContent | ProseMirrorNode): JSONContent[] {
+  const json = getMarkdownNodeJson(node);
+
+  return Array.isArray(json.content) ? json.content : [];
+}
+
+function getMarkdownNodeJson(node: JSONContent | ProseMirrorNode): JSONContent {
   if ('type' in node && typeof node.type === 'string') {
-    return Array.isArray(node.content) ? node.content : [];
+    return node as JSONContent;
   }
 
   if ('toJSON' in node && typeof node.toJSON === 'function') {
-    const json = node.toJSON() as JSONContent;
-    return Array.isArray(json.content) ? json.content : [];
+    return node.toJSON() as JSONContent;
   }
 
-  return [];
+  return {};
 }
 
 export const MermaidNode = Node.create({
@@ -1283,7 +1288,7 @@ function parseMermaidCommand(text: string): { prefix: string; replaceCurrent: bo
 
 const VelocaTable = Table.extend({
   renderMarkdown(node, helpers): string {
-    return renderVelocaTableToMarkdown(node.toJSON() as JSONContent, helpers);
+    return renderVelocaTableToMarkdown(getMarkdownNodeJson(node), helpers);
   }
 });
 
