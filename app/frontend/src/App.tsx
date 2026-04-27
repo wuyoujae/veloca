@@ -580,19 +580,6 @@ function parseProvenanceSnapshot(snapshotJson?: string | null): JSONContent | nu
 function normalizeAiGeneratedSnapshot(node: JSONContent, insideAiBlock = false): JSONContent {
   const nextInsideAiBlock = insideAiBlock || node.type === 'velocaAiGeneratedBlock';
 
-  if (nextInsideAiBlock && node.type === 'text') {
-    const marks = node.marks ?? [];
-    const isEdited = marks.some((mark) => mark.type === 'velocaAiEdited');
-    const hasGenerated = marks.some((mark) => mark.type === 'velocaAiGenerated');
-
-    if (!isEdited && !hasGenerated) {
-      return {
-        ...node,
-        marks: [...marks, { type: 'velocaAiGenerated' }]
-      };
-    }
-  }
-
   if (!node.content?.length) {
     return node;
   }
