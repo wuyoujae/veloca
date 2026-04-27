@@ -416,6 +416,7 @@ export function AgentPalette({
   const timersRef = useRef<number[]>([]);
   const canvasControlsTimerRef = useRef<number | null>(null);
   const autoScrollLockedRef = useRef(false);
+  const pointerInsertHandledRef = useRef<string | null>(null);
   const lastCanvasScrollTopRef = useRef(0);
   const programmaticScrollUntilRef = useRef(0);
 
@@ -1200,6 +1201,18 @@ export function AgentPalette({
     pushTimer(timer);
   };
 
+  const insertAnswer = (message: AgentConversation) => {
+    console.info('[Veloca AI Insert] action triggered', {
+      answerLength: message.answer.length,
+      hasInsertHandler: Boolean(onInsertAnswer),
+      messageId: message.id,
+      targetFilePath: context.currentFilePath,
+      visible,
+      workspaceType: context.workspaceType
+    });
+    onInsertAnswer?.(message.answer, message.id, context.currentFilePath);
+  };
+
   const overlayStyle = {
     '--agent-left': `${position.left}px`,
     '--agent-top': `${position.top}px`,
@@ -1528,18 +1541,28 @@ export function AgentPalette({
                       type="button"
                       title="Insert"
                       aria-label="Insert AI response"
-                      onMouseDown={(event) => event.preventDefault()}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) {
+                          return;
+                        }
+
+                        event.preventDefault();
+                        event.stopPropagation();
+                        pointerInsertHandledRef.current = message.id;
+                        insertAnswer(message);
+                        window.setTimeout(() => {
+                          if (pointerInsertHandledRef.current === message.id) {
+                            pointerInsertHandledRef.current = null;
+                          }
+                        }, 0);
+                      }}
                       onClick={(event) => {
                         event.stopPropagation();
-                        console.info('[Veloca AI Insert] action button clicked', {
-                          answerLength: message.answer.length,
-                          hasInsertHandler: Boolean(onInsertAnswer),
-                          messageId: message.id,
-                          targetFilePath: context.currentFilePath,
-                          visible,
-                          workspaceType: context.workspaceType
-                        });
-                        onInsertAnswer?.(message.answer, message.id, context.currentFilePath);
+                        if (pointerInsertHandledRef.current === message.id) {
+                          return;
+                        }
+
+                        insertAnswer(message);
                       }}
                     >
                       <FileInput size={14} />

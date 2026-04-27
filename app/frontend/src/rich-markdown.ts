@@ -2015,12 +2015,7 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
     to
   });
 
-  const insertedAtSelection = editor
-    .chain()
-    .focus()
-    .insertContentAt({ from, to }, insertContent, { updateSelection: true })
-    .setMeta(aiProvenanceInsertMeta, true)
-    .run();
+  const insertedAtSelection = runAiGeneratedInsert(editor, { from, to }, insertContent);
 
   console.info('[Veloca AI Insert] rich insert selection attempt finished', {
     afterSize: editor.state.doc.content.size,
@@ -2033,12 +2028,7 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
   }
 
   const beforeFallbackSize = editor.state.doc.content.size;
-  const insertedAtDocumentEnd = editor
-    .chain()
-    .focus()
-    .insertContentAt(editor.state.doc.content.size, insertContent, { updateSelection: true })
-    .setMeta(aiProvenanceInsertMeta, true)
-    .run();
+  const insertedAtDocumentEnd = runAiGeneratedInsert(editor, editor.state.doc.content.size, insertContent);
 
   console.info('[Veloca AI Insert] rich insert document-end fallback finished', {
     afterSize: editor.state.doc.content.size,
@@ -2048,6 +2038,27 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
   });
 
   return insertedAtDocumentEnd && editor.state.doc.content.size !== beforeFallbackSize;
+}
+
+function runAiGeneratedInsert(
+  editor: Editor,
+  position: number | { from: number; to: number },
+  content: JSONContent[]
+): boolean {
+  try {
+    return editor
+      .chain()
+      .focus()
+      .insertContentAt(position, content, { updateSelection: true })
+      .setMeta(aiProvenanceInsertMeta, true)
+      .run();
+  } catch (error) {
+    console.info('[Veloca AI Insert] rich insert attempt threw', {
+      error: error instanceof Error ? error.message : String(error),
+      position
+    });
+    return false;
+  }
 }
 
 function markAiGeneratedContent(content: JSONContent[]): JSONContent[] {
