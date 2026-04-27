@@ -4026,6 +4026,40 @@ const versionChangeLabels: Record<VersionManagedChange['kind'], string> = {
   modified: 'M'
 };
 
+const versionChangeStatusClasses: Record<VersionManagedChange['kind'], string> = {
+  added: 'status-a',
+  deleted: 'status-d',
+  modified: 'status-m'
+};
+
+function splitVersionPath(relativePath: string): { directory: string; name: string } {
+  const parts = relativePath.split('/').filter(Boolean);
+
+  if (parts.length === 0) {
+    return { directory: '', name: relativePath };
+  }
+
+  const name = parts[parts.length - 1] ?? relativePath;
+  const directoryParts = parts.slice(0, -1);
+
+  return {
+    directory: directoryParts.length > 0 ? `${directoryParts.join('/')}/` : '',
+    name
+  };
+}
+
+function getVersionChangeIcon(kind: VersionManagedChange['kind']): JSX.Element {
+  if (kind === 'added') {
+    return <FilePlus size={14} style={{ color: 'var(--git-added)' }} />;
+  }
+
+  if (kind === 'deleted') {
+    return <Trash2 size={14} style={{ color: 'var(--git-deleted)' }} />;
+  }
+
+  return <FileText size={14} />;
+}
+
 function GitVersionPanel({
   commitMessage,
   loading,
@@ -4075,120 +4109,129 @@ function GitVersionPanel({
 
   return (
     <section className="git-panel" aria-label="Veloca version management">
-      <div className="git-panel-header">
-        <div>
-          <span className="git-panel-eyebrow">Veloca Version Manager</span>
-          <h3>GitHub Shadow Repository</h3>
-        </div>
-        <button className="git-icon-action" type="button" title="Refresh" onClick={onRefresh}>
-          <RefreshCw className={loading ? 'spinning' : ''} size={15} />
+      <div className="git-commit-box">
+        <textarea
+          className="git-textarea"
+          disabled={!repository || loading}
+          placeholder={repository ? 'Message (Cmd+Enter to commit)' : 'Create the private GitHub repository first'}
+          value={commitMessage}
+          onChange={(event) => onCommitMessageChange(event.target.value)}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && canCommit) {
+              event.preventDefault();
+              onCommitAndPush();
+            }
+          }}
+        />
+        <button
+          className="git-btn"
+          type="button"
+          disabled={repository ? !canCommit : loading}
+          onClick={repository ? onCommitAndPush : onEnsureRepository}
+        >
+          {loading ? <RefreshCw className="spinning" size={16} /> : repository ? <CheckCircle2 size={16} /> : <Github size={16} />}
+          {repository ? 'Commit & Push' : 'Create Repository'}
         </button>
       </div>
 
-      {repository ? (
-        <div className="git-repository-card">
-          <div className="git-repository-title">
-            <CheckCircle2 size={16} />
-            <span>
-              {repository.owner}/{repository.name}
-            </span>
+      <div className="git-scroll-area">
+        <div className="git-group-header">
+          <div className="git-group-title">
+            <ChevronDown size={14} />
+            Repository <span className="git-badge-count">{repository ? 1 : 0}</span>
           </div>
-          <a className="git-repository-link" href={repository.htmlUrl} rel="noreferrer" target="_blank">
-            Open on GitHub
-            <ExternalLink size={13} />
-          </a>
-          <span className="git-repository-path">{repository.localPath}</span>
+          <div className="git-actions">
+            <button className="git-action-btn" type="button" title="Refresh" onClick={onRefresh}>
+              <RefreshCw className={loading ? 'spinning' : ''} size={14} />
+            </button>
+          </div>
         </div>
-      ) : (
-        <div className="git-setup-card">
-          <GitBranch size={20} />
-          <span>Create the private GitHub repository veloca-version-manager for Veloca-managed markdown files.</span>
-          <button className="primary-action" type="button" disabled={loading} onClick={onEnsureRepository}>
-            {loading ? <RefreshCw className="spinning" size={15} /> : <Github size={15} />}
-            Create Repository
-          </button>
-        </div>
-      )}
 
-      <div className="git-summary-grid">
-        <div className="git-summary-item">
-          <span>Managed Files</span>
-          <strong>{status.managedFileCount}</strong>
-        </div>
-        <div className="git-summary-item">
-          <span>Pending</span>
-          <strong>{status.pendingChangeCount}</strong>
-        </div>
-      </div>
+        {repository ? (
+          <div className="git-item active">
+            <div className="git-item-left">
+              <GitBranch size={14} />
+              <span className="git-item-name">
+                {repository.owner}/{repository.name}
+              </span>
+              <span className="git-item-dir">private</span>
+            </div>
+            <div className="git-item-right">
+              <div className="git-actions">
+                <a className="git-action-btn" href={repository.htmlUrl} rel="noreferrer" target="_blank" title="Open on GitHub">
+                  <ExternalLink size={14} />
+                </a>
+              </div>
+              <span className="git-status-badge status-a">R</span>
+            </div>
+          </div>
+        ) : (
+          <div className="git-empty-state compact">
+            <GitBranch size={17} />
+            <span>Create veloca-version-manager before committing Veloca markdown versions.</span>
+          </div>
+        )}
 
-      <div className="git-directory-section">
-        <div className="git-change-list-header">
-          <span>Managed Directories</span>
-          <span>{status.workspaceConfigs.length}</span>
+        <div className="git-group-header with-margin">
+          <div className="git-group-title">
+            <ChevronDown size={14} />
+            Managed Directories <span className="git-badge-count">{status.workspaceConfigs.length}</span>
+          </div>
         </div>
 
         {status.workspaceConfigs.length > 0 ? (
-          <div className="git-directory-list">
-            {status.workspaceConfigs.map((config) => (
-              <div className="git-directory-item" key={config.workspaceFolderId}>
-                <div className="git-directory-title">
-                  <Folder size={14} />
-                  <span>{config.displayName}</span>
-                  <strong>{config.managedFileCount}</strong>
-                </div>
-                <span className="git-directory-path">{config.sourceRootPath}</span>
-                <span className="git-directory-prefix">workspaces/{config.shadowPrefix}</span>
+          status.workspaceConfigs.map((config) => (
+            <div className="git-item" key={config.workspaceFolderId}>
+              <div className="git-item-left">
+                <Folder size={14} />
+                <span className="git-item-name">{config.displayName}</span>
+                <span className="git-item-dir">workspaces/{config.shadowPrefix}</span>
               </div>
-            ))}
-          </div>
+              <div className="git-item-right">
+                <span className="git-status-badge">{config.managedFileCount}</span>
+              </div>
+            </div>
+          ))
         ) : (
           <div className="git-empty-state compact">
             <Folder size={17} />
             <span>Save a local markdown file to create its managed directory prefix.</span>
           </div>
         )}
-      </div>
 
-      {repository && (
-        <>
-          <div className="git-commit-box">
-            <textarea
-              className="git-commit-input"
-              placeholder="Version message"
-              value={commitMessage}
-              onChange={(event) => onCommitMessageChange(event.target.value)}
-            />
-            <button className="primary-action git-commit-action" type="button" disabled={!canCommit} onClick={onCommitAndPush}>
-              {loading ? <RefreshCw className="spinning" size={15} /> : <Save size={15} />}
-              Commit & Push
-            </button>
+        <div className="git-group-header with-margin">
+          <div className="git-group-title">
+            <ChevronDown size={14} />
+            Changes <span className="git-badge-count">{status.pendingChangeCount}</span>
           </div>
+        </div>
 
-          <div className="git-change-list">
-            <div className="git-change-list-header">
-              <span>Veloca Markdown Changes</span>
-              <span>{status.pendingChangeCount}</span>
-            </div>
+        {status.changes.length > 0 ? (
+          status.changes.map((change) => {
+            const pathParts = splitVersionPath(change.relativePath);
 
-            {status.changes.length > 0 ? (
-              status.changes.map((change) => (
-                <div className="git-change-item" key={change.shadowPath}>
-                  <FileText size={14} />
-                  <span className="git-change-name">{change.relativePath}</span>
-                  <span className={`git-change-badge ${change.kind}`}>
+            return (
+              <div className="git-item" key={change.shadowPath}>
+                <div className="git-item-left">
+                  {getVersionChangeIcon(change.kind)}
+                  <span className="git-item-name">{pathParts.name}</span>
+                  {pathParts.directory ? <span className="git-item-dir">{pathParts.directory}</span> : null}
+                </div>
+                <div className="git-item-right">
+                  <span className={`git-status-badge ${versionChangeStatusClasses[change.kind]}`}>
                     {versionChangeLabels[change.kind]}
                   </span>
                 </div>
-              ))
-            ) : (
-              <div className="git-empty-state compact">
-                <CheckCircle2 size={17} />
-                <span>No Veloca-managed markdown changes yet.</span>
               </div>
-            )}
+            );
+          })
+        ) : (
+          <div className="git-empty-state compact">
+            <CheckCircle2 size={17} />
+            <span>No Veloca-managed markdown changes yet.</span>
           </div>
-        </>
-      )}
+        )}
+      </div>
     </section>
   );
 }

@@ -1017,6 +1017,7 @@ export async function commitAndPushVersionChanges(message: string): Promise<Vers
     http: electronGitHttpClient,
     onAuth: () => ({ username: token }),
     ref: defaultBranch,
+    remoteRef: `refs/heads/${defaultBranch}`,
     remote: 'origin'
   });
 
