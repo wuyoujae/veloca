@@ -1993,11 +1993,11 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
   }
 
   const parsed = editor.markdown.parse(transformMarkdownForEditor(markdown));
-  const content = markAiGeneratedContent(parsed.content?.length ? parsed.content : [{ type: 'paragraph' }]);
+  const content = markAiGeneratedContent(editor.schema, parsed.content?.length ? parsed.content : [{ type: 'paragraph' }]);
   const createdAt = Date.now();
   const provenanceId = `ai-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const insertContent: JSONContent[] = [
-    {
+  const insertNodes = createAiGeneratedInsertNodes(editor, {
+    aiBlock: {
       type: 'velocaAiGeneratedBlock',
       attrs: {
         createdAt,
@@ -2006,8 +2006,13 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
       },
       content
     },
-    { type: 'paragraph' }
-  ];
+    trailingParagraph: { type: 'paragraph' }
+  });
+
+  if (!insertNodes) {
+    return false;
+  }
+
   const { from, to } = editor.state.selection;
   const beforeSize = editor.state.doc.content.size;
 
@@ -2020,7 +2025,7 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
     to
   });
 
-  const insertedAtSelection = runAiGeneratedInsert(editor, { from, to }, insertContent);
+  const insertedAtSelection = runAiGeneratedInsert(editor, { from, to }, insertNodes);
 
   console.info('[Veloca AI Insert] rich insert selection attempt finished', {
     afterSize: editor.state.doc.content.size,
@@ -2032,8 +2037,25 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
     return true;
   }
 
+  const blockSafePosition = getSafeBlockInsertPosition(editor, from);
+  const beforeBlockSafeSize = editor.state.doc.content.size;
+  const insertedAtBlockBoundary =
+    typeof blockSafePosition === 'number' ? runAiGeneratedInsert(editor, blockSafePosition, insertNodes) : false;
+
+  console.info('[Veloca AI Insert] rich insert block-boundary attempt finished', {
+    afterSize: editor.state.doc.content.size,
+    beforeBlockSafeSize,
+    blockSafePosition,
+    insertedAtBlockBoundary,
+    sizeChanged: editor.state.doc.content.size !== beforeBlockSafeSize
+  });
+
+  if (insertedAtBlockBoundary && editor.state.doc.content.size !== beforeBlockSafeSize) {
+    return true;
+  }
+
   const beforeFallbackSize = editor.state.doc.content.size;
-  const insertedAtDocumentEnd = runAiGeneratedInsert(editor, editor.state.doc.content.size, insertContent);
+  const insertedAtDocumentEnd = runAiGeneratedInsert(editor, editor.state.doc.content.size, insertNodes);
 
   console.info('[Veloca AI Insert] rich insert document-end fallback finished', {
     afterSize: editor.state.doc.content.size,
@@ -2045,18 +2067,48 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
   return insertedAtDocumentEnd && editor.state.doc.content.size !== beforeFallbackSize;
 }
 
+function createAiGeneratedInsertNodes(
+  editor: Editor,
+  content: {
+    aiBlock: JSONContent;
+    trailingParagraph: JSONContent;
+  }
+): ProseMirrorNode[] | null {
+  try {
+    const aiBlockNode = editor.schema.nodeFromJSON(content.aiBlock);
+    const trailingParagraphNode = editor.schema.nodeFromJSON(content.trailingParagraph);
+
+    aiBlockNode.check();
+    trailingParagraphNode.check();
+
+    return [aiBlockNode, trailingParagraphNode];
+  } catch (error) {
+    console.info('[Veloca AI Insert] rich insert node creation failed', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return null;
+  }
+}
+
 function runAiGeneratedInsert(
   editor: Editor,
   position: number | { from: number; to: number },
-  content: JSONContent[]
+  content: ProseMirrorNode[]
 ): boolean {
   try {
-    return editor
-      .chain()
-      .focus()
-      .insertContentAt(position, content, { updateSelection: true })
-      .setMeta(aiProvenanceInsertMeta, true)
-      .run();
+    const fragment = Fragment.fromArray(content);
+    const insertionStart = typeof position === 'number' ? position : position.from;
+    const transaction =
+      typeof position === 'number'
+        ? editor.state.tr.replaceWith(position, position, fragment)
+        : editor.state.tr.replaceWith(position.from, position.to, fragment);
+    const selectionPosition = Math.max(0, Math.min(insertionStart + fragment.size - 1, transaction.doc.content.size));
+
+    transaction.setMeta(aiProvenanceInsertMeta, true);
+    transaction.setSelection(TextSelection.near(transaction.doc.resolve(selectionPosition), -1));
+    editor.view.dispatch(transaction.scrollIntoView());
+    editor.view.focus();
+    return true;
   } catch (error) {
     console.info('[Veloca AI Insert] rich insert attempt threw', {
       error: error instanceof Error ? error.message : String(error),
@@ -2066,13 +2118,30 @@ function runAiGeneratedInsert(
   }
 }
 
-function markAiGeneratedContent(content: JSONContent[]): JSONContent[] {
-  return content.map((node) => markAiGeneratedNode(node, true));
+function getSafeBlockInsertPosition(editor: Editor, position: number): number | null {
+  try {
+    const resolvedPosition = editor.state.doc.resolve(Math.max(0, Math.min(position, editor.state.doc.content.size)));
+
+    if (resolvedPosition.depth <= 0) {
+      return resolvedPosition.pos;
+    }
+
+    return resolvedPosition.after(1);
+  } catch {
+    return null;
+  }
 }
 
-function markAiGeneratedNode(node: JSONContent, marksAllowed: boolean): JSONContent {
+function markAiGeneratedContent(schema: Editor['schema'], content: JSONContent[]): JSONContent[] {
+  return content.map((node) => markAiGeneratedNode(schema, node, null));
+}
+
+function markAiGeneratedNode(schema: Editor['schema'], node: JSONContent, parentNodeTypeName: string | null): JSONContent {
   if (node.type === 'text') {
-    if (!marksAllowed) {
+    const parentNodeType = parentNodeTypeName ? schema.nodes[parentNodeTypeName] : null;
+    const generatedMark = schema.marks.velocaAiGenerated;
+
+    if (!parentNodeType || !generatedMark || !parentNodeType.allowsMarkType(generatedMark)) {
       return node;
     }
 
@@ -2089,11 +2158,9 @@ function markAiGeneratedNode(node: JSONContent, marksAllowed: boolean): JSONCont
     return node;
   }
 
-  const childMarksAllowed = marksAllowed && node.type !== 'codeBlock';
-
   return {
     ...node,
-    content: node.content.map((child) => markAiGeneratedNode(child, childMarksAllowed))
+    content: node.content.map((child) => markAiGeneratedNode(schema, child, node.type ?? null))
   };
 }
 
