@@ -17,6 +17,7 @@ export interface AiGeneratedMarkdownRange {
 }
 
 export interface AiProvenanceSnapshotV2 {
+  markSnapshot?: JSONContent | null;
   markdownHash: string;
   ranges: AiGeneratedMarkdownRange[];
   snapshot: JSONContent | null;

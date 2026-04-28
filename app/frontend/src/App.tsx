@@ -615,6 +615,7 @@ function parseStoredAiProvenanceSnapshot(snapshotJson?: string | null): StoredAi
     }
 
     return {
+      markSnapshot: isJsonDoc(parsed.markSnapshot) ? normalizeAiGeneratedSnapshot(parsed.markSnapshot) : null,
       markdownHash: parsed.markdownHash,
       ranges,
       snapshot: isJsonDoc(parsed.snapshot) ? normalizeAiGeneratedSnapshot(parsed.snapshot) : null,
@@ -738,7 +739,8 @@ function getAiProvenanceRangesForContent(
 function buildAiProvenanceSnapshotFields(
   content: string,
   ranges: AiGeneratedMarkdownRange[],
-  snapshot: JSONContent | null
+  snapshot: JSONContent | null,
+  markSnapshot: JSONContent | null = null
 ): Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'> {
   const validRanges = filterValidAiProvenanceRanges(content, ranges);
 
@@ -751,6 +753,7 @@ function buildAiProvenanceSnapshotFields(
 
   const markdownHash = hashMarkdownContent(content);
   const payload: AiProvenanceSnapshotV2 = {
+    markSnapshot,
     markdownHash,
     ranges: validRanges,
     snapshot,
@@ -795,7 +798,12 @@ function normalizePersistedProvenanceForContent(
       ? filterValidAiProvenanceRanges(content, parsed.ranges)
       : relocateAiProvenanceRanges(content, parsed.ranges);
 
-  return buildAiProvenanceSnapshotFields(content, ranges, parsed.markdownHash === markdownHash ? parsed.snapshot : null);
+  return buildAiProvenanceSnapshotFields(
+    content,
+    ranges,
+    parsed.markdownHash === markdownHash ? parsed.snapshot : null,
+    parsed.markdownHash === markdownHash ? null : (parsed.snapshot ?? parsed.markSnapshot ?? null)
+  );
 }
 
 function insertTemporaryTextIntoAiProvenanceRanges(
@@ -845,7 +853,7 @@ function updateAiProvenanceForSourceContentChange(
 
   const ranges = updateAiProvenanceRangesForSourceEdit(previousContent, nextContent, parsed.ranges);
 
-  return buildAiProvenanceSnapshotFields(nextContent, ranges, null);
+  return buildAiProvenanceSnapshotFields(nextContent, ranges, null, parsed.snapshot ?? parsed.markSnapshot ?? null);
 }
 
 function getAgentWorkspaceRootPath(
@@ -1904,7 +1912,8 @@ export function App(): JSX.Element {
       const provenance = buildAiProvenanceSnapshotFields(
         content,
         fallbackProvenance.ranges,
-        editorSnapshot ?? fallbackProvenance.snapshot
+        editorSnapshot ?? fallbackProvenance.snapshot,
+        fallbackProvenance.markSnapshot ?? null
       );
 
       if (!provenance.provenanceSnapshotJson) {
@@ -5610,6 +5619,17 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       ? storedProvenanceSnapshot.snapshot
       : storedProvenanceSnapshot.snapshot;
   }, [contentMarkdownHash, provenanceMarkdownHash, storedProvenanceSnapshot]);
+  const provenanceMarkSnapshot = useMemo(() => {
+    if (
+      provenanceMarkdownHash !== contentMarkdownHash ||
+      !storedProvenanceSnapshot ||
+      storedProvenanceSnapshot.version !== 2
+    ) {
+      return null;
+    }
+
+    return storedProvenanceSnapshot.markSnapshot ?? storedProvenanceSnapshot.snapshot ?? null;
+  }, [contentMarkdownHash, provenanceMarkdownHash, storedProvenanceSnapshot]);
   const provenanceRanges = useMemo(() => {
     if (
       provenanceMarkdownHash !== contentMarkdownHash ||
@@ -5958,7 +5978,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     }
 
     const nextProvenanceSnapshot =
-      provenanceSnapshot ?? createAiProvenanceDocument(editor, content, provenanceRanges) ?? null;
+      provenanceSnapshot ?? createAiProvenanceDocument(editor, content, provenanceRanges, provenanceMarkSnapshot) ?? null;
 
     syncingRef.current = true;
     editor.commands.setContent(nextProvenanceSnapshot ?? transformMarkdownForEditor(content), {
@@ -5969,7 +5989,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     lastEditorContentRef.current = content;
     renderedDirtyRef.current = false;
     void hydrateDocumentAssets(editor, filePath, resolveAssetForEditor);
-  }, [content, editor, filePath, provenanceRanges, provenanceSnapshot]);
+  }, [content, editor, filePath, provenanceMarkSnapshot, provenanceRanges, provenanceSnapshot]);
 
   useEffect(() => {
     if (!editor) {
@@ -6108,9 +6128,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const markedContent = `${currentContent.slice(0, safeOffset)}${marker}${currentContent.slice(safeOffset)}`;
     const temporaryRanges = insertTemporaryTextIntoAiProvenanceRanges(provenanceRanges, safeOffset, marker);
     const temporarySnapshot =
-      temporaryRanges.length > 0 ? createAiProvenanceDocument(currentEditor, markedContent, temporaryRanges) : null;
+      temporaryRanges.length > 0
+        ? createAiProvenanceDocument(currentEditor, markedContent, temporaryRanges, provenanceMarkSnapshot)
+        : null;
     const restoredSnapshot =
-      provenanceSnapshot ?? createAiProvenanceDocument(currentEditor, currentContent, provenanceRanges) ?? null;
+      provenanceSnapshot ??
+      createAiProvenanceDocument(currentEditor, currentContent, provenanceRanges, provenanceMarkSnapshot) ??
+      null;
 
     syncingRef.current = true;
 
@@ -6149,7 +6173,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       lastEditorContentRef.current = contentRef.current;
       void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
     }
-  }, [provenanceRanges, provenanceSnapshot]);
+  }, [provenanceMarkSnapshot, provenanceRanges, provenanceSnapshot]);
 
   const applyAiProvenanceContent = useCallback((markdown: string, ranges: AiGeneratedMarkdownRange[]): JSONContent | null => {
     const currentEditor = editorInstanceRef.current;

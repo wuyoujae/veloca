@@ -92,6 +92,18 @@ type AiGeneratedBlockAttrs = {
   sourceMessageId: string;
 };
 
+type AiEditedMarkdownRange = {
+  from: number;
+  to: number;
+};
+
+type AiMarkTemplate = {
+  editedRanges: AiEditedMarkdownRange[];
+  provenanceId: string;
+  rawMarkdown: string;
+  sourceMessageId: string;
+};
+
 type MediaNodeAttrs = {
   allow?: string | null;
   allowfullscreen?: boolean | null;
@@ -2177,13 +2189,15 @@ function unwrapVelocaInternalNodes(node: JSONContent): JSONContent {
 export function createAiProvenanceDocument(
   editor: Editor,
   markdown: string,
-  ranges: AiGeneratedMarkdownRange[]
+  ranges: AiGeneratedMarkdownRange[],
+  markSnapshot: JSONContent | null = null
 ): JSONContent | null {
   if (!editor.markdown) {
     return null;
   }
 
   const content: JSONContent[] = [];
+  const markTemplates = getAiMarkTemplatesFromSnapshot(editor, markSnapshot);
   let cursor = 0;
 
   for (const range of ranges) {
@@ -2196,6 +2210,14 @@ export function createAiProvenanceDocument(
       continue;
     }
 
+    const template = findAiMarkTemplate(markTemplates, range);
+    const editedRanges = template ? mapEditedRangesToMarkdown(template, range.rawMarkdown) : [];
+    const aiMarkdown = editedRanges.length ? insertAiEditMarkers(range.rawMarkdown, editedRanges) : range.rawMarkdown;
+    const aiContent = parseMarkdownContent(editor, markdown.slice(range.start, range.end), true);
+    const markedAiContent = editedRanges.length
+      ? markAiGeneratedContentWithEditMarkers(parseMarkdownContent(editor, aiMarkdown, true))
+      : markAiGeneratedContent(aiContent);
+
     content.push(...parseMarkdownContent(editor, markdown.slice(cursor, range.start)));
     content.push({
       type: 'velocaAiGeneratedBlock',
@@ -2204,7 +2226,7 @@ export function createAiProvenanceDocument(
         provenanceId: range.provenanceId,
         sourceMessageId: range.sourceMessageId
       },
-      content: markAiGeneratedContent(parseMarkdownContent(editor, markdown.slice(range.start, range.end), true))
+      content: markedAiContent
     });
     cursor = range.end;
   }
@@ -2215,6 +2237,346 @@ export function createAiProvenanceDocument(
     type: 'doc',
     content: content.length ? content : [{ type: 'paragraph' }]
   };
+}
+
+function getAiMarkTemplatesFromSnapshot(editor: Editor, snapshot: JSONContent | null): AiMarkTemplate[] {
+  if (!snapshot || !editor.markdown) {
+    return [];
+  }
+
+  const templates: AiMarkTemplate[] = [];
+
+  visitJsonContent(snapshot, (node) => {
+    if (node.type !== 'velocaAiGeneratedBlock') {
+      return true;
+    }
+
+    const attrs = (node.attrs ?? {}) as Partial<AiGeneratedBlockAttrs>;
+    const markedBlock = insertEditMarkersIntoSnapshotNode(node);
+    const markedMarkdown = serializeAiGeneratedBlockMarkdown(editor, markedBlock);
+    const extracted = extractAiEditMarkers(markedMarkdown);
+    const provenanceId = typeof attrs.provenanceId === 'string' ? attrs.provenanceId : '';
+    const sourceMessageId = typeof attrs.sourceMessageId === 'string' ? attrs.sourceMessageId : '';
+
+    if (extracted.rawMarkdown.trim()) {
+      templates.push({
+        editedRanges: extracted.editedRanges,
+        provenanceId,
+        rawMarkdown: extracted.rawMarkdown,
+        sourceMessageId
+      });
+    }
+
+    return false;
+  });
+
+  return templates;
+}
+
+function findAiMarkTemplate(
+  templates: AiMarkTemplate[],
+  range: AiGeneratedMarkdownRange
+): AiMarkTemplate | null {
+  return (
+    templates.find((template) => template.provenanceId && template.provenanceId === range.provenanceId) ??
+    templates.find((template) => template.sourceMessageId && template.sourceMessageId === range.sourceMessageId) ??
+    null
+  );
+}
+
+function mapEditedRangesToMarkdown(template: AiMarkTemplate, rawMarkdown: string): AiEditedMarkdownRange[] {
+  if (template.rawMarkdown === rawMarkdown) {
+    return template.editedRanges;
+  }
+
+  const edit = getMarkdownEditRange(template.rawMarkdown, rawMarkdown);
+  const delta = edit.next.to - edit.next.from - (edit.previous.to - edit.previous.from);
+  const nextRanges: AiEditedMarkdownRange[] = [];
+
+  for (const range of template.editedRanges) {
+    if (range.to <= edit.previous.from) {
+      nextRanges.push(range);
+      continue;
+    }
+
+    if (range.from >= edit.previous.to) {
+      nextRanges.push({
+        from: range.from + delta,
+        to: range.to + delta
+      });
+      continue;
+    }
+
+    if (range.from < edit.previous.from) {
+      nextRanges.push({
+        from: range.from,
+        to: edit.previous.from
+      });
+    }
+
+    if (edit.next.to > edit.next.from) {
+      nextRanges.push(edit.next);
+    }
+
+    if (range.to > edit.previous.to) {
+      nextRanges.push({
+        from: edit.next.to,
+        to: edit.next.to + (range.to - edit.previous.to)
+      });
+    }
+  }
+
+  if (edit.next.to > edit.next.from) {
+    nextRanges.push(edit.next);
+  }
+
+  return mergeAiEditedRanges(nextRanges, rawMarkdown.length);
+}
+
+function getMarkdownEditRange(
+  previousMarkdown: string,
+  nextMarkdown: string
+): { next: AiEditedMarkdownRange; previous: AiEditedMarkdownRange } {
+  let prefixLength = 0;
+  const maxPrefixLength = Math.min(previousMarkdown.length, nextMarkdown.length);
+
+  while (
+    prefixLength < maxPrefixLength &&
+    previousMarkdown.charCodeAt(prefixLength) === nextMarkdown.charCodeAt(prefixLength)
+  ) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  const maxSuffixLength = Math.min(
+    previousMarkdown.length - prefixLength,
+    nextMarkdown.length - prefixLength
+  );
+
+  while (
+    suffixLength < maxSuffixLength &&
+    previousMarkdown.charCodeAt(previousMarkdown.length - 1 - suffixLength) ===
+      nextMarkdown.charCodeAt(nextMarkdown.length - 1 - suffixLength)
+  ) {
+    suffixLength += 1;
+  }
+
+  return {
+    next: {
+      from: prefixLength,
+      to: nextMarkdown.length - suffixLength
+    },
+    previous: {
+      from: prefixLength,
+      to: previousMarkdown.length - suffixLength
+    }
+  };
+}
+
+function mergeAiEditedRanges(ranges: AiEditedMarkdownRange[], markdownLength: number): AiEditedMarkdownRange[] {
+  const sortedRanges = ranges
+    .map((range) => ({
+      from: Math.max(0, Math.min(range.from, markdownLength)),
+      to: Math.max(0, Math.min(range.to, markdownLength))
+    }))
+    .filter((range) => range.to > range.from)
+    .sort((left, right) => left.from - right.from);
+  const merged: AiEditedMarkdownRange[] = [];
+
+  for (const range of sortedRanges) {
+    const previous = merged.at(-1);
+
+    if (previous && range.from <= previous.to) {
+      previous.to = Math.max(previous.to, range.to);
+      continue;
+    }
+
+    merged.push({ ...range });
+  }
+
+  return merged;
+}
+
+function insertAiEditMarkers(markdown: string, ranges: AiEditedMarkdownRange[]): string {
+  let nextMarkdown = '';
+  let cursor = 0;
+
+  for (const range of mergeAiEditedRanges(ranges, markdown.length)) {
+    nextMarkdown += markdown.slice(cursor, range.from);
+    nextMarkdown += aiEditStartMarker;
+    nextMarkdown += markdown.slice(range.from, range.to);
+    nextMarkdown += aiEditEndMarker;
+    cursor = range.to;
+  }
+
+  return `${nextMarkdown}${markdown.slice(cursor)}`;
+}
+
+const aiEditStartMarker = 'VELOCAAIEDITSTART';
+const aiEditEndMarker = 'VELOCAAIEDITEND';
+
+function extractAiEditMarkers(markdown: string): {
+  editedRanges: AiEditedMarkdownRange[];
+  rawMarkdown: string;
+} {
+  const editedRanges: AiEditedMarkdownRange[] = [];
+  let rawMarkdown = '';
+  let cursor = 0;
+  let activeEditedStart: number | null = null;
+
+  while (cursor < markdown.length) {
+    if (markdown.startsWith(aiEditStartMarker, cursor)) {
+      activeEditedStart = rawMarkdown.length;
+      cursor += aiEditStartMarker.length;
+      continue;
+    }
+
+    if (markdown.startsWith(aiEditEndMarker, cursor)) {
+      if (activeEditedStart !== null && rawMarkdown.length > activeEditedStart) {
+        editedRanges.push({
+          from: activeEditedStart,
+          to: rawMarkdown.length
+        });
+      }
+
+      activeEditedStart = null;
+      cursor += aiEditEndMarker.length;
+      continue;
+    }
+
+    rawMarkdown += markdown[cursor];
+    cursor += 1;
+  }
+
+  return {
+    editedRanges: mergeAiEditedRanges(editedRanges, rawMarkdown.length),
+    rawMarkdown
+  };
+}
+
+function markAiGeneratedContentWithEditMarkers(content: JSONContent[]): JSONContent[] {
+  const state = { insideEdited: false };
+
+  return content.flatMap((node) => markAiGeneratedNodeWithEditMarkers(node, false, state));
+}
+
+function markAiGeneratedNodeWithEditMarkers(
+  node: JSONContent,
+  insideCodeBlock: boolean,
+  state: { insideEdited: boolean }
+): JSONContent[] {
+  const nextInsideCodeBlock = insideCodeBlock || node.type === 'codeBlock';
+
+  if (node.type === 'text') {
+    return splitMarkedAiTextNode(node, nextInsideCodeBlock, state);
+  }
+
+  if (!node.content?.length) {
+    return [node];
+  }
+
+  return [
+    {
+      ...node,
+      content: node.content.flatMap((child) => markAiGeneratedNodeWithEditMarkers(child, nextInsideCodeBlock, state))
+    }
+  ];
+}
+
+function splitMarkedAiTextNode(
+  node: JSONContent,
+  insideCodeBlock: boolean,
+  state: { insideEdited: boolean }
+): JSONContent[] {
+  const text = node.text ?? '';
+  const nodes: JSONContent[] = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    const startIndex = text.indexOf(aiEditStartMarker, cursor);
+    const endIndex = text.indexOf(aiEditEndMarker, cursor);
+    const nextMarkerIndex =
+      startIndex >= 0 && (endIndex < 0 || startIndex < endIndex) ? startIndex : endIndex;
+
+    if (nextMarkerIndex < 0) {
+      pushAiTextSegment(nodes, node, text.slice(cursor), insideCodeBlock, state.insideEdited);
+      break;
+    }
+
+    pushAiTextSegment(nodes, node, text.slice(cursor, nextMarkerIndex), insideCodeBlock, state.insideEdited);
+
+    if (startIndex === nextMarkerIndex) {
+      state.insideEdited = true;
+      cursor = nextMarkerIndex + aiEditStartMarker.length;
+      continue;
+    }
+
+    state.insideEdited = false;
+    cursor = nextMarkerIndex + aiEditEndMarker.length;
+  }
+
+  return nodes;
+}
+
+function pushAiTextSegment(
+  nodes: JSONContent[],
+  node: JSONContent,
+  text: string,
+  insideCodeBlock: boolean,
+  insideEdited: boolean
+): void {
+  if (!text) {
+    return;
+  }
+
+  if (insideCodeBlock) {
+    nodes.push({
+      ...node,
+      marks: node.marks?.filter((mark) => mark.type !== 'velocaAiGenerated' && mark.type !== 'velocaAiEdited'),
+      text
+    });
+    return;
+  }
+
+  const marks = node.marks?.filter((mark) => mark.type !== 'velocaAiGenerated' && mark.type !== 'velocaAiEdited') ?? [];
+
+  nodes.push({
+    ...node,
+    marks: [...marks, { type: insideEdited ? 'velocaAiEdited' : 'velocaAiGenerated' }],
+    text
+  });
+}
+
+function insertEditMarkersIntoSnapshotNode(node: JSONContent, insideCodeBlock = false): JSONContent {
+  const nextInsideCodeBlock = insideCodeBlock || node.type === 'codeBlock';
+
+  if (node.type === 'text' && node.text && !nextInsideCodeBlock) {
+    const hasEditedMark = node.marks?.some((mark) => mark.type === 'velocaAiEdited') ?? false;
+
+    return {
+      ...node,
+      text: hasEditedMark ? `${aiEditStartMarker}${node.text}${aiEditEndMarker}` : node.text
+    };
+  }
+
+  if (!node.content?.length) {
+    return node;
+  }
+
+  return {
+    ...node,
+    content: node.content.map((child) => insertEditMarkersIntoSnapshotNode(child, nextInsideCodeBlock))
+  };
+}
+
+function visitJsonContent(node: JSONContent, callback: (node: JSONContent) => boolean | void): void {
+  if (callback(node) === false) {
+    return;
+  }
+
+  for (const child of node.content ?? []) {
+    visitJsonContent(child, callback);
+  }
 }
 
 function parseMarkdownContent(editor: Editor, markdown: string, fallbackParagraph = false): JSONContent[] {

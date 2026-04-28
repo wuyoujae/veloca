@@ -36,8 +36,9 @@
   - 渲染视图中的蓝色效果不是 Markdown 语法，而是根据 sidecar provenance range 把对应内容恢复为 Veloca 内部 `velocaAiGeneratedBlock`，并给 AI 原文文本应用内部 `velocaAiGenerated` mark，再由 `.veloca-ai-generated-text` 使用 `--info` 蓝色下划线展示；
   - Markdown 正文保持纯净，保存时不会写入 Veloca 专属语法、HTML 标记或隐藏注释；
   - 插入成功后会立即更新 Markdown 草稿；如果用户未在渲染视图继续编辑，切换源码模式不会再强制把 TipTap 文档重新序列化回 Markdown；
-  - AI 内容来源保存为 `document_provenance_snapshots` sidecar v2 结构，复用现有 `snapshot_json` 字段记录 `version: 2`、`markdownHash`、AI range、原始片段 hash 和渲染快照，不需要数据库迁移；
-  - 用户在源码模式编辑时，Veloca 会把源码变更转换为最小 Markdown patch，并同步移动或更新 v2 provenance range；再次切回渲染视图时，仍会恢复可匹配内容的底部来源线；
+  - AI 内容来源保存为 `document_provenance_snapshots` sidecar v2 结构，复用现有 `snapshot_json` 字段记录 `version: 2`、`markdownHash`、AI range、原始片段 hash、渲染快照和用于恢复蓝/黄 mark 的 `markSnapshot`，不需要数据库迁移；
+  - 用户在源码模式编辑时，Veloca 会把源码变更转换为最小 Markdown patch，并同步移动或更新 v2 provenance range；如果已有黄色编辑 mark，会把旧快照作为 `markSnapshot` 颜色模板保留，再次切回渲染视图时会基于新 Markdown 重建 AI block 并恢复蓝/黄底部来源线；
+  - 用户在源码模式直接修改 AI range 内的内容时，新增或替换出来的源码片段也会被视为用户编辑内容，切回渲染视图后显示黄色底线；删除内容不会让剩余原文误变黄；
   - 打开文档或源码被外部改写后，Veloca 会先按 hash 校验 provenance；不匹配时尝试用原始 AI Markdown 片段做唯一匹配重定位，无法唯一定位的 range 会被丢弃，避免把普通内容误判为 AI 内容；
   - 用户在 AI 生成块内新增或替换的文字会自动应用内部 `velocaAiEdited` mark，并将对应文字下划线改为黄色；删除内容不会标记剩余原文；
   - 渲染视图中编辑过 AI 内容后，切换源码或保存时会从当前 TipTap `velocaAiGeneratedBlock` 快照反推最新 v2 range，把用户改写后的 Markdown 片段作为新的 `rawMarkdown`，并连同蓝色原文 mark 与黄色编辑 mark 一起写入 sidecar；

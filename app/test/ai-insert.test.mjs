@@ -8,7 +8,11 @@ import {
   shiftAiProvenanceRangesForPatch,
   updateAiProvenanceRangesForSourceEdit
 } from '../frontend/src/ai-insert.ts';
-import { getAiProvenanceRangesFromEditor, getEditorMarkdown } from '../frontend/src/rich-markdown.ts';
+import {
+  createAiProvenanceDocument,
+  getAiProvenanceRangesFromEditor,
+  getEditorMarkdown
+} from '../frontend/src/rich-markdown.ts';
 
 test('inserts normalized AI markdown into an empty document', () => {
   const patch = buildAiMarkdownInsertionPatch('', '\n\n# Title\n\nBody\n\n', { from: 0, to: 0 });
@@ -251,3 +255,129 @@ test('extracts edited AI provenance ranges from the rendered editor snapshot', (
   assert.equal(range.provenanceId, 'ai-a');
   assert.equal(range.sourceMessageId, 'message-a');
 });
+
+test('preserves edited AI marks after source edits outside the AI range', () => {
+  const manager = new MarkdownManager({ extensions: [StarterKit] });
+  const editor = { markdown: manager };
+  const previousSnapshot = buildAiMarkSnapshot('AI edited block');
+  const markdown = 'Intro changed\n\nAI edited block\n\nTail';
+  const range = {
+    createdAt: 123,
+    end: markdown.indexOf('\n\nTail'),
+    id: 'range-ai-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: 'AI edited block',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: markdown.indexOf('AI edited block')
+  };
+  const snapshot = createAiProvenanceDocument(editor, markdown, [range], previousSnapshot);
+  const marks = collectAiTextMarks(snapshot);
+
+  assert.deepEqual(marks, [
+    { text: 'AI ', mark: 'velocaAiGenerated' },
+    { text: 'edited', mark: 'velocaAiEdited' },
+    { text: ' block', mark: 'velocaAiGenerated' }
+  ]);
+});
+
+test('marks source edits inside AI content as edited while preserving previous yellow marks', () => {
+  const manager = new MarkdownManager({ extensions: [StarterKit] });
+  const editor = { markdown: manager };
+  const previousSnapshot = buildAiMarkSnapshot('AI edited block');
+  const markdown = 'Intro\n\nAI source edited block\n\nTail';
+  const range = {
+    createdAt: 123,
+    end: markdown.indexOf('\n\nTail'),
+    id: 'range-ai-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: 'AI source edited block',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: markdown.indexOf('AI source edited block')
+  };
+  const snapshot = createAiProvenanceDocument(editor, markdown, [range], previousSnapshot);
+  const marks = collectAiTextMarks(snapshot);
+
+  assert.deepEqual(marks, [
+    { text: 'AI ', mark: 'velocaAiGenerated' },
+    { text: 'source edited', mark: 'velocaAiEdited' },
+    { text: ' block', mark: 'velocaAiGenerated' }
+  ]);
+});
+
+test('marks source edits inside previously unedited AI content as edited', () => {
+  const manager = new MarkdownManager({ extensions: [StarterKit] });
+  const editor = { markdown: manager };
+  const previousSnapshot = buildAiMarkSnapshot('AI block', null);
+  const markdown = 'Intro\n\nAI source block\n\nTail';
+  const range = {
+    createdAt: 123,
+    end: markdown.indexOf('\n\nTail'),
+    id: 'range-ai-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: 'AI source block',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: markdown.indexOf('AI source block')
+  };
+  const snapshot = createAiProvenanceDocument(editor, markdown, [range], previousSnapshot);
+  const marks = collectAiTextMarks(snapshot);
+
+  assert.deepEqual(marks, [
+    { text: 'AI ', mark: 'velocaAiGenerated' },
+    { text: 'source ', mark: 'velocaAiEdited' },
+    { text: 'block', mark: 'velocaAiGenerated' }
+  ]);
+});
+
+function buildAiMarkSnapshot(aiText, editedText = 'edited') {
+  const editedStart = editedText ? aiText.indexOf(editedText) : -1;
+  const editedEnd = editedStart + (editedText?.length ?? 0);
+  const aiContent =
+    editedStart >= 0
+      ? [
+          { type: 'text', text: aiText.slice(0, editedStart), marks: [{ type: 'velocaAiGenerated' }] },
+          { type: 'text', text: aiText.slice(editedStart, editedEnd), marks: [{ type: 'velocaAiEdited' }] },
+          { type: 'text', text: aiText.slice(editedEnd), marks: [{ type: 'velocaAiGenerated' }] }
+        ]
+      : [{ type: 'text', text: aiText, marks: [{ type: 'velocaAiGenerated' }] }];
+
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Intro' }]
+      },
+      {
+        type: 'velocaAiGeneratedBlock',
+        attrs: {
+          createdAt: 123,
+          provenanceId: 'ai-a',
+          sourceMessageId: 'message-a'
+        },
+        content: [
+          {
+            type: 'paragraph',
+            content: aiContent
+          }
+        ]
+      },
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Tail' }]
+      }
+    ]
+  };
+}
+
+function collectAiTextMarks(snapshot) {
+  const block = snapshot.content.find((node) => node.type === 'velocaAiGeneratedBlock');
+  const paragraph = block.content[0];
+
+  return paragraph.content.map((node) => ({
+    mark: node.marks?.find((mark) => mark.type === 'velocaAiEdited' || mark.type === 'velocaAiGenerated')?.type,
+    text: node.text
+  }));
+}
