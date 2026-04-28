@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { MarkdownManager } from '@tiptap/markdown';
+import StarterKit from '@tiptap/starter-kit';
 import {
   buildAiMarkdownInsertionPatch,
   relocateAiProvenanceRanges,
   shiftAiProvenanceRangesForPatch,
   updateAiProvenanceRangesForSourceEdit
 } from '../frontend/src/ai-insert.ts';
+import { getEditorMarkdown } from '../frontend/src/rich-markdown.ts';
 
 test('inserts normalized AI markdown into an empty document', () => {
   const patch = buildAiMarkdownInsertionPatch('', '\n\n# Title\n\nBody\n\n', { from: 0, to: 0 });
@@ -120,4 +123,58 @@ test('keeps provenance ranges when source edits happen inside AI content', () =>
   assert.equal(updated.start, nextContent.indexOf('AI edited block'));
   assert.equal(updated.end, nextContent.indexOf('\n\nTail'));
   assert.equal(updated.rawMarkdown, 'AI edited block');
+});
+
+test('serializes rendered editor markdown with block separators', () => {
+  const manager = new MarkdownManager({ extensions: [StarterKit] });
+  const doc = {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: '你好！我是 Loomber 项目的开发者。' }]
+      },
+      {
+        type: 'heading',
+        attrs: { level: 3 },
+        content: [{ type: 'text', text: '项目总结：Loomber' }]
+      },
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: '简单来说，' },
+          { type: 'text', text: 'Loomber', marks: [{ type: 'bold' }] },
+          { type: 'text', text: ' 是一个 Markdown 编辑器。' }
+        ]
+      },
+      {
+        type: 'bulletList',
+        content: [
+          {
+            type: 'listItem',
+            content: [
+              {
+                type: 'paragraph',
+                content: [{ type: 'text', text: '后端：处理文件上传。' }]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  };
+  const editor = {
+    getMarkdown: () => '',
+    markdown: manager,
+    state: {
+      doc: {
+        toJSON: () => doc
+      }
+    }
+  };
+
+  assert.equal(
+    getEditorMarkdown(editor),
+    '你好！我是 Loomber 项目的开发者。\n\n### 项目总结：Loomber\n\n简单来说，**Loomber** 是一个 Markdown 编辑器。\n\n- 后端：处理文件上传。'
+  );
 });

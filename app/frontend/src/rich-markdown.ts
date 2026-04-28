@@ -2061,9 +2061,8 @@ export function renderMarkdownToSafeHtml(content: string): string {
 
 export function getEditorMarkdown(editor: Editor): string {
   const json = unwrapVelocaInternalNodes(editor.state.doc.toJSON() as JSONContent);
-  const content = Array.isArray(json.content) ? json.content : [];
 
-  return editor.markdown?.serialize(content as unknown as JSONContent) ?? editor.getMarkdown();
+  return editor.markdown?.serialize(json) ?? editor.getMarkdown();
 }
 
 function unwrapVelocaInternalNodes(node: JSONContent): JSONContent {
