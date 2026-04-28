@@ -7,7 +7,6 @@
   "scripts": {
     "postinstall": "electron-rebuild -f -w better-sqlite3 --dist-url=https://npmmirror.com/mirrors/electron/",
     "dev": "electron-vite dev",
-    "dev:official": "node app/backend/waitlist-server.js",
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "lint": "eslint . --ext .ts,.tsx",
@@ -40,7 +39,6 @@
     "better-sqlite3": "^11.9.1",
     "dompurify": "^3.4.0",
     "electron-vite": "^3.0.0",
-    "express": "^5.2.1",
     "isomorphic-git": "^1.37.5",
     "katex": "^0.16.45",
     "lucide-react": "^0.468.0",

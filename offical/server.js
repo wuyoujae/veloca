@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 
 const defaultPort = 8787;
@@ -11,11 +12,14 @@ const maxRequestsPerWindow = 8;
 
 loadLocalEnv();
 
+const officialDir = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const configuredPort = Number.parseInt(process.env.VELOCA_OFFICIAL_PORT ?? `${defaultPort}`, 10);
 const port = Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : defaultPort;
-const waitlistFile = resolve(process.env.VELOCA_WAITLIST_FILE ?? defaultWaitlistFile);
-const officialDir = resolve('offical');
+const configuredWaitlistFile = process.env.VELOCA_WAITLIST_FILE ?? defaultWaitlistFile;
+const waitlistFile = isAbsolute(configuredWaitlistFile)
+  ? configuredWaitlistFile
+  : resolve(officialDir, configuredWaitlistFile);
 const requestBuckets = new Map();
 
 let writeQueue = Promise.resolve();
@@ -219,7 +223,7 @@ function hashValue(value) {
 }
 
 function loadLocalEnv() {
-  const envPath = resolve('.env');
+  const envPath = resolve(dirname(fileURLToPath(import.meta.url)), '.env');
 
   if (!existsSync(envPath)) {
     return;
