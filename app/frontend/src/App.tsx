@@ -61,12 +61,12 @@ import {
   MEDIA_LIMITS,
   buildMediaInsertContent,
   buildMediaNodeFromUrl,
+  createAiProvenanceDocument,
   createRichEditorExtensions,
   extractFirstMediaUrl,
   getActiveTableInfo,
   getEditorMarkdown,
   hydrateDocumentAssets,
-  insertAiGeneratedMarkdown,
   insertActiveTableColumn,
   insertActiveTableRow,
   insertMermaidBlockFromCommand,
@@ -79,6 +79,16 @@ import {
   type WorkspaceAssetPayload,
   type WorkspaceResolvedAsset
 } from './rich-markdown';
+import {
+  buildAiMarkdownInsertionPatch,
+  filterValidAiProvenanceRanges,
+  relocateAiProvenanceRanges,
+  shiftAiProvenanceRangesForPatch,
+  type AiGeneratedMarkdownRange,
+  type AiMarkdownInsertionPatch,
+  type AiProvenanceSnapshotV2,
+  type MarkdownSelectionRange
+} from './ai-insert';
 import {
   AgentPalette,
   type AgentPaletteAnchor,
@@ -565,14 +575,49 @@ function hashMarkdownContent(content: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
-function parseProvenanceSnapshot(snapshotJson?: string | null): JSONContent | null {
+interface LegacyAiProvenanceSnapshot {
+  snapshot: JSONContent;
+  version: 1;
+}
+
+type StoredAiProvenanceSnapshot = LegacyAiProvenanceSnapshot | AiProvenanceSnapshotV2;
+
+function parseStoredAiProvenanceSnapshot(snapshotJson?: string | null): StoredAiProvenanceSnapshot | null {
   if (!snapshotJson) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(snapshotJson) as JSONContent;
-    return parsed && parsed.type === 'doc' ? normalizeAiGeneratedSnapshot(parsed) : null;
+    const parsed = JSON.parse(snapshotJson) as unknown;
+
+    if (isJsonDoc(parsed)) {
+      return {
+        snapshot: normalizeAiGeneratedSnapshot(parsed),
+        version: 1
+      };
+    }
+
+    if (!isRecord(parsed) || parsed.version !== 2 || typeof parsed.markdownHash !== 'string') {
+      return null;
+    }
+
+    const ranges = Array.isArray(parsed.ranges)
+      ? parsed.ranges.flatMap((range) => {
+          const normalized = normalizeAiProvenanceRange(range);
+          return normalized ? [normalized] : [];
+        })
+      : [];
+
+    if (!ranges.length) {
+      return null;
+    }
+
+    return {
+      markdownHash: parsed.markdownHash,
+      ranges,
+      snapshot: isJsonDoc(parsed.snapshot) ? normalizeAiGeneratedSnapshot(parsed.snapshot) : null,
+      version: 2
+    };
   } catch {
     return null;
   }
@@ -604,6 +649,135 @@ function documentSnapshotHasAiProvenance(snapshot: JSONContent | null): boolean 
   }
 
   return Boolean(snapshot.content?.some((child) => documentSnapshotHasAiProvenance(child)));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isJsonDoc(value: unknown): value is JSONContent {
+  return isRecord(value) && value.type === 'doc';
+}
+
+function normalizeAiProvenanceRange(value: unknown): AiGeneratedMarkdownRange | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const start = typeof value.start === 'number' ? value.start : Number.NaN;
+  const end = typeof value.end === 'number' ? value.end : Number.NaN;
+  const createdAt = typeof value.createdAt === 'number' ? value.createdAt : Date.now();
+
+  if (
+    !Number.isFinite(start) ||
+    !Number.isFinite(end) ||
+    !Number.isFinite(createdAt) ||
+    typeof value.rawMarkdown !== 'string' ||
+    typeof value.rawMarkdownHash !== 'string' ||
+    typeof value.sourceMessageId !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    createdAt,
+    end,
+    id: typeof value.id === 'string' && value.id ? value.id : createAiProvenanceId('range'),
+    provenanceId:
+      typeof value.provenanceId === 'string' && value.provenanceId
+        ? value.provenanceId
+        : createAiProvenanceId('ai'),
+    rawMarkdown: value.rawMarkdown,
+    rawMarkdownHash: value.rawMarkdownHash,
+    sourceMessageId: value.sourceMessageId,
+    start
+  };
+}
+
+function createAiProvenanceId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getAiProvenanceRangesForContent(
+  content: string,
+  snapshotJson?: string | null
+): AiGeneratedMarkdownRange[] {
+  const parsed = parseStoredAiProvenanceSnapshot(snapshotJson);
+
+  if (!parsed || parsed.version !== 2) {
+    return [];
+  }
+
+  const exactRanges = filterValidAiProvenanceRanges(content, parsed.ranges);
+
+  if (exactRanges.length) {
+    return exactRanges;
+  }
+
+  return relocateAiProvenanceRanges(content, parsed.ranges);
+}
+
+function buildAiProvenanceSnapshotFields(
+  content: string,
+  ranges: AiGeneratedMarkdownRange[],
+  snapshot: JSONContent | null
+): Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'> {
+  const validRanges = filterValidAiProvenanceRanges(content, ranges);
+
+  if (!validRanges.length) {
+    return {
+      provenanceMarkdownHash: null,
+      provenanceSnapshotJson: null
+    };
+  }
+
+  const markdownHash = hashMarkdownContent(content);
+  const payload: AiProvenanceSnapshotV2 = {
+    markdownHash,
+    ranges: validRanges,
+    snapshot,
+    version: 2
+  };
+
+  return {
+    provenanceMarkdownHash: markdownHash,
+    provenanceSnapshotJson: JSON.stringify(payload)
+  };
+}
+
+function normalizePersistedProvenanceForContent(
+  content: string,
+  storedMarkdownHash: string,
+  snapshotJson?: string | null
+): Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'> {
+  const parsed = parseStoredAiProvenanceSnapshot(snapshotJson);
+  const markdownHash = hashMarkdownContent(content);
+
+  if (!parsed) {
+    return {
+      provenanceMarkdownHash: null,
+      provenanceSnapshotJson: null
+    };
+  }
+
+  if (parsed.version === 1) {
+    return storedMarkdownHash === markdownHash && documentSnapshotHasAiProvenance(parsed.snapshot)
+      ? {
+          provenanceMarkdownHash: markdownHash,
+          provenanceSnapshotJson: snapshotJson ?? null
+        }
+      : {
+          provenanceMarkdownHash: null,
+          provenanceSnapshotJson: null
+        };
+  }
+
+  const ranges =
+    parsed.markdownHash === markdownHash
+      ? filterValidAiProvenanceRanges(content, parsed.ranges)
+      : relocateAiProvenanceRanges(content, parsed.ranges);
+
+  return buildAiProvenanceSnapshotFields(content, ranges, parsed.markdownHash === markdownHash ? parsed.snapshot : null);
 }
 
 function getAgentWorkspaceRootPath(
@@ -1602,19 +1776,15 @@ export function App(): JSX.Element {
     }
 
     const snapshot = await window.veloca.workspace.readProvenance(documentKey);
-    const markdownHash = hashMarkdownContent(file.content);
 
-    if (!snapshot || snapshot.markdownHash !== markdownHash || !parseProvenanceSnapshot(snapshot.snapshotJson)) {
+    if (!snapshot) {
       return {
         provenanceMarkdownHash: null,
         provenanceSnapshotJson: null
       };
     }
 
-    return {
-      provenanceMarkdownHash: snapshot.markdownHash,
-      provenanceSnapshotJson: snapshot.snapshotJson
-    };
+    return normalizePersistedProvenanceForContent(file.content, snapshot.markdownHash, snapshot.snapshotJson);
   };
 
   const persistDocumentProvenance = async (
@@ -1635,8 +1805,36 @@ export function App(): JSX.Element {
 
     const markdownHash = hashMarkdownContent(content);
     const editorSnapshot = snapshotOverride ?? renderedEditorHandlesRef.current.get(file.path)?.getProvenanceSnapshot() ?? null;
-    const fallbackSnapshot =
-      fallback?.provenanceMarkdownHash === markdownHash ? parseProvenanceSnapshot(fallback.provenanceSnapshotJson) : null;
+    const fallbackProvenance =
+      fallback?.provenanceMarkdownHash === markdownHash
+        ? parseStoredAiProvenanceSnapshot(fallback.provenanceSnapshotJson)
+        : null;
+
+    if (fallbackProvenance?.version === 2) {
+      const provenance = buildAiProvenanceSnapshotFields(
+        content,
+        fallbackProvenance.ranges,
+        editorSnapshot ?? fallbackProvenance.snapshot
+      );
+
+      if (!provenance.provenanceSnapshotJson) {
+        await window.veloca.workspace.deleteProvenance(documentKey);
+        return provenance;
+      }
+
+      await window.veloca.workspace.saveProvenance({
+        documentKey,
+        documentPath: file.path,
+        markdownHash,
+        snapshotJson: provenance.provenanceSnapshotJson,
+        workspaceFolderId: file.workspaceFolderId,
+        workspaceType
+      });
+
+      return provenance;
+    }
+
+    const fallbackSnapshot = fallbackProvenance?.version === 1 ? fallbackProvenance.snapshot : null;
     const snapshot = editorSnapshot ?? fallbackSnapshot;
 
     if (!documentSnapshotHasAiProvenance(snapshot)) {
@@ -1668,8 +1866,14 @@ export function App(): JSX.Element {
   const updateTabProvenanceSnapshot = (filePath: string, content: string, snapshot: JSONContent | null) => {
     let provenanceMarkdownHash: string | null = null;
     let provenanceSnapshotJson: string | null = null;
+    const targetTab = openTabs.find((tab) => tab.file.path === filePath);
+    const ranges = getAiProvenanceRangesForContent(content, targetTab?.provenanceSnapshotJson);
+    const v2Provenance = buildAiProvenanceSnapshotFields(content, ranges, snapshot);
 
-    if (documentSnapshotHasAiProvenance(snapshot)) {
+    if (v2Provenance.provenanceSnapshotJson) {
+      provenanceMarkdownHash = v2Provenance.provenanceMarkdownHash ?? null;
+      provenanceSnapshotJson = v2Provenance.provenanceSnapshotJson;
+    } else if (documentSnapshotHasAiProvenance(snapshot)) {
       provenanceMarkdownHash = hashMarkdownContent(content);
       provenanceSnapshotJson = JSON.stringify(snapshot);
     }
@@ -1731,7 +1935,7 @@ export function App(): JSX.Element {
     try {
       const renderedHandle = currentMode === 'rendered' ? renderedEditorHandlesRef.current.get(targetPath) : null;
 
-      if (renderedHandle) {
+      if (renderedHandle?.hasRenderedEdits()) {
         const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
         const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
         flushedMarkdownLength = latestRenderedMarkdown.length;
@@ -1795,15 +1999,33 @@ export function App(): JSX.Element {
     });
   };
 
-  const insertAiAnswerIntoRenderedEditor = (
+  const updateTabProvenanceFields = (
     filePath: string,
-    answer: string,
-    messageId: string,
-    cursorOffset?: number | null,
+    provenance: Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>
+  ) => {
+    setOpenTabs((current) => {
+      const nextTabs = current.map((tab) =>
+        tab.file.path === filePath
+          ? {
+              ...tab,
+              ...provenance
+            }
+          : tab
+      );
+
+      activeTabRef.current = nextTabs.find((tab) => tab.file.path === filePath) ?? activeTabRef.current;
+      return nextTabs;
+    });
+  };
+
+  const applyAiProvenanceToRenderedEditor = (
+    filePath: string,
+    content: string,
+    ranges: AiGeneratedMarkdownRange[],
     attempt = 0
   ) => {
     const handle = renderedEditorHandlesRef.current.get(filePath);
-    logAiInsertDebug('looking for rendered editor handle', {
+    logAiInsertDebug('looking for rendered editor handle for provenance apply', {
       attempt,
       filePath,
       hasHandle: Boolean(handle),
@@ -1814,7 +2036,7 @@ export function App(): JSX.Element {
     if (!handle) {
       if (attempt < 20) {
         window.setTimeout(
-          () => insertAiAnswerIntoRenderedEditor(filePath, answer, messageId, cursorOffset, attempt + 1),
+          () => applyAiProvenanceToRenderedEditor(filePath, content, ranges, attempt + 1),
           50
         );
         return;
@@ -1828,38 +2050,98 @@ export function App(): JSX.Element {
       return;
     }
 
-    if (typeof cursorOffset === 'number') {
-      logAiInsertDebug('restoring source cursor before insert', {
-        cursorOffset,
-        filePath
+    const snapshot = handle.applyAiProvenanceContent(content, ranges);
+
+    if (!snapshot) {
+      showToast({
+        type: 'info',
+        title: 'Insert Failed',
+        description: 'The AI response was inserted, but the rendered provenance could not be restored.'
       });
-      handle.focusAtMarkdownOffset(cursorOffset);
+      return;
     }
 
-    const inserted = handle.insertAiGeneratedContent(answer, messageId);
-    logAiInsertDebug('rendered editor insert result', {
-      answerLength: answer.length,
-      filePath,
-      inserted,
-      messageId
-    });
+    updateTabProvenanceFields(filePath, buildAiProvenanceSnapshotFields(content, ranges, snapshot));
+  };
 
-    if (!inserted) {
+  const getAiInsertSelectionRange = (
+    filePath: string,
+    mode: DocumentViewMode,
+    fallbackContentLength: number
+  ): MarkdownSelectionRange => {
+    const range =
+      mode === 'source'
+        ? sourceEditorHandlesRef.current.get(filePath)?.getSelectionRange()
+        : renderedEditorHandlesRef.current.get(filePath)?.getMarkdownSelectionRange();
+
+    return (
+      range ?? {
+        from: fallbackContentLength,
+        to: fallbackContentLength
+      }
+    );
+  };
+
+  const createAiGeneratedMarkdownRange = (
+    messageId: string,
+    patch: AiMarkdownInsertionPatch
+  ): AiGeneratedMarkdownRange => ({
+    createdAt: Date.now(),
+    end: patch.inserted.to,
+    id: createAiProvenanceId('range'),
+    provenanceId: createAiProvenanceId('ai'),
+    rawMarkdown: patch.normalizedMarkdown,
+    rawMarkdownHash: hashMarkdownContent(patch.normalizedMarkdown),
+    sourceMessageId: messageId,
+    start: patch.inserted.from
+  });
+
+  const insertAiAnswerIntoMarkdownSource = (
+    filePath: string,
+    answer: string,
+    messageId: string,
+    currentMode: DocumentViewMode
+  ): boolean => {
+    const targetTab = openTabs.find((tab) => tab.file.path === filePath);
+    const currentContent = filePath === activeTabPath ? documentContentRef.current : targetTab?.draftContent ?? '';
+    const selectionRange = getAiInsertSelectionRange(filePath, currentMode, currentContent.length);
+    const patch = buildAiMarkdownInsertionPatch(currentContent, answer, selectionRange);
+
+    if (!patch) {
       showToast({
         type: 'info',
         title: 'Insert Failed',
         description: 'The AI response is empty or could not be inserted.'
       });
-      return;
+      return false;
     }
 
-    updateTabProvenanceSnapshot(filePath, handle.getMarkdownContent(), handle.getProvenanceSnapshot());
+    const existingRanges = getAiProvenanceRangesForContent(currentContent, targetTab?.provenanceSnapshotJson);
+    const shiftedRanges = shiftAiProvenanceRangesForPatch(
+      existingRanges,
+      patch.replaced,
+      patch.content.length - currentContent.length + (patch.replaced.to - patch.replaced.from)
+    );
+    const ranges = filterValidAiProvenanceRanges(patch.content, [
+      ...shiftedRanges,
+      createAiGeneratedMarkdownRange(messageId, patch)
+    ]);
+    const snapshot = renderedEditorHandlesRef.current.get(filePath)?.applyAiProvenanceContent(patch.content, ranges) ?? null;
+    const provenance = buildAiProvenanceSnapshotFields(patch.content, ranges, snapshot);
+
+    updateTabDocumentContent(filePath, patch.content, provenance);
+
+    if (!snapshot) {
+      applyAiProvenanceToRenderedEditor(filePath, patch.content, ranges);
+    }
 
     showToast({
       type: 'success',
       title: 'Inserted',
       description: 'The AI response has been inserted into the document.'
     });
+
+    return true;
   };
 
   const handleInsertAiAnswer = (answer: string, messageId: string, targetFilePath?: string) => {
@@ -1901,26 +2183,14 @@ export function App(): JSX.Element {
       targetPath
     });
 
-    if (currentMode === 'source') {
-      const fallbackContentLength =
-        targetPath === activeTabPath ? documentContent.length : targetTab?.draftContent.length ?? 0;
-      const cursorOffset = sourceEditorHandlesRef.current.get(targetPath)?.getCursorOffset() ?? fallbackContentLength;
-      logAiInsertDebug('switching source view to rendered before insert', {
-        cursorOffset,
-        targetPath
-      });
+    const inserted = insertAiAnswerIntoMarkdownSource(targetPath, answer, messageId, currentMode);
 
+    if (inserted && currentMode === 'source') {
       setDocumentViewModesByPath((current) => ({
         ...current,
         [targetPath]: 'rendered'
       }));
-      window.requestAnimationFrame(() => {
-        insertAiAnswerIntoRenderedEditor(targetPath, answer, messageId, cursorOffset);
-      });
-      return;
     }
-
-    insertAiAnswerIntoRenderedEditor(targetPath, answer, messageId);
   };
 
   const ensureTabGroup = (paths: string[], insertIndex?: number) => {
@@ -2206,7 +2476,11 @@ export function App(): JSX.Element {
     }
   };
 
-  const updateTabDocumentContent = (filePath: string, content: string) => {
+  const updateTabDocumentContent = (
+    filePath: string,
+    content: string,
+    provenance?: Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>
+  ) => {
     const targetTab = openTabs.find((tab) => tab.file.path === filePath);
     const nextStatus: SaveStatus =
       targetTab && !targetTab.isUntitled && !isUntitledFilePath(filePath) && content === targetTab.savedContent
@@ -2228,6 +2502,7 @@ export function App(): JSX.Element {
           ? {
               ...tab,
               draftContent: content,
+              ...(provenance ?? {}),
               status: (
                 !tab.isUntitled && !isUntitledFilePath(tab.file.path) && content === tab.savedContent
                   ? 'saved'
@@ -4824,11 +5099,13 @@ interface MarkdownEditorProps {
 }
 
 interface MarkdownEditorHandle {
+  applyAiProvenanceContent: (markdown: string, ranges: AiGeneratedMarkdownRange[]) => JSONContent | null;
   focusAtMarkdownOffset: (offset: number) => void;
   getCursorMarkdownOffset: () => number | null;
   getMarkdownContent: () => string;
+  getMarkdownSelectionRange: () => MarkdownSelectionRange | null;
   getProvenanceSnapshot: () => JSONContent | null;
-  insertAiGeneratedContent: (markdown: string, sourceMessageId: string) => boolean;
+  hasRenderedEdits: () => boolean;
 }
 
 interface SourceMarkdownEditorProps {
@@ -4843,6 +5120,7 @@ interface SourceMarkdownEditorProps {
 interface SourceMarkdownEditorHandle {
   focusAtOffset: (offset: number) => void;
   getCursorOffset: () => number | null;
+  getSelectionRange: () => MarkdownSelectionRange | null;
 }
 
 type TableControlsState = {
@@ -5114,13 +5392,27 @@ const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdo
       return textareaRef.current?.selectionStart ?? null;
     }, []);
 
+    const getSelectionRange = useCallback((): MarkdownSelectionRange | null => {
+      const textarea = textareaRef.current;
+
+      if (!textarea) {
+        return null;
+      }
+
+      return {
+        from: textarea.selectionStart,
+        to: textarea.selectionEnd
+      };
+    }, []);
+
     useImperativeHandle(
       ref,
       () => ({
         focusAtOffset,
-        getCursorOffset
+        getCursorOffset,
+        getSelectionRange
       }),
-      [focusAtOffset, getCursorOffset]
+      [focusAtOffset, getCursorOffset, getSelectionRange]
     );
 
     useEffect(() => {
@@ -5176,17 +5468,38 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const onChangeRef = useRef(onChange);
   const onToastRef = useRef(onToast);
   const syncingRef = useRef(false);
+  const renderedDirtyRef = useRef(false);
   const [tableControls, setTableControls] = useState<TableControlsState | null>(null);
   const [tableGridOpen, setTableGridOpen] = useState(false);
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [tableGridHover, setTableGridHover] = useState<TableGridHoverState | null>(null);
   const [slashCommandMenu, setSlashCommandMenu] = useState<SlashCommandMenuState | null>(null);
   const slashCommandMenuRef = useRef<SlashCommandMenuState | null>(null);
+  const contentMarkdownHash = useMemo(() => hashMarkdownContent(content), [content]);
+  const storedProvenanceSnapshot = useMemo(
+    () => parseStoredAiProvenanceSnapshot(provenanceSnapshotJson),
+    [provenanceSnapshotJson]
+  );
   const provenanceSnapshot = useMemo(() => {
-    return provenanceMarkdownHash === hashMarkdownContent(content)
-      ? parseProvenanceSnapshot(provenanceSnapshotJson)
-      : null;
-  }, [content, provenanceMarkdownHash, provenanceSnapshotJson]);
+    if (provenanceMarkdownHash !== contentMarkdownHash || !storedProvenanceSnapshot) {
+      return null;
+    }
+
+    return storedProvenanceSnapshot.version === 1
+      ? storedProvenanceSnapshot.snapshot
+      : storedProvenanceSnapshot.snapshot;
+  }, [contentMarkdownHash, provenanceMarkdownHash, storedProvenanceSnapshot]);
+  const provenanceRanges = useMemo(() => {
+    if (
+      provenanceMarkdownHash !== contentMarkdownHash ||
+      !storedProvenanceSnapshot ||
+      storedProvenanceSnapshot.version !== 2
+    ) {
+      return [];
+    }
+
+    return filterValidAiProvenanceRanges(content, storedProvenanceSnapshot.ranges);
+  }, [content, contentMarkdownHash, provenanceMarkdownHash, storedProvenanceSnapshot]);
 
   const updateSlashCommandMenu = useCallback((nextMenu: SlashCommandMenuState | null) => {
     slashCommandMenuRef.current = nextMenu;
@@ -5474,6 +5787,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       immediatelyRender: false,
       onCreate: ({ editor: currentEditor }) => {
         editorInstanceRef.current = currentEditor;
+        renderedDirtyRef.current = false;
         void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
       },
       onUpdate: ({ editor: currentEditor }) => {
@@ -5481,6 +5795,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
           return;
         }
 
+        renderedDirtyRef.current = true;
         const nextMarkdown = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
         lastEditorContentRef.current = nextMarkdown;
 
@@ -5502,28 +5817,38 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const fileChanged = activeFilePathRef.current !== filePath;
     const isExternalContentChange = content !== lastEditorContentRef.current;
     const isProvenanceChange = provenanceSnapshotJson !== lastProvenanceSnapshotJsonRef.current;
+    const needsRangeSnapshot = !provenanceSnapshot && provenanceRanges.length > 0;
 
     activeFilePathRef.current = filePath;
     lastProvenanceSnapshotJsonRef.current = provenanceSnapshotJson;
 
-    if (!fileChanged && !isExternalContentChange && !isProvenanceChange) {
+    if (!fileChanged && !isExternalContentChange && !isProvenanceChange && !needsRangeSnapshot) {
       return;
     }
 
-    if (!fileChanged && !isProvenanceChange && transformMarkdownFromEditor(getEditorMarkdown(editor)) === content) {
+    if (
+      !needsRangeSnapshot &&
+      !fileChanged &&
+      !isProvenanceChange &&
+      transformMarkdownFromEditor(getEditorMarkdown(editor)) === content
+    ) {
       lastEditorContentRef.current = content;
       return;
     }
 
+    const nextProvenanceSnapshot =
+      provenanceSnapshot ?? createAiProvenanceDocument(editor, content, provenanceRanges) ?? null;
+
     syncingRef.current = true;
-    editor.commands.setContent(provenanceSnapshot ?? transformMarkdownForEditor(content), {
-      contentType: provenanceSnapshot ? 'json' : 'markdown',
+    editor.commands.setContent(nextProvenanceSnapshot ?? transformMarkdownForEditor(content), {
+      contentType: nextProvenanceSnapshot ? 'json' : 'markdown',
       emitUpdate: false
     });
     syncingRef.current = false;
     lastEditorContentRef.current = content;
+    renderedDirtyRef.current = false;
     void hydrateDocumentAssets(editor, filePath, resolveAssetForEditor);
-  }, [content, editor, filePath, provenanceSnapshot]);
+  }, [content, editor, filePath, provenanceRanges, provenanceSnapshot]);
 
   useEffect(() => {
     if (!editor) {
@@ -5581,6 +5906,74 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     }
   }, []);
 
+  const getMarkdownSelectionRange = useCallback((): MarkdownSelectionRange | null => {
+    const currentEditor = editorInstanceRef.current;
+
+    if (!currentEditor) {
+      return null;
+    }
+
+    const { from, to } = currentEditor.state.selection;
+
+    if (from === to) {
+      const cursorOffset = getCursorMarkdownOffset();
+      return typeof cursorOffset === 'number'
+        ? {
+            from: cursorOffset,
+            to: cursorOffset
+          }
+        : null;
+    }
+
+    const startMarker = createSourceCursorMarker();
+    const endMarker = createSourceCursorMarker();
+    const originalFrom = from;
+    const originalTo = to;
+
+    syncingRef.current = true;
+
+    try {
+      let transaction = currentEditor.state.tr.insertText(endMarker, originalTo);
+      transaction = transaction.insertText(startMarker, originalFrom);
+      currentEditor.view.dispatch(transaction);
+
+      const markdownWithMarkers = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
+      const startOffset = markdownWithMarkers.indexOf(startMarker);
+      const endOffsetWithStartMarker = markdownWithMarkers.indexOf(endMarker);
+      const startRange = findTextMarkerRange(currentEditor.state.doc, startMarker);
+      const endRange = findTextMarkerRange(currentEditor.state.doc, endMarker);
+      let cleanupTransaction = currentEditor.state.tr;
+
+      if (endRange) {
+        cleanupTransaction = cleanupTransaction.delete(endRange.from, endRange.to);
+      }
+
+      if (startRange) {
+        cleanupTransaction = cleanupTransaction.delete(startRange.from, startRange.to);
+      }
+
+      const selectionFrom = clampNumber(originalFrom, 0, cleanupTransaction.doc.content.size);
+      const selectionTo = clampNumber(originalTo, selectionFrom, cleanupTransaction.doc.content.size);
+      currentEditor.view.dispatch(
+        cleanupTransaction.setSelection(TextSelection.create(cleanupTransaction.doc, selectionFrom, selectionTo))
+      );
+
+      if (startOffset < 0 || endOffsetWithStartMarker < 0) {
+        return null;
+      }
+
+      return {
+        from: startOffset,
+        to: Math.max(startOffset, endOffsetWithStartMarker - startMarker.length)
+      };
+    } catch {
+      return null;
+    } finally {
+      syncingRef.current = false;
+      lastEditorContentRef.current = contentRef.current;
+    }
+  }, [getCursorMarkdownOffset]);
+
   const focusAtMarkdownOffset = useCallback((offset: number) => {
     const currentEditor = editorInstanceRef.current;
 
@@ -5626,47 +6019,47 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     }
   }, []);
 
-  const insertAiGeneratedContent = useCallback((markdown: string, sourceMessageId: string): boolean => {
+  const applyAiProvenanceContent = useCallback((markdown: string, ranges: AiGeneratedMarkdownRange[]): JSONContent | null => {
     const currentEditor = editorInstanceRef.current;
 
     if (!currentEditor) {
-      logAiInsertDebug('MarkdownEditor handle has no editor instance', {
+      logAiInsertDebug('MarkdownEditor handle has no editor instance for provenance content', {
         filePath
       });
-      return false;
+      return null;
     }
 
-    const beforeSize = currentEditor.state.doc.content.size;
-    const beforeSelection = {
-      from: currentEditor.state.selection.from,
-      to: currentEditor.state.selection.to
-    };
-    const inserted = insertAiGeneratedMarkdown(currentEditor, markdown, sourceMessageId);
-    const afterSize = currentEditor.state.doc.content.size;
-    const documentChanged = afterSize !== beforeSize;
+    const snapshot = createAiProvenanceDocument(currentEditor, markdown, ranges);
 
-    if (inserted || documentChanged) {
-      const nextMarkdown = transformMarkdownFromEditor(getEditorMarkdown(currentEditor));
-
-      if (nextMarkdown.trim() || !currentEditor.state.doc.textContent.trim()) {
-        lastEditorContentRef.current = nextMarkdown;
-        contentRef.current = nextMarkdown;
-        onChangeRef.current(nextMarkdown);
-      }
+    if (!snapshot) {
+      return null;
     }
 
-    logAiInsertDebug('MarkdownEditor handle finished insert command', {
-      afterSize,
-      beforeSelection,
-      beforeSize,
-      documentChanged,
+    syncingRef.current = true;
+
+    try {
+      currentEditor.commands.setContent(snapshot, {
+        contentType: 'json',
+        emitUpdate: false
+      });
+      currentEditor.commands.focus();
+      contentRef.current = markdown;
+      lastEditorContentRef.current = markdown;
+      renderedDirtyRef.current = false;
+      void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
+    } finally {
+      syncingRef.current = false;
+    }
+
+    logAiInsertDebug('MarkdownEditor applied AI provenance content', {
       filePath,
-      inserted,
-      sourceMessageId
+      rangeCount: ranges.length
     });
 
-    return inserted || documentChanged;
+    return snapshot;
   }, [filePath]);
+
+  const hasRenderedEdits = useCallback((): boolean => renderedDirtyRef.current, []);
 
   const getMarkdownContent = useCallback((): string => {
     const currentEditor = editorInstanceRef.current;
@@ -5685,11 +6078,21 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     () => ({
       focusAtMarkdownOffset,
       getCursorMarkdownOffset,
+      getMarkdownSelectionRange,
       getMarkdownContent,
       getProvenanceSnapshot,
-      insertAiGeneratedContent
+      applyAiProvenanceContent,
+      hasRenderedEdits
     }),
-    [focusAtMarkdownOffset, getCursorMarkdownOffset, getMarkdownContent, getProvenanceSnapshot, insertAiGeneratedContent]
+    [
+      applyAiProvenanceContent,
+      focusAtMarkdownOffset,
+      getCursorMarkdownOffset,
+      getMarkdownContent,
+      getMarkdownSelectionRange,
+      getProvenanceSnapshot,
+      hasRenderedEdits
+    ]
   );
 
   useEffect(() => {

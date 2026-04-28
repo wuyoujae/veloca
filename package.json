@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "lint": "eslint . --ext .ts,.tsx",
+    "test": "node app/test/ai-insert.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

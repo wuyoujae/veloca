@@ -56,6 +56,7 @@ import jsonLanguage from 'shiki/langs/json.mjs';
 import markdownLanguage from 'shiki/langs/markdown.mjs';
 import typescriptLanguage from 'shiki/langs/typescript.mjs';
 import vitesseLightTheme from 'shiki/themes/vitesse-light.mjs';
+import type { AiGeneratedMarkdownRange } from './ai-insert';
 
 const purifier = typeof window === 'undefined' ? null : DOMPurify(window);
 const mermaidCommandText = '/mermaid';
@@ -2046,6 +2047,59 @@ function unwrapVelocaInternalNodes(node: JSONContent): JSONContent {
     ...(content ? { content } : {}),
     ...(marks ? { marks } : {})
   };
+}
+
+export function createAiProvenanceDocument(
+  editor: Editor,
+  markdown: string,
+  ranges: AiGeneratedMarkdownRange[]
+): JSONContent | null {
+  if (!editor.markdown) {
+    return null;
+  }
+
+  const content: JSONContent[] = [];
+  let cursor = 0;
+
+  for (const range of ranges) {
+    if (
+      range.start < cursor ||
+      range.end <= range.start ||
+      range.end > markdown.length ||
+      markdown.slice(range.start, range.end) !== range.rawMarkdown
+    ) {
+      continue;
+    }
+
+    content.push(...parseMarkdownContent(editor, markdown.slice(cursor, range.start)));
+    content.push({
+      type: 'velocaAiGeneratedBlock',
+      attrs: {
+        createdAt: range.createdAt,
+        provenanceId: range.provenanceId,
+        sourceMessageId: range.sourceMessageId
+      },
+      content: parseMarkdownContent(editor, markdown.slice(range.start, range.end), true)
+    });
+    cursor = range.end;
+  }
+
+  content.push(...parseMarkdownContent(editor, markdown.slice(cursor)));
+
+  return {
+    type: 'doc',
+    content: content.length ? content : [{ type: 'paragraph' }]
+  };
+}
+
+function parseMarkdownContent(editor: Editor, markdown: string, fallbackParagraph = false): JSONContent[] {
+  if (!markdown.trim()) {
+    return fallbackParagraph ? [{ type: 'paragraph' }] : [];
+  }
+
+  const parsed = editor.markdown?.parse(transformMarkdownForEditor(markdown));
+
+  return parsed?.content?.length ? parsed.content : fallbackParagraph ? [{ type: 'paragraph' }] : [];
 }
 
 export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sourceMessageId: string): boolean {

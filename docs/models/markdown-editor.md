@@ -30,13 +30,16 @@
 - Agent 已接入后端流式事件通道，AI 回复会在同一条消息中按 `delta` 增量显示，完成后标记为完整状态，错误时展示错误文本并触发 toast。
 - AI 回复内容复用编辑器侧 `rich-markdown` 的 Markdown 渲染与 HTML 清洗能力，支持段落、列表、标题、引用、代码块、Mermaid 图表和表格等基础 Markdown；AI 回复完成后才会在回复下方显示复制按钮，用于复制原始 AI 回复文本。
 - AI 回复完成后，复制按钮右侧提供 `Insert` 按钮：
-  - 点击后将当前 AI 回复插入活动富文本编辑器；渲染视图中按当前选区/光标插入，源码视图会先切回渲染视图再插入，避免丢失富文本来源信息；
-  - 插入内容会被包裹为 Veloca 内部 `velocaAiGeneratedBlock`，其中每个 AI 生成文字会应用内部 `velocaAiGenerated` mark，并以蓝色文字下划线区分；
+  - 点击后以 Markdown 源码为唯一正文真相执行插入：先计算目标文档的源码插入位置，再把 AI 回复的原始 Markdown 片段写入当前草稿，避免由 TipTap 重新序列化整篇文档造成代码围栏、表格、HTML、空行或缩进格式丢失；
+  - 插入位置使用块级边界：如果光标位于代码块、表格、标题、列表或普通非空段落内部，AI 回复会插入到当前块之后；空文档或空段落会直接放入当前位置；
+  - AI 回复源码只做最小规范化：统一换行为 `\n`，去掉首尾空白行，保留内部 Markdown 结构；
+  - 渲染视图中的蓝色效果不是 Markdown 语法，而是根据 sidecar provenance range 把对应内容恢复为 Veloca 内部 `velocaAiGeneratedBlock`，再由 `.veloca-ai-generated-block` 使用 `--info` 蓝色下划线展示；
   - Markdown 正文保持纯净，保存时不会写入 Veloca 专属语法、HTML 标记或隐藏注释；
-  - 插入成功后会立即把富文本编辑器当前内容序列化回 Markdown 草稿，保证用户马上切换到源码视图时仍能看到刚插入的内容；
-  - AI 内容来源和用户编辑痕迹保存到 `document_provenance_snapshots` sidecar 表，只有 sidecar 中的 `markdown_hash` 与当前 Markdown 完全一致时才恢复内部渲染；
+  - 插入成功后会立即更新 Markdown 草稿；如果用户未在渲染视图继续编辑，切换源码模式不会再强制把 TipTap 文档重新序列化回 Markdown；
+  - AI 内容来源保存为 `document_provenance_snapshots` sidecar v2 结构，复用现有 `snapshot_json` 字段记录 `version: 2`、`markdownHash`、AI range、原始片段 hash 和渲染快照，不需要数据库迁移；
+  - 打开文档或源码被外部改写后，Veloca 会先按 hash 校验 provenance；不匹配时尝试用原始 AI Markdown 片段做唯一匹配重定位，无法唯一定位的 range 会被丢弃，避免把普通内容误判为 AI 内容；
   - 用户在 AI 生成块内新增或替换的文字会自动应用内部 `velocaAiEdited` mark，并将对应文字下划线改为黄色；删除内容不会标记剩余原文；
-  - 如果文件被外部工具或源码视图直接改写导致 hash 不匹配，Veloca 会放弃恢复 AI 来源样式，避免把普通内容误判为 AI 内容。
+  - 如果用户在渲染视图继续编辑，编辑器仍会把渲染态内容同步回 Markdown 草稿，并尽量保留 v2 provenance range；这类编辑属于显式富文本编辑，不再保证完全保留原始 Markdown 写法。
 - 画布浮动按钮有两种互斥状态：当用户离开最新对话纸张时，底部显示 `Back to latest`；当用户仍在最新对话但上滑打断流式自动贴底时，底部显示仅含图标的恢复自动滚动按钮。
 - 用户发送新消息或点击 `Back to latest` 会进入自动贴底状态；流式输出期间会持续滚动到最新内容底部，用户上滑会打断该状态，用户滚到画布底部或点击恢复按钮会重新进入该状态。
 - 画布左上 session 控件和右上折叠控件在打开或发送后短暂出现，用户 4 秒无画布操作后上滑淡出；用户上滑查看历史内容时重新出现，向下滚动时隐藏。
