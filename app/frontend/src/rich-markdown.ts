@@ -1464,6 +1464,10 @@ function createAiProvenancePlugin() {
         return null;
       }
 
+      if (ranges.some((range) => rangeContainsAiGeneratedBlockNode(newState.doc, range.from, range.to))) {
+        return null;
+      }
+
       const transaction = newState.tr;
       let changed = false;
 
@@ -1527,6 +1531,23 @@ function getInsertedTransactionRanges(transactions: readonly Transaction[]): Arr
   }
 
   return ranges;
+}
+
+function rangeContainsAiGeneratedBlockNode(doc: ProseMirrorNode, from: number, to: number): boolean {
+  let containsAiBlock = false;
+  const safeFrom = Math.max(0, Math.min(from, doc.content.size));
+  const safeTo = Math.max(safeFrom, Math.min(to, doc.content.size));
+
+  doc.nodesBetween(safeFrom, safeTo, (node) => {
+    if (node.type.name === 'velocaAiGeneratedBlock') {
+      containsAiBlock = true;
+      return false;
+    }
+
+    return !containsAiBlock;
+  });
+
+  return containsAiBlock;
 }
 
 function rangeTouchesAiGeneratedBlock(doc: ProseMirrorNode, from: number, to: number): boolean {
