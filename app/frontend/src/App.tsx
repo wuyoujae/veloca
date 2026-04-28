@@ -2549,15 +2549,6 @@ export function App(): JSX.Element {
     provenance?: Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>
   ) => {
     const targetTab = openTabs.find((tab) => tab.file.path === filePath);
-    const nextProvenance =
-      provenance ??
-      (targetTab
-        ? updateAiProvenanceForSourceContentChange(
-            targetTab.draftContent,
-            content,
-            targetTab.provenanceSnapshotJson
-          )
-        : undefined);
     const nextStatus: SaveStatus =
       targetTab && !targetTab.isUntitled && !isUntitledFilePath(filePath) && content === targetTab.savedContent
         ? 'saved'
@@ -2578,7 +2569,7 @@ export function App(): JSX.Element {
           ? {
               ...tab,
               draftContent: content,
-              ...(nextProvenance ?? {}),
+              ...(provenance ?? {}),
               status: (
                 !tab.isUntitled && !isUntitledFilePath(tab.file.path) && content === tab.savedContent
                   ? 'saved'
@@ -2593,12 +2584,29 @@ export function App(): JSX.Element {
     });
   };
 
+  const updateTabSourceDocumentContent = (filePath: string, content: string) => {
+    const targetTab = openTabs.find((tab) => tab.file.path === filePath);
+    const provenance = targetTab
+      ? updateAiProvenanceForSourceContentChange(targetTab.draftContent, content, targetTab.provenanceSnapshotJson)
+      : undefined;
+
+    updateTabDocumentContent(filePath, content, provenance);
+  };
+
   const updateDocumentContent = (content: string) => {
     if (!activeTabPath) {
       return;
     }
 
     updateTabDocumentContent(activeTabPath, content);
+  };
+
+  const updateSourceDocumentContent = (content: string) => {
+    if (!activeTabPath) {
+      return;
+    }
+
+    updateTabSourceDocumentContent(activeTabPath, content);
   };
 
   const loadWorkspace = async () => {
@@ -3762,7 +3770,7 @@ export function App(): JSX.Element {
 
                   sourceEditorHandlesRef.current.delete(tab.file.path);
                 }}
-                onChange={(content) => updateTabDocumentContent(tab.file.path, content)}
+                onChange={(content) => updateTabSourceDocumentContent(tab.file.path, content)}
                 {...restoreProps}
               />
             ) : (
@@ -4307,7 +4315,7 @@ export function App(): JSX.Element {
 
                       sourceEditorHandlesRef.current.delete(activeFile.path);
                     }}
-                    onChange={updateDocumentContent}
+                    onChange={updateSourceDocumentContent}
                     {...getCursorRestoreProps(activeFile.path, 'source')}
                   />
                 ) : (
