@@ -84,6 +84,7 @@ import {
   filterValidAiProvenanceRanges,
   relocateAiProvenanceRanges,
   shiftAiProvenanceRangesForPatch,
+  updateAiProvenanceRangesForSourceEdit,
   type AiGeneratedMarkdownRange,
   type AiMarkdownInsertionPatch,
   type AiProvenanceSnapshotV2,
@@ -828,6 +829,22 @@ function insertTemporaryTextIntoAiProvenanceRanges(
       rawMarkdownHash: hashMarkdownContent(rawMarkdown)
     };
   });
+}
+
+function updateAiProvenanceForSourceContentChange(
+  previousContent: string,
+  nextContent: string,
+  snapshotJson?: string | null
+): Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'> | undefined {
+  const parsed = parseStoredAiProvenanceSnapshot(snapshotJson);
+
+  if (!parsed || parsed.version !== 2) {
+    return undefined;
+  }
+
+  const ranges = updateAiProvenanceRangesForSourceEdit(previousContent, nextContent, parsed.ranges);
+
+  return buildAiProvenanceSnapshotFields(nextContent, ranges, null);
 }
 
 function getAgentWorkspaceRootPath(
@@ -2532,6 +2549,15 @@ export function App(): JSX.Element {
     provenance?: Pick<OpenEditorTab, 'provenanceMarkdownHash' | 'provenanceSnapshotJson'>
   ) => {
     const targetTab = openTabs.find((tab) => tab.file.path === filePath);
+    const nextProvenance =
+      provenance ??
+      (targetTab
+        ? updateAiProvenanceForSourceContentChange(
+            targetTab.draftContent,
+            content,
+            targetTab.provenanceSnapshotJson
+          )
+        : undefined);
     const nextStatus: SaveStatus =
       targetTab && !targetTab.isUntitled && !isUntitledFilePath(filePath) && content === targetTab.savedContent
         ? 'saved'
@@ -2552,7 +2578,7 @@ export function App(): JSX.Element {
           ? {
               ...tab,
               draftContent: content,
-              ...(provenance ?? {}),
+              ...(nextProvenance ?? {}),
               status: (
                 !tab.isUntitled && !isUntitledFilePath(tab.file.path) && content === tab.savedContent
                   ? 'saved'

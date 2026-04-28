@@ -3,7 +3,8 @@ import test from 'node:test';
 import {
   buildAiMarkdownInsertionPatch,
   relocateAiProvenanceRanges,
-  shiftAiProvenanceRangesForPatch
+  shiftAiProvenanceRangesForPatch,
+  updateAiProvenanceRangesForSourceEdit
 } from '../frontend/src/ai-insert.ts';
 
 test('inserts normalized AI markdown into an empty document', () => {
@@ -77,4 +78,46 @@ test('relocates an AI range only when its raw markdown has one clear match', () 
     start: 7
   });
   assert.equal(relocateAiProvenanceRanges('AI block\n\nAI block', [range]).length, 0);
+});
+
+test('keeps provenance ranges when source edits happen before AI content', () => {
+  const previousContent = 'Intro\n\nAI block';
+  const nextContent = 'Intro changed\n\nAI block';
+  const range = {
+    createdAt: 1,
+    end: previousContent.length,
+    id: 'range-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: 'AI block',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: previousContent.indexOf('AI block')
+  };
+
+  const [updated] = updateAiProvenanceRangesForSourceEdit(previousContent, nextContent, [range]);
+
+  assert.equal(updated.start, nextContent.indexOf('AI block'));
+  assert.equal(updated.end, nextContent.length);
+  assert.equal(updated.rawMarkdown, 'AI block');
+});
+
+test('keeps provenance ranges when source edits happen inside AI content', () => {
+  const previousContent = 'Intro\n\nAI block\n\nTail';
+  const nextContent = 'Intro\n\nAI edited block\n\nTail';
+  const range = {
+    createdAt: 1,
+    end: previousContent.indexOf('\n\nTail'),
+    id: 'range-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: 'AI block',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: previousContent.indexOf('AI block')
+  };
+
+  const [updated] = updateAiProvenanceRangesForSourceEdit(previousContent, nextContent, [range]);
+
+  assert.equal(updated.start, nextContent.indexOf('AI edited block'));
+  assert.equal(updated.end, nextContent.indexOf('\n\nTail'));
+  assert.equal(updated.rawMarkdown, 'AI edited block');
 });

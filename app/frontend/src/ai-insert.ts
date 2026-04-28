@@ -175,6 +175,97 @@ export function filterValidAiProvenanceRanges(
   return valid;
 }
 
+export function updateAiProvenanceRangesForSourceEdit(
+  previousContent: string,
+  nextContent: string,
+  ranges: AiGeneratedMarkdownRange[]
+): AiGeneratedMarkdownRange[] {
+  if (!ranges.length || previousContent === nextContent) {
+    return filterValidAiProvenanceRanges(nextContent, ranges);
+  }
+
+  const edit = getSourceEditRange(previousContent, nextContent);
+  const insertedText = nextContent.slice(edit.next.from, edit.next.to);
+  const delta = insertedText.length - (edit.previous.to - edit.previous.from);
+
+  return ranges
+    .flatMap((range) => {
+      if (range.end <= edit.previous.from) {
+        return [range];
+      }
+
+      if (range.start >= edit.previous.to) {
+        return [
+          {
+            ...range,
+            end: range.end + delta,
+            start: range.start + delta
+          }
+        ];
+      }
+
+      const before = edit.previous.from > range.start ? previousContent.slice(range.start, edit.previous.from) : '';
+      const after = edit.previous.to < range.end ? previousContent.slice(edit.previous.to, range.end) : '';
+      const rawMarkdown = `${before}${insertedText}${after}`;
+      const start = edit.previous.from <= range.start ? edit.next.from : range.start;
+
+      if (!rawMarkdown) {
+        return [];
+      }
+
+      return [
+        {
+          ...range,
+          end: start + rawMarkdown.length,
+          rawMarkdown,
+          rawMarkdownHash: hashString(rawMarkdown),
+          start
+        }
+      ];
+    })
+    .sort((left, right) => left.start - right.start);
+}
+
+function getSourceEditRange(
+  previousContent: string,
+  nextContent: string
+): { next: MarkdownSelectionRange; previous: MarkdownSelectionRange } {
+  let prefixLength = 0;
+  const maxPrefixLength = Math.min(previousContent.length, nextContent.length);
+
+  while (
+    prefixLength < maxPrefixLength &&
+    previousContent.charCodeAt(prefixLength) === nextContent.charCodeAt(prefixLength)
+  ) {
+    prefixLength += 1;
+  }
+
+  let suffixLength = 0;
+  const maxSuffixLength = Math.min(
+    previousContent.length - prefixLength,
+    nextContent.length - prefixLength
+  );
+
+  while (
+    suffixLength < maxSuffixLength &&
+    previousContent.charCodeAt(previousContent.length - 1 - suffixLength) ===
+      nextContent.charCodeAt(nextContent.length - 1 - suffixLength)
+  ) {
+    suffixLength += 1;
+  }
+
+  return {
+    next: {
+      from: prefixLength,
+      to: nextContent.length - suffixLength
+    },
+    previous: {
+      from: prefixLength,
+      to: previousContent.length - suffixLength
+    }
+  };
+}
+
 function normalizeSelection(selection: MarkdownSelectionRange | null, contentLength: number): MarkdownSelectionRange {
   const from = clamp(selection?.from ?? contentLength, 0, contentLength);
   const to = clamp(selection?.to ?? from, 0, contentLength);
@@ -480,4 +571,15 @@ function overlapsExisting(ranges: AiGeneratedMarkdownRange[], start: number, end
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, max));
+}
+
+function hashString(content: string): string {
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
