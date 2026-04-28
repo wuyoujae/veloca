@@ -625,6 +625,20 @@ function parseStoredAiProvenanceSnapshot(snapshotJson?: string | null): StoredAi
 
 function normalizeAiGeneratedSnapshot(node: JSONContent, insideAiBlock = false): JSONContent {
   const nextInsideAiBlock = insideAiBlock || node.type === 'velocaAiGeneratedBlock';
+  const nextInsideCodeBlock = node.type === 'codeBlock';
+
+  if (nextInsideAiBlock && node.type === 'text' && !nextInsideCodeBlock) {
+    const marks = node.marks ?? [];
+    const hasGeneratedMark = marks.some((mark) => mark.type === 'velocaAiGenerated');
+    const hasEditedMark = marks.some((mark) => mark.type === 'velocaAiEdited');
+
+    if (!hasGeneratedMark && !hasEditedMark) {
+      return {
+        ...node,
+        marks: [...marks, { type: 'velocaAiGenerated' }]
+      };
+    }
+  }
 
   if (!node.content?.length) {
     return node;
@@ -632,7 +646,9 @@ function normalizeAiGeneratedSnapshot(node: JSONContent, insideAiBlock = false):
 
   return {
     ...node,
-    content: node.content.map((child) => normalizeAiGeneratedSnapshot(child, nextInsideAiBlock))
+    content: node.content.map((child) =>
+      normalizeAiGeneratedSnapshot(child, nextInsideAiBlock && node.type !== 'codeBlock')
+    )
   };
 }
 

@@ -33,7 +33,7 @@
   - 点击后以 Markdown 源码为唯一正文真相执行插入：先计算目标文档的源码插入位置，再把 AI 回复的原始 Markdown 片段写入当前草稿，避免由 TipTap 重新序列化整篇文档造成代码围栏、表格、HTML、空行或缩进格式丢失；
   - 插入位置使用块级边界：如果光标位于代码块、表格、标题、列表或普通非空段落内部，AI 回复会插入到当前块之后；空文档或空段落会直接放入当前位置；
   - AI 回复源码只做最小规范化：统一换行为 `\n`，去掉首尾空白行，保留内部 Markdown 结构；
-  - 渲染视图中的蓝色效果不是 Markdown 语法，而是根据 sidecar provenance range 把对应内容恢复为 Veloca 内部 `velocaAiGeneratedBlock`，再由 `.veloca-ai-generated-block` 使用 `--info` 蓝色下划线展示；
+  - 渲染视图中的蓝色效果不是 Markdown 语法，而是根据 sidecar provenance range 把对应内容恢复为 Veloca 内部 `velocaAiGeneratedBlock`，并给 AI 原文文本应用内部 `velocaAiGenerated` mark，再由 `.veloca-ai-generated-text` 使用 `--info` 蓝色下划线展示；
   - Markdown 正文保持纯净，保存时不会写入 Veloca 专属语法、HTML 标记或隐藏注释；
   - 插入成功后会立即更新 Markdown 草稿；如果用户未在渲染视图继续编辑，切换源码模式不会再强制把 TipTap 文档重新序列化回 Markdown；
   - AI 内容来源保存为 `document_provenance_snapshots` sidecar v2 结构，复用现有 `snapshot_json` 字段记录 `version: 2`、`markdownHash`、AI range、原始片段 hash 和渲染快照，不需要数据库迁移；

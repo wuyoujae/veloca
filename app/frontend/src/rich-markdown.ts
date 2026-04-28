@@ -2079,7 +2079,7 @@ export function createAiProvenanceDocument(
         provenanceId: range.provenanceId,
         sourceMessageId: range.sourceMessageId
       },
-      content: parseMarkdownContent(editor, markdown.slice(range.start, range.end), true)
+      content: markAiGeneratedContent(parseMarkdownContent(editor, markdown.slice(range.start, range.end), true))
     });
     cursor = range.end;
   }
@@ -2100,6 +2100,36 @@ function parseMarkdownContent(editor: Editor, markdown: string, fallbackParagrap
   const parsed = editor.markdown?.parse(transformMarkdownForEditor(markdown));
 
   return parsed?.content?.length ? parsed.content : fallbackParagraph ? [{ type: 'paragraph' }] : [];
+}
+
+function markAiGeneratedContent(content: JSONContent[]): JSONContent[] {
+  return content.map((node) => markAiGeneratedNode(node));
+}
+
+function markAiGeneratedNode(node: JSONContent, insideCodeBlock = false): JSONContent {
+  const nextInsideCodeBlock = insideCodeBlock || node.type === 'codeBlock';
+
+  if (node.type === 'text' && !nextInsideCodeBlock) {
+    const marks = node.marks ?? [];
+    const hasGeneratedMark = marks.some((mark) => mark.type === 'velocaAiGenerated');
+    const hasEditedMark = marks.some((mark) => mark.type === 'velocaAiEdited');
+
+    if (!hasGeneratedMark && !hasEditedMark) {
+      return {
+        ...node,
+        marks: [...marks, { type: 'velocaAiGenerated' }]
+      };
+    }
+  }
+
+  if (!node.content?.length) {
+    return node;
+  }
+
+  return {
+    ...node,
+    content: node.content.map((child) => markAiGeneratedNode(child, nextInsideCodeBlock))
+  };
 }
 
 export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sourceMessageId: string): boolean {
@@ -2128,7 +2158,7 @@ export function insertAiGeneratedMarkdown(editor: Editor, markdown: string, sour
             provenanceId,
             sourceMessageId
           },
-          content
+          content: markAiGeneratedContent(content)
         },
         {
           updateSelection: true
