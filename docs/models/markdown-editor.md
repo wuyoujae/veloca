@@ -120,6 +120,10 @@ flowchart TD
   - 源代码视图切回渲染视图时，textarea 的 `selectionStart` 会作为 Markdown offset，通过临时 marker 恢复到 TipTap 文档中的相近位置；
   - 源代码视图切回渲染视图时，临时 marker 文档只用于定位光标；定位完成后必须恢复原始 provenance snapshot，避免把带黄色 `velocaAiEdited` mark 的 AI 内容替换成由 range 重建出来的全蓝 AI block；
   - 如果 offset 落在 Markdown 语法边界或无法精确映射，则回退到最近可用文本位置。
+- 编辑时视口跟随当前输入位置：
+  - 渲染视图在 TipTap 文档发生用户输入更新后，根据当前 selection 坐标把外层滚动容器拉回光标附近；
+  - 源代码视图在 textarea 输入后用镜像节点计算 `selectionStart` 对应的可视坐标，再滚动外层容器；
+  - 跟随只在实际输入时触发，用户单纯滚动浏览长文档不会被强制拉回光标。
 
 ## 关闭标签
 

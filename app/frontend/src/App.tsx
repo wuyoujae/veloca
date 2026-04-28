@@ -5516,6 +5516,75 @@ function getClosestTextSelection(editor: TiptapEditor, pos: number): Selection {
   return TextSelection.near(resolvedPos);
 }
 
+function getEditorScrollContainer(element: HTMLElement | null): HTMLElement | null {
+  return element?.closest<HTMLElement>('.editor-pane-scroll, .editor-scroll-area') ?? null;
+}
+
+function scrollRectIntoEditorView(scrollContainer: HTMLElement, targetRect: Pick<DOMRect, 'top' | 'bottom'>): void {
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const padding = Math.min(96, Math.max(32, containerRect.height * 0.18));
+  const topLimit = containerRect.top + padding;
+  const bottomLimit = containerRect.bottom - padding;
+
+  if (targetRect.top < topLimit) {
+    scrollContainer.scrollTop -= topLimit - targetRect.top;
+    return;
+  }
+
+  if (targetRect.bottom > bottomLimit) {
+    scrollContainer.scrollTop += targetRect.bottom - bottomLimit;
+  }
+}
+
+function getTextareaCaretViewportRect(textarea: HTMLTextAreaElement): DOMRect | null {
+  const style = window.getComputedStyle(textarea);
+  const textareaRect = textarea.getBoundingClientRect();
+  const mirror = document.createElement('div');
+  const marker = document.createElement('span');
+  const caretOffset = clampNumber(textarea.selectionStart ?? textarea.value.length, 0, textarea.value.length);
+  const mirroredStyleProperties = [
+    'boxSizing',
+    'fontFamily',
+    'fontSize',
+    'fontStyle',
+    'fontWeight',
+    'letterSpacing',
+    'lineHeight',
+    'paddingTop',
+    'paddingRight',
+    'paddingBottom',
+    'paddingLeft',
+    'textAlign',
+    'textTransform',
+    'tabSize',
+    'wordBreak'
+  ] as const;
+
+  mirroredStyleProperties.forEach((property) => {
+    mirror.style[property] = style[property];
+  });
+
+  mirror.style.position = 'fixed';
+  mirror.style.visibility = 'hidden';
+  mirror.style.pointerEvents = 'none';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.overflowWrap = 'break-word';
+  mirror.style.top = `${textareaRect.top}px`;
+  mirror.style.left = `${textareaRect.left}px`;
+  mirror.style.width = `${textareaRect.width}px`;
+  mirror.style.minHeight = '0';
+
+  marker.textContent = '\u200b';
+  mirror.append(document.createTextNode(textarea.value.slice(0, caretOffset)), marker);
+  document.body.append(mirror);
+
+  try {
+    return marker.getBoundingClientRect();
+  } finally {
+    mirror.remove();
+  }
+}
+
 const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdownEditorProps>(
   function SourceMarkdownEditor({
     content,
@@ -5526,6 +5595,7 @@ const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdo
     onChange
   }: SourceMarkdownEditorProps, ref): JSX.Element {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    const cursorFollowFrameRef = useRef(0);
 
     const resizeTextarea = useCallback(() => {
       const textarea = textareaRef.current;
@@ -5537,6 +5607,25 @@ const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdo
       textarea.style.height = 'auto';
       textarea.style.height = `${Math.max(480, textarea.scrollHeight)}px`;
     }, []);
+
+    const queueCursorFollow = useCallback(() => {
+      window.cancelAnimationFrame(cursorFollowFrameRef.current);
+      cursorFollowFrameRef.current = window.requestAnimationFrame(() => {
+        const textarea = textareaRef.current;
+
+        if (!textarea || document.activeElement !== textarea) {
+          return;
+        }
+
+        resizeTextarea();
+        const caretRect = getTextareaCaretViewportRect(textarea);
+        const scrollContainer = getEditorScrollContainer(textarea);
+
+        if (caretRect && scrollContainer) {
+          scrollRectIntoEditorView(scrollContainer, caretRect);
+        }
+      });
+    }, [resizeTextarea]);
 
     const focusAtOffset = useCallback((offset: number) => {
       const textarea = textareaRef.current;
@@ -5582,6 +5671,10 @@ const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdo
     }, [content, resizeTextarea]);
 
     useEffect(() => {
+      return () => window.cancelAnimationFrame(cursorFollowFrameRef.current);
+    }, []);
+
+    useEffect(() => {
       if (typeof restoreCursorOffset !== 'number' || restoreCursorSequence === null || restoreCursorSequence === undefined) {
         return;
       }
@@ -5600,8 +5693,11 @@ const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdo
           ref={textareaRef}
           spellCheck={false}
           value={content}
-          onChange={(event) => onChange(event.currentTarget.value)}
-          onInput={resizeTextarea}
+          onChange={(event) => {
+            onChange(event.currentTarget.value);
+            resizeTextarea();
+            queueCursorFollow();
+          }}
         />
       </div>
     );
@@ -5631,6 +5727,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   const onToastRef = useRef(onToast);
   const syncingRef = useRef(false);
   const renderedDirtyRef = useRef(false);
+  const cursorFollowFrameRef = useRef(0);
   const [tableControls, setTableControls] = useState<TableControlsState | null>(null);
   const [tableGridOpen, setTableGridOpen] = useState(false);
   const [tableMenuOpen, setTableMenuOpen] = useState(false);
@@ -5856,6 +5953,27 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     []
   );
 
+  const queueCursorFollow = useCallback((currentEditor: TiptapEditor) => {
+    window.cancelAnimationFrame(cursorFollowFrameRef.current);
+    cursorFollowFrameRef.current = window.requestAnimationFrame(() => {
+      if (!currentEditor.isFocused || editorInstanceRef.current !== currentEditor) {
+        return;
+      }
+
+      const scrollContainer = getEditorScrollContainer(editorShellRef.current);
+
+      if (!scrollContainer) {
+        return;
+      }
+
+      try {
+        scrollRectIntoEditorView(scrollContainer, currentEditor.view.coordsAtPos(currentEditor.state.selection.from));
+      } catch {
+        // Some node selections do not expose usable caret coordinates.
+      }
+    });
+  }, []);
+
   const editor = useEditor(
     {
       content: provenanceSnapshot ?? transformMarkdownForEditor(content),
@@ -5976,10 +6094,11 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
           onChangeRef.current(nextMarkdown);
         }
 
+        queueCursorFollow(currentEditor);
         void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
       }
     },
-    [filePath, handleSlashCommandKeyDown]
+    [filePath, handleSlashCommandKeyDown, queueCursorFollow]
   );
 
   useEffect(() => {
@@ -6044,6 +6163,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
   useEffect(() => {
     editorInstanceRef.current = editor;
   }, [editor]);
+
+  useEffect(() => {
+    return () => window.cancelAnimationFrame(cursorFollowFrameRef.current);
+  }, []);
 
   const getCursorMarkdownOffset = useCallback((): number | null => {
     const currentEditor = editorInstanceRef.current;
