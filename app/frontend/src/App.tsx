@@ -700,6 +700,7 @@ function normalizeAiProvenanceRange(value: unknown): AiGeneratedMarkdownRange | 
 
   return {
     createdAt,
+    editedRanges: normalizeAiEditedRanges(value.editedRanges, Math.max(0, end - start)),
     end,
     id: typeof value.id === 'string' && value.id ? value.id : createAiProvenanceId('range'),
     provenanceId:
@@ -711,6 +712,37 @@ function normalizeAiProvenanceRange(value: unknown): AiGeneratedMarkdownRange | 
     sourceMessageId: value.sourceMessageId,
     start
   };
+}
+
+function normalizeAiEditedRanges(value: unknown, rawMarkdownLength: number): MarkdownSelectionRange[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const ranges = value
+    .flatMap((range) => {
+      if (!isRecord(range)) {
+        return [];
+      }
+
+      const from = typeof range.from === 'number' ? range.from : Number.NaN;
+      const to = typeof range.to === 'number' ? range.to : Number.NaN;
+
+      if (!Number.isFinite(from) || !Number.isFinite(to)) {
+        return [];
+      }
+
+      return [
+        {
+          from: clampNumber(from, 0, rawMarkdownLength),
+          to: clampNumber(to, 0, rawMarkdownLength)
+        }
+      ];
+    })
+    .filter((range) => range.to > range.from)
+    .sort((left, right) => left.from - right.from);
+
+  return ranges.length ? ranges : undefined;
 }
 
 function createAiProvenanceId(prefix: string): string {

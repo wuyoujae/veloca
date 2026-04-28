@@ -252,6 +252,7 @@ test('extracts edited AI provenance ranges from the rendered editor snapshot', (
   assert.equal(range.start, markdown.indexOf('AI edited block'));
   assert.equal(range.end, range.start + 'AI edited block'.length);
   assert.equal(range.rawMarkdown, 'AI edited block');
+  assert.deepEqual(range.editedRanges, [{ from: 3, to: 9 }]);
   assert.equal(range.provenanceId, 'ai-a');
   assert.equal(range.sourceMessageId, 'message-a');
 });
@@ -329,6 +330,51 @@ test('marks source edits inside previously unedited AI content as edited', () =>
     { text: 'source ', mark: 'velocaAiEdited' },
     { text: 'block', mark: 'velocaAiGenerated' }
   ]);
+});
+
+test('marks only inserted Chinese source text as edited inside AI content', () => {
+  const manager = new MarkdownManager({ extensions: [StarterKit] });
+  const editor = { markdown: manager };
+  const previousSnapshot = buildAiMarkSnapshot('你好呀你今天吃饭了吗', null);
+  const markdown = 'Intro\n\n你好呀ABC你今天吃饭了吗\n\nTail';
+  const range = {
+    createdAt: 123,
+    end: markdown.indexOf('\n\nTail'),
+    id: 'range-ai-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: '你好呀ABC你今天吃饭了吗',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: markdown.indexOf('你好呀ABC你今天吃饭了吗')
+  };
+  const snapshot = createAiProvenanceDocument(editor, markdown, [range], previousSnapshot);
+  const marks = collectAiTextMarks(snapshot);
+
+  assert.deepEqual(marks, [
+    { text: '你好呀', mark: 'velocaAiGenerated' },
+    { text: 'ABC', mark: 'velocaAiEdited' },
+    { text: '你今天吃饭了吗', mark: 'velocaAiGenerated' }
+  ]);
+});
+
+test('tracks only inserted Chinese source text in AI edited ranges', () => {
+  const previousContent = 'Intro\n\n你好呀你今天吃饭了吗\n\nTail';
+  const nextContent = 'Intro\n\n你好呀ABC你今天吃饭了吗\n\nTail';
+  const previousRange = {
+    createdAt: 123,
+    editedRanges: [],
+    end: previousContent.indexOf('\n\nTail'),
+    id: 'range-ai-a',
+    provenanceId: 'ai-a',
+    rawMarkdown: '你好呀你今天吃饭了吗',
+    rawMarkdownHash: 'hash-a',
+    sourceMessageId: 'message-a',
+    start: previousContent.indexOf('你好呀你今天吃饭了吗')
+  };
+  const [nextRange] = updateAiProvenanceRangesForSourceEdit(previousContent, nextContent, [previousRange]);
+
+  assert.equal(nextRange.rawMarkdown, '你好呀ABC你今天吃饭了吗');
+  assert.deepEqual(nextRange.editedRanges, [{ from: 3, to: 6 }]);
 });
 
 function buildAiMarkSnapshot(aiText, editedText = 'edited') {

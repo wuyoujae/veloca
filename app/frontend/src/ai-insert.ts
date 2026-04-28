@@ -7,6 +7,7 @@ export interface MarkdownSelectionRange {
 
 export interface AiGeneratedMarkdownRange {
   createdAt: number;
+  editedRanges?: MarkdownSelectionRange[];
   end: number;
   id: string;
   provenanceId: string;
@@ -209,6 +210,10 @@ export function updateAiProvenanceRangesForSourceEdit(
       const after = edit.previous.to < range.end ? previousContent.slice(edit.previous.to, range.end) : '';
       const rawMarkdown = `${before}${insertedText}${after}`;
       const start = edit.previous.from <= range.start ? edit.next.from : range.start;
+      const replaced = {
+        from: clamp(edit.previous.from - range.start, 0, range.rawMarkdown.length),
+        to: clamp(edit.previous.to - range.start, 0, range.rawMarkdown.length)
+      };
 
       if (!rawMarkdown) {
         return [];
@@ -217,6 +222,7 @@ export function updateAiProvenanceRangesForSourceEdit(
       return [
         {
           ...range,
+          editedRanges: updateEditedRangesForPatch(range.editedRanges ?? [], replaced, insertedText.length, rawMarkdown.length),
           end: start + rawMarkdown.length,
           rawMarkdown,
           rawMarkdownHash: hashString(rawMarkdown),
@@ -225,6 +231,79 @@ export function updateAiProvenanceRangesForSourceEdit(
       ];
     })
     .sort((left, right) => left.start - right.start);
+}
+
+function updateEditedRangesForPatch(
+  ranges: MarkdownSelectionRange[],
+  replaced: MarkdownSelectionRange,
+  insertedLength: number,
+  rawMarkdownLength: number
+): MarkdownSelectionRange[] {
+  const removedLength = replaced.to - replaced.from;
+  const delta = insertedLength - removedLength;
+  const nextRanges: MarkdownSelectionRange[] = [];
+
+  for (const range of ranges) {
+    if (range.to <= replaced.from) {
+      nextRanges.push(range);
+      continue;
+    }
+
+    if (range.from >= replaced.to) {
+      nextRanges.push({
+        from: range.from + delta,
+        to: range.to + delta
+      });
+      continue;
+    }
+
+    if (range.from < replaced.from) {
+      nextRanges.push({
+        from: range.from,
+        to: replaced.from
+      });
+    }
+
+    if (range.to > replaced.to) {
+      nextRanges.push({
+        from: replaced.from + insertedLength,
+        to: replaced.from + insertedLength + (range.to - replaced.to)
+      });
+    }
+  }
+
+  if (insertedLength > 0) {
+    nextRanges.push({
+      from: replaced.from,
+      to: replaced.from + insertedLength
+    });
+  }
+
+  return mergeMarkdownRanges(nextRanges, rawMarkdownLength);
+}
+
+function mergeMarkdownRanges(ranges: MarkdownSelectionRange[], contentLength: number): MarkdownSelectionRange[] {
+  const sortedRanges = ranges
+    .map((range) => ({
+      from: clamp(range.from, 0, contentLength),
+      to: clamp(range.to, 0, contentLength)
+    }))
+    .filter((range) => range.to > range.from)
+    .sort((left, right) => left.from - right.from);
+  const merged: MarkdownSelectionRange[] = [];
+
+  for (const range of sortedRanges) {
+    const previous = merged.at(-1);
+
+    if (previous && range.from <= previous.to) {
+      previous.to = Math.max(previous.to, range.to);
+      continue;
+    }
+
+    merged.push({ ...range });
+  }
+
+  return merged;
 }
 
 function getSourceEditRange(

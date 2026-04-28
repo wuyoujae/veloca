@@ -2087,6 +2087,7 @@ export function getAiProvenanceRangesFromEditor(
 
   const blocks: Array<{
     createdAt: number;
+    editedRanges?: AiEditedMarkdownRange[];
     provenanceId: string;
     rawMarkdown: string;
     sourceMessageId: string;
@@ -2098,7 +2099,11 @@ export function getAiProvenanceRangesFromEditor(
     }
 
     const attrs = node.attrs as Partial<AiGeneratedBlockAttrs>;
-    const rawMarkdown = serializeAiGeneratedBlockMarkdown(editor, node.toJSON() as JSONContent);
+    const markedMarkdown = serializeAiGeneratedBlockMarkdown(
+      editor,
+      insertEditMarkersIntoSnapshotNode(node.toJSON() as JSONContent)
+    );
+    const { editedRanges, rawMarkdown } = extractAiEditMarkers(markedMarkdown);
 
     if (rawMarkdown.trim()) {
       const provenanceId = typeof attrs.provenanceId === 'string' && attrs.provenanceId
@@ -2107,6 +2112,7 @@ export function getAiProvenanceRangesFromEditor(
 
       blocks.push({
         createdAt: typeof attrs.createdAt === 'number' ? attrs.createdAt : 0,
+        editedRanges,
         provenanceId,
         rawMarkdown,
         sourceMessageId: typeof attrs.sourceMessageId === 'string' ? attrs.sourceMessageId : ''
@@ -2130,6 +2136,7 @@ export function getAiProvenanceRangesFromEditor(
 
     ranges.push({
       createdAt: block.createdAt,
+      editedRanges: block.editedRanges,
       end,
       id: `range-${block.provenanceId}`,
       provenanceId: block.provenanceId,
@@ -2211,7 +2218,7 @@ export function createAiProvenanceDocument(
     }
 
     const template = findAiMarkTemplate(markTemplates, range);
-    const editedRanges = template ? mapEditedRangesToMarkdown(template, range.rawMarkdown) : [];
+    const editedRanges = range.editedRanges ?? (template ? mapEditedRangesToMarkdown(template, range.rawMarkdown) : []);
     const aiMarkdown = editedRanges.length ? insertAiEditMarkers(range.rawMarkdown, editedRanges) : range.rawMarkdown;
     const aiContent = parseMarkdownContent(editor, markdown.slice(range.start, range.end), true);
     const markedAiContent = editedRanges.length
