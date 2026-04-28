@@ -8,7 +8,7 @@ import {
   shiftAiProvenanceRangesForPatch,
   updateAiProvenanceRangesForSourceEdit
 } from '../frontend/src/ai-insert.ts';
-import { getEditorMarkdown } from '../frontend/src/rich-markdown.ts';
+import { getAiProvenanceRangesFromEditor, getEditorMarkdown } from '../frontend/src/rich-markdown.ts';
 
 test('inserts normalized AI markdown into an empty document', () => {
   const patch = buildAiMarkdownInsertionPatch('', '\n\n# Title\n\nBody\n\n', { from: 0, to: 0 });
@@ -177,4 +177,77 @@ test('serializes rendered editor markdown with block separators', () => {
     getEditorMarkdown(editor),
     '你好！我是 Loomber 项目的开发者。\n\n### 项目总结：Loomber\n\n简单来说，**Loomber** 是一个 Markdown 编辑器。\n\n- 后端：处理文件上传。'
   );
+});
+
+test('extracts edited AI provenance ranges from the rendered editor snapshot', () => {
+  const manager = new MarkdownManager({ extensions: [StarterKit] });
+  const doc = {
+    type: 'doc',
+    content: [
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Intro' }]
+      },
+      {
+        type: 'velocaAiGeneratedBlock',
+        attrs: {
+          createdAt: 123,
+          provenanceId: 'ai-a',
+          sourceMessageId: 'message-a'
+        },
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'AI ', marks: [{ type: 'velocaAiGenerated' }] },
+              { type: 'text', text: 'edited', marks: [{ type: 'velocaAiEdited' }] },
+              { type: 'text', text: ' block', marks: [{ type: 'velocaAiGenerated' }] }
+            ]
+          }
+        ]
+      },
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', text: 'Tail' }]
+      }
+    ]
+  };
+  const walkDoc = (callback) => {
+    const walk = (node) => {
+      const shouldContinue = callback({
+        attrs: node.attrs ?? {},
+        toJSON: () => node,
+        type: { name: node.type }
+      });
+
+      if (shouldContinue === false) {
+        return;
+      }
+
+      for (const child of node.content ?? []) {
+        walk(child);
+      }
+    };
+
+    walk(doc);
+  };
+  const editor = {
+    getMarkdown: () => '',
+    markdown: manager,
+    state: {
+      doc: {
+        descendants: walkDoc,
+        toJSON: () => doc
+      }
+    }
+  };
+  const markdown = getEditorMarkdown(editor);
+  const [range] = getAiProvenanceRangesFromEditor(editor, markdown);
+
+  assert.equal(markdown, 'Intro\n\nAI edited block\n\nTail');
+  assert.equal(range.start, markdown.indexOf('AI edited block'));
+  assert.equal(range.end, range.start + 'AI edited block'.length);
+  assert.equal(range.rawMarkdown, 'AI edited block');
+  assert.equal(range.provenanceId, 'ai-a');
+  assert.equal(range.sourceMessageId, 'message-a');
 });

@@ -2065,6 +2065,95 @@ export function getEditorMarkdown(editor: Editor): string {
   return editor.markdown?.serialize(json) ?? editor.getMarkdown();
 }
 
+export function getAiProvenanceRangesFromEditor(
+  editor: Editor,
+  markdown = transformMarkdownFromEditor(getEditorMarkdown(editor))
+): AiGeneratedMarkdownRange[] {
+  if (!editor.markdown) {
+    return [];
+  }
+
+  const blocks: Array<{
+    createdAt: number;
+    provenanceId: string;
+    rawMarkdown: string;
+    sourceMessageId: string;
+  }> = [];
+
+  editor.state.doc.descendants((node) => {
+    if (node.type.name !== 'velocaAiGeneratedBlock') {
+      return true;
+    }
+
+    const attrs = node.attrs as Partial<AiGeneratedBlockAttrs>;
+    const rawMarkdown = serializeAiGeneratedBlockMarkdown(editor, node.toJSON() as JSONContent);
+
+    if (rawMarkdown.trim()) {
+      const provenanceId = typeof attrs.provenanceId === 'string' && attrs.provenanceId
+        ? attrs.provenanceId
+        : `ai-rendered-${blocks.length}`;
+
+      blocks.push({
+        createdAt: typeof attrs.createdAt === 'number' ? attrs.createdAt : 0,
+        provenanceId,
+        rawMarkdown,
+        sourceMessageId: typeof attrs.sourceMessageId === 'string' ? attrs.sourceMessageId : ''
+      });
+    }
+
+    return false;
+  });
+
+  const ranges: AiGeneratedMarkdownRange[] = [];
+  let cursor = 0;
+
+  for (const block of blocks) {
+    const start = markdown.indexOf(block.rawMarkdown, cursor);
+
+    if (start < 0) {
+      continue;
+    }
+
+    const end = start + block.rawMarkdown.length;
+
+    ranges.push({
+      createdAt: block.createdAt,
+      end,
+      id: `range-${block.provenanceId}`,
+      provenanceId: block.provenanceId,
+      rawMarkdown: block.rawMarkdown,
+      rawMarkdownHash: hashMarkdownString(block.rawMarkdown),
+      sourceMessageId: block.sourceMessageId,
+      start
+    });
+    cursor = end;
+  }
+
+  return ranges;
+}
+
+function serializeAiGeneratedBlockMarkdown(editor: Editor, block: JSONContent): string {
+  const doc: JSONContent = {
+    type: 'doc',
+    content: block.content ?? []
+  };
+
+  const rawMarkdown = editor.markdown?.serialize(unwrapVelocaInternalNodes(doc)) ?? '';
+
+  return transformMarkdownFromEditor(rawMarkdown).trim();
+}
+
+function hashMarkdownString(content: string): string {
+  let hash = 0x811c9dc5;
+
+  for (let index = 0; index < content.length; index += 1) {
+    hash ^= content.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 function unwrapVelocaInternalNodes(node: JSONContent): JSONContent {
   const content = node.content?.flatMap((child) => {
     const nextChild = unwrapVelocaInternalNodes(child);

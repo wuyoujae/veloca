@@ -64,6 +64,7 @@ import {
   createAiProvenanceDocument,
   createRichEditorExtensions,
   extractFirstMediaUrl,
+  getAiProvenanceRangesFromEditor,
   getActiveTableInfo,
   getEditorMarkdown,
   hydrateDocumentAssets,
@@ -1871,11 +1872,33 @@ export function App(): JSX.Element {
     }
 
     const markdownHash = hashMarkdownContent(content);
-    const editorSnapshot = snapshotOverride ?? renderedEditorHandlesRef.current.get(file.path)?.getProvenanceSnapshot() ?? null;
+    const renderedHandle = renderedEditorHandlesRef.current.get(file.path);
+    const editorSnapshot = snapshotOverride ?? renderedHandle?.getProvenanceSnapshot() ?? null;
+    const renderedRanges = renderedHandle?.getAiProvenanceRanges(content) ?? [];
     const fallbackProvenance =
       fallback?.provenanceMarkdownHash === markdownHash
         ? parseStoredAiProvenanceSnapshot(fallback.provenanceSnapshotJson)
         : null;
+
+    if (renderedRanges.length) {
+      const provenance = buildAiProvenanceSnapshotFields(content, renderedRanges, editorSnapshot);
+
+      if (!provenance.provenanceSnapshotJson) {
+        await window.veloca.workspace.deleteProvenance(documentKey);
+        return provenance;
+      }
+
+      await window.veloca.workspace.saveProvenance({
+        documentKey,
+        documentPath: file.path,
+        markdownHash,
+        snapshotJson: provenance.provenanceSnapshotJson,
+        workspaceFolderId: file.workspaceFolderId,
+        workspaceType
+      });
+
+      return provenance;
+    }
 
     if (fallbackProvenance?.version === 2) {
       const provenance = buildAiProvenanceSnapshotFields(
@@ -1930,11 +1953,18 @@ export function App(): JSX.Element {
     };
   };
 
-  const updateTabProvenanceSnapshot = (filePath: string, content: string, snapshot: JSONContent | null) => {
+  const updateTabProvenanceSnapshot = (
+    filePath: string,
+    content: string,
+    snapshot: JSONContent | null,
+    renderedRanges?: AiGeneratedMarkdownRange[]
+  ) => {
     let provenanceMarkdownHash: string | null = null;
     let provenanceSnapshotJson: string | null = null;
     const targetTab = openTabs.find((tab) => tab.file.path === filePath);
-    const ranges = getAiProvenanceRangesForContent(content, targetTab?.provenanceSnapshotJson);
+    const ranges = renderedRanges?.length
+      ? renderedRanges
+      : getAiProvenanceRangesForContent(content, targetTab?.provenanceSnapshotJson);
     const v2Provenance = buildAiProvenanceSnapshotFields(content, ranges, snapshot);
 
     if (v2Provenance.provenanceSnapshotJson) {
@@ -2004,11 +2034,17 @@ export function App(): JSX.Element {
 
       if (renderedHandle?.hasRenderedEdits()) {
         const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
+        const latestRenderedRanges = renderedHandle.getAiProvenanceRanges(latestRenderedMarkdown);
         const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
         flushedMarkdownLength = latestRenderedMarkdown.length;
 
         if (!shouldSkipEmptyFlush) {
-          updateTabProvenanceSnapshot(targetPath, latestRenderedMarkdown, renderedHandle.getProvenanceSnapshot());
+          updateTabProvenanceSnapshot(
+            targetPath,
+            latestRenderedMarkdown,
+            renderedHandle.getProvenanceSnapshot(),
+            latestRenderedRanges
+          );
         }
 
         if (!shouldSkipEmptyFlush && latestRenderedMarkdown !== documentContentRef.current) {
@@ -5184,6 +5220,7 @@ interface MarkdownEditorProps {
 
 interface MarkdownEditorHandle {
   applyAiProvenanceContent: (markdown: string, ranges: AiGeneratedMarkdownRange[]) => JSONContent | null;
+  getAiProvenanceRanges: (markdown?: string) => AiGeneratedMarkdownRange[];
   focusAtMarkdownOffset: (offset: number) => void;
   getCursorMarkdownOffset: () => number | null;
   getMarkdownContent: () => string;
@@ -6150,6 +6187,12 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
   const hasRenderedEdits = useCallback((): boolean => renderedDirtyRef.current, []);
 
+  const getAiProvenanceRanges = useCallback((markdown?: string): AiGeneratedMarkdownRange[] => {
+    const currentEditor = editorInstanceRef.current;
+
+    return currentEditor ? getAiProvenanceRangesFromEditor(currentEditor, markdown) : [];
+  }, []);
+
   const getMarkdownContent = useCallback((): string => {
     const currentEditor = editorInstanceRef.current;
 
@@ -6166,6 +6209,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     ref,
     () => ({
       focusAtMarkdownOffset,
+      getAiProvenanceRanges,
       getCursorMarkdownOffset,
       getMarkdownSelectionRange,
       getMarkdownContent,
@@ -6176,6 +6220,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     [
       applyAiProvenanceContent,
       focusAtMarkdownOffset,
+      getAiProvenanceRanges,
       getCursorMarkdownOffset,
       getMarkdownContent,
       getMarkdownSelectionRange,
