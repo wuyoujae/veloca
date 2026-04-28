@@ -6134,9 +6134,15 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
         return;
       }
 
-      const transaction = currentEditor.state.tr.delete(markerRange.from, markerRange.to);
-      const nextSelection = TextSelection.near(transaction.doc.resolve(markerRange.from));
-      currentEditor.view.dispatch(transaction.setSelection(nextSelection));
+      currentEditor.commands.setContent(restoredSnapshot ?? transformMarkdownForEditor(currentContent), {
+        contentType: restoredSnapshot ? 'json' : 'markdown',
+        emitUpdate: false
+      });
+
+      const selectionPos = clampNumber(markerRange.from, 0, currentEditor.state.doc.content.size);
+      currentEditor.view.dispatch(
+        currentEditor.state.tr.setSelection(getClosestTextSelection(currentEditor, selectionPos))
+      );
       currentEditor.commands.focus();
     } finally {
       syncingRef.current = false;

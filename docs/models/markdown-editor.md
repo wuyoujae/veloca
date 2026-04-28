@@ -116,6 +116,7 @@ flowchart TD
 - 切换视图时会尽量保持文本焦点位置：
   - 渲染视图切到源代码视图时，TipTap 编辑器会临时插入唯一 cursor marker，序列化为 Markdown 后计算 marker offset，再移除 marker；
   - 源代码视图切回渲染视图时，textarea 的 `selectionStart` 会作为 Markdown offset，通过临时 marker 恢复到 TipTap 文档中的相近位置；
+  - 源代码视图切回渲染视图时，临时 marker 文档只用于定位光标；定位完成后必须恢复原始 provenance snapshot，避免把带黄色 `velocaAiEdited` mark 的 AI 内容替换成由 range 重建出来的全蓝 AI block；
   - 如果 offset 落在 Markdown 语法边界或无法精确映射，则回退到最近可用文本位置。
 
 ## 关闭标签
