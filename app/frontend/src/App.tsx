@@ -5999,12 +5999,14 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       return;
     }
 
-    if (
-      !needsRangeSnapshot &&
-      !fileChanged &&
-      !isProvenanceChange &&
-      transformMarkdownFromEditor(getEditorMarkdown(editor)) === content
-    ) {
+    const currentMarkdown = transformMarkdownFromEditor(getEditorMarkdown(editor));
+    const currentHasAiProvenance = documentSnapshotHasAiProvenance(editor.state.doc.toJSON() as JSONContent);
+    const incomingNeedsAiProvenance =
+      documentSnapshotHasAiProvenance(provenanceSnapshot) ||
+      documentSnapshotHasAiProvenance(provenanceMarkSnapshot) ||
+      provenanceRanges.length > 0;
+
+    if (!fileChanged && currentMarkdown === content && (!incomingNeedsAiProvenance || currentHasAiProvenance)) {
       lastEditorContentRef.current = content;
       return;
     }
