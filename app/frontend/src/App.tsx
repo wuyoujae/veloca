@@ -780,6 +780,40 @@ function normalizePersistedProvenanceForContent(
   return buildAiProvenanceSnapshotFields(content, ranges, parsed.markdownHash === markdownHash ? parsed.snapshot : null);
 }
 
+function insertTemporaryTextIntoAiProvenanceRanges(
+  ranges: AiGeneratedMarkdownRange[],
+  offset: number,
+  text: string
+): AiGeneratedMarkdownRange[] {
+  if (!ranges.length || !text) {
+    return ranges;
+  }
+
+  return ranges.map((range) => {
+    if (range.end <= offset) {
+      return range;
+    }
+
+    if (range.start >= offset) {
+      return {
+        ...range,
+        end: range.end + text.length,
+        start: range.start + text.length
+      };
+    }
+
+    const rawOffset = offset - range.start;
+    const rawMarkdown = `${range.rawMarkdown.slice(0, rawOffset)}${text}${range.rawMarkdown.slice(rawOffset)}`;
+
+    return {
+      ...range,
+      end: range.end + text.length,
+      rawMarkdown,
+      rawMarkdownHash: hashMarkdownContent(rawMarkdown)
+    };
+  });
+}
+
 function getAgentWorkspaceRootPath(
   activeFile: MarkdownFileContent | null,
   workspace: WorkspaceSnapshot,
@@ -5985,20 +6019,25 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
     const safeOffset = clampNumber(offset, 0, currentContent.length);
     const marker = createSourceCursorMarker();
     const markedContent = `${currentContent.slice(0, safeOffset)}${marker}${currentContent.slice(safeOffset)}`;
+    const temporaryRanges = insertTemporaryTextIntoAiProvenanceRanges(provenanceRanges, safeOffset, marker);
+    const temporarySnapshot =
+      temporaryRanges.length > 0 ? createAiProvenanceDocument(currentEditor, markedContent, temporaryRanges) : null;
+    const restoredSnapshot =
+      provenanceSnapshot ?? createAiProvenanceDocument(currentEditor, currentContent, provenanceRanges) ?? null;
 
     syncingRef.current = true;
 
     try {
-      currentEditor.commands.setContent(transformMarkdownForEditor(markedContent), {
-        contentType: 'markdown',
+      currentEditor.commands.setContent(temporarySnapshot ?? transformMarkdownForEditor(markedContent), {
+        contentType: temporarySnapshot ? 'json' : 'markdown',
         emitUpdate: false
       });
 
       const markerRange = findTextMarkerRange(currentEditor.state.doc, marker);
 
       if (!markerRange) {
-        currentEditor.commands.setContent(transformMarkdownForEditor(currentContent), {
-          contentType: 'markdown',
+        currentEditor.commands.setContent(restoredSnapshot ?? transformMarkdownForEditor(currentContent), {
+          contentType: restoredSnapshot ? 'json' : 'markdown',
           emitUpdate: false
         });
         currentEditor.commands.focus();
@@ -6017,7 +6056,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       lastEditorContentRef.current = contentRef.current;
       void hydrateDocumentAssets(currentEditor, activeFilePathRef.current, resolveAssetForEditor);
     }
-  }, []);
+  }, [provenanceRanges, provenanceSnapshot]);
 
   const applyAiProvenanceContent = useCallback((markdown: string, ranges: AiGeneratedMarkdownRange[]): JSONContent | null => {
     const currentEditor = editorInstanceRef.current;
