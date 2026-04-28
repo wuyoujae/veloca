@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Veloca - The Premium AI Markdown Editor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* 
+         * VELOCA - SAAS LANDING PAGE (PREMIUM LIGHT)
+         */
+        :root {
+            --bg: #ffffff;
+            --bg-subtle: #fafafa;
+            --fg: #09090b;
+            --muted: #f4f4f5;
+            --muted-fg: #71717a;
+            --border: #e4e4e7;
+            --primary: #09090b;
+            --primary-fg: #ffffff;
+            
+            --font-sans: 'Inter', -apple-system, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            --max-width: 1200px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: var(--font-sans); background-color: var(--bg); color: var(--fg);
+            -webkit-font-smoothing: antialiased; overflow-x: hidden; line-height: 1.5;
+        }
+
+        /* 背景网格 (Light Grid) */
+        .bg-grid {
+            position: absolute; inset: 0; z-index: -1; height: 100vh;
+            background-size: 32px 32px;
+            background-image: radial-gradient(var(--border) 1px, transparent 1px);
+            mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+        }
+
+        /* ==========================================
+           1. 导航栏 (Sticky Navbar)
+           ========================================== */
+        .navbar {
+            position: fixed; top: 0; width: 100%; z-index: 100;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(228, 228, 231, 0.5);
+            display: flex; justify-content: center;
+        }
+        .nav-container {
+            width: 100%; max-width: var(--max-width); padding: 16px 24px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+        .brand-logo { width: 24px; height: 24px; display: block; }
+        .nav-links { display: flex; gap: 32px; align-items: center; }
+        .nav-links a { text-decoration: none; color: var(--muted-fg); font-size: 14px; font-weight: 500; transition: color 0.2s; }
+        .nav-links a:hover { color: var(--fg); }
+        .nav-btn { background: var(--primary); color: var(--primary-fg); border: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .nav-btn:hover { opacity: 0.9; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+
+        /* ==========================================
+           2. 英雄区域 (Hero Section)
+           ========================================== */
+        .hero {
+            padding: 160px 24px 80px 24px; display: flex; flex-direction: column; align-items: center; text-align: center;
+        }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; margin-bottom: 32px;
+            background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 99px;
+            font-size: 13px; font-weight: 600; color: var(--muted-fg);
+            animation: fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .hero-badge span { display: inline-block; width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; box-shadow: 0 0 8px #3b82f6; }
+
+        .hero-title {
+            font-size: 5rem; font-weight: 800; line-height: 1.05; letter-spacing: -0.04em; max-width: 900px; margin-bottom: 24px;
+            opacity: 0; transform: translateY(20px); animation: fade-up 0.8s 0.1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        /* 渐变高亮词 */
+        .text-gradient {
+            background: linear-gradient(135deg, #2563eb 0%, #9333ea 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+
+        .hero-subtitle {
+            font-size: 1.25rem; color: var(--muted-fg); max-width: 600px; margin-bottom: 48px;
+            opacity: 0; transform: translateY(20px); animation: fade-up 0.8s 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* --- 邮件预约表单 --- */
+        .waitlist-container {
+            position: relative; width: 100%; max-width: 480px; margin: 0 auto;
+            opacity: 0; transform: translateY(20px); animation: fade-up 0.8s 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .waitlist-form { display: flex; gap: 8px; transition: opacity 0.3s; }
+        .waitlist-form.hidden { opacity: 0; pointer-events: none; position: absolute; width: 100%; }
+        
+        .input-email {
+            flex: 1; height: 52px; padding: 0 16px; border: 1px solid var(--border); border-radius: 8px;
+            font-size: 15px; color: var(--fg); background: var(--bg); outline: none; transition: 0.2s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        }
+        .input-email:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+        .input-email::placeholder { color: #a1a1aa; }
+
+        .btn-submit {
+            height: 52px; padding: 0 28px; background: var(--primary); color: var(--primary-fg);
+            border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; transition: 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-submit:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        
+        .loader { animation: spin 1s linear infinite; display: none; }
+        .btn-submit.loading .btn-text { display: none; }
+        .btn-submit.loading .loader { display: block; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        .success-msg {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px;
+            font-size: 15px; font-weight: 600; color: #10b981; opacity: 0; transform: scale(0.95); transition: 0.3s; pointer-events: none;
+            text-align: center;
+        }
+        .success-msg.show { opacity: 1; transform: scale(1); }
+        .error-msg {
+            margin-top: 12px; min-height: 20px; color: #ef4444; font-size: 13px; font-weight: 500;
+            opacity: 0; transform: translateY(-4px); transition: 0.2s;
+        }
+        .error-msg.show { opacity: 1; transform: translateY(0); }
+
+        /* ==========================================
+           3. 视觉模型区 (App Mockup) 极高质感
+           ========================================== */
+        .mockup-section {
+            position: relative; width: 100%; max-width: 1000px; margin: 60px auto 120px auto; padding: 0 24px;
+            opacity: 0; transform: translateY(40px); animation: fade-up 1s 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* 背后极其柔和的彩色弥散光晕 */
+        .mockup-glow {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 80%; height: 60%; background: linear-gradient(to right, rgba(59,130,246,0.15), rgba(147,51,234,0.15));
+            filter: blur(80px); z-index: 0; border-radius: 50%; pointer-events: none;
+        }
+
+        /* 真正的编辑器视窗 */
+        .mockup-window {
+            position: relative; z-index: 10; width: 100%; height: 560px;
+            background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.02);
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+
+        /* macOS 风格控制栏 */
+        .mockup-header { height: 40px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); display: flex; align-items: center; padding: 0 16px; gap: 8px; }
+        .mac-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .mac-dot.close { background: #ff5f56; } .mac-dot.min { background: #ffbd2e; } .mac-dot.max { background: #27c93f; }
+        .mockup-title { flex: 1; text-align: center; font-size: 13px; font-weight: 500; color: var(--muted-fg); margin-right: 56px; }
+
+        /* Light mode editor preview from the prototype */
+        .preview-layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+        .preview-sidebar {
+            width: 260px; min-width: 220px; border-right: 1px solid var(--border);
+            display: flex; flex-direction: column; background-color: #fafafa;
+        }
+        .preview-sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+        .preview-tabs-list { display: flex; background-color: var(--border); padding: 3px; border-radius: 8px; }
+        .preview-tab-trigger {
+            flex: 1; display: inline-flex; align-items: center; justify-content: center;
+            padding: 4px 8px; font-size: 13px; font-weight: 500; color: var(--muted-fg);
+            background: transparent; border: none; border-radius: 6px;
+        }
+        .preview-tab-trigger.active { background-color: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .preview-sidebar-content { flex: 1; overflow: hidden; padding: 12px; }
+        .preview-tree-item {
+            display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+            font-size: 13px; color: var(--muted-fg); border-radius: 8px; margin-bottom: 2px; white-space: nowrap;
+        }
+        .preview-tree-item.active { background-color: var(--fg); color: var(--bg); font-weight: 500; }
+        .preview-sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+        .preview-settings-btn {
+            width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+            font-size: 13px; color: var(--muted-fg); border: none; background: transparent; border-radius: 8px;
+        }
+        .preview-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; background-color: var(--bg); }
+        .preview-editor-header {
+            height: 48px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between;
+            border-bottom: 1px solid var(--border); flex-shrink: 0;
+        }
+        .preview-breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted-fg); font-weight: 500; }
+        .preview-editor-actions { display: flex; align-items: center; gap: 8px; }
+        .preview-demo-btn {
+            background-color: var(--bg); border: 1px solid var(--border); color: var(--fg);
+            font-size: 12px; font-weight: 500; padding: 4px 12px; border-radius: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .preview-icon-btn { background: transparent; border: none; color: var(--muted-fg); padding: 6px; border-radius: 8px; }
+        .preview-scroll-area { flex: 1; overflow: hidden; padding: 40px 0 100px 0; display: flex; justify-content: center; }
+        .preview-markdown-body { width: 100%; max-width: 720px; padding: 0 40px; text-align: left; }
+        .preview-markdown-body h1 { font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 24px; color: var(--fg); }
+        .preview-markdown-body h2 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; margin-top: 48px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--fg); }
+        .preview-markdown-body p { font-size: 1rem; line-height: 1.75; color: #3f3f46; margin-bottom: 20px; }
+        .preview-markdown-body blockquote {
+            border-left: 3px solid var(--fg); padding: 8px 0 8px 16px; margin: 24px 0;
+            color: var(--muted-fg); font-style: italic; background: #fafafa; border-radius: 0 8px 8px 0;
+        }
+        .preview-markdown-body code { font-family: var(--font-mono); background-color: var(--muted); padding: 3px 6px; border-radius: 4px; font-size: 0.85em; color: var(--fg); }
+        .preview-markdown-body pre { background-color: #fafafa; border: 1px solid var(--border); padding: 16px; border-radius: 8px; overflow: hidden; margin: 24px 0; }
+        .preview-markdown-body pre code { background-color: transparent; padding: 0; font-size: 0.9em; color: #3f3f46; }
+
+        /* ==========================================
+           4. 特性介绍区 (Bento Features)
+           ========================================== */
+        .features-section {
+            width: 100%; max-width: var(--max-width); margin: 0 auto 120px auto; padding: 0 24px;
+        }
+        .features-header { text-align: center; margin-bottom: 64px; }
+        .features-header h2 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 16px; }
+
+        .bento-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+        }
+        .bento-card {
+            background: var(--bg); border: 1px solid var(--border); border-radius: 16px; padding: 32px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02); transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .bento-card:hover {
+            transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.01);
+        }
+        .bento-icon {
+            display: flex; align-items: center; justify-content: center; width: 48px; height: 48px;
+            background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 24px; color: var(--fg);
+        }
+        .bento-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+        .bento-desc { font-size: 14px; color: var(--muted-fg); line-height: 1.6; }
+
+        /* ==========================================
+           5. 底部版权区 (Footer)
+           ========================================== */
+        .footer {
+            border-top: 1px solid var(--border); padding: 40px 24px; text-align: center; color: var(--muted-fg); font-size: 14px;
+        }
+
+        @keyframes fade-up {
+            0% { opacity: 0; transform: translateY(20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 响应式 */
+        @media (max-width: 900px) {
+            .hero-title { font-size: 3.5rem; }
+            .bento-grid { grid-template-columns: 1fr; }
+            .mockup-window { height: 400px; }
+            .preview-sidebar { display: none; }
+            .preview-editor-actions .preview-demo-btn { display: none; }
+            .preview-markdown-body { padding: 0 24px; }
+            .preview-markdown-body h1 { font-size: 1.75rem; }
+        }
+
+        @media (max-width: 640px) {
+            .nav-container { padding: 14px 24px; gap: 16px; }
+            .nav-links { display: none; }
+            .brand { flex-shrink: 0; }
+            .nav-btn { padding: 8px 12px; font-size: 13px; }
+            .hero { padding: 132px 24px 64px 24px; }
+            .hero-badge { max-width: 100%; margin-bottom: 28px; }
+            .hero-title { font-size: 2.75rem; max-width: 100%; }
+            .hero-subtitle { font-size: 1rem; max-width: 100%; margin-bottom: 40px; }
+            .waitlist-form { flex-direction: column; }
+            .input-email, .btn-submit { width: 100%; }
+            .mockup-section { margin: 48px auto 96px auto; }
+            .mockup-window { height: 360px; }
+            .preview-editor-header { padding: 0 16px; }
+            .preview-editor-actions { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-grid"></div>
+
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="brand">
+                <img src="./veloca_logo.svg" alt="Veloca logo" class="brand-logo"> Veloca
+            </div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#">Manifesto</a>
+                <a href="#">Pricing</a>
+            </div>
+            <button class="nav-btn">Get Early Access</button>
+        </div>
+    </nav>
+
+    <!-- 英雄区 -->
+    <main class="hero">
+        <div class="hero-badge">
+            <span></span> Veloca v1.0 is currently in Private Beta
+        </div>
+        
+        <h1 class="hero-title">
+            Write at the speed<br>of <span class="text-gradient">Intelligence.</span>
+        </h1>
+        
+        <p class="hero-subtitle">
+            A frictionless, local-first markdown editor seamlessly integrated with a world-class AI Agent. Built for developers, designers, and obsessives.
+        </p>
+
+        <!-- 预约表单 -->
+        <div class="waitlist-container">
+            <form class="waitlist-form" id="waitlistForm">
+                <input type="email" class="input-email" id="emailInput" placeholder="Enter your email address" required autocomplete="off">
+                <button type="submit" class="btn-submit" id="submitBtn">
+                    <span class="btn-text">Join Waitlist</span>
+                    <i data-lucide="loader-2" class="loader" style="width: 18px; height: 18px;"></i>
+                </button>
+            </form>
+            <div class="success-msg" id="successMessage">
+                <i data-lucide="check-circle-2" style="width: 20px; height: 20px;"></i>
+                You're on the list. We'll send the registration code to your email.
+            </div>
+            <div class="error-msg" id="errorMessage" role="alert" aria-live="polite"></div>
+        </div>
+    </main>
+
+    <!-- 应用视觉模型 (让页面不再简陋的核心) -->
+    <section class="mockup-section">
+        <div class="mockup-glow"></div>
+        <div class="mockup-window">
+            <div class="mockup-header">
+                <div class="mac-dot close"></div>
+                <div class="mac-dot min"></div>
+                <div class="mac-dot max"></div>
+                <div class="mockup-title">architecture.md - Veloca</div>
+            </div>
+            <div class="preview-layout">
+                <aside class="preview-sidebar">
+                    <div class="preview-sidebar-header">
+                        <div class="preview-tabs-list">
+                            <button class="preview-tab-trigger active">Files</button>
+                            <button class="preview-tab-trigger">Outline</button>
+                        </div>
+                    </div>
+
+                    <div class="preview-sidebar-content">
+                        <div class="preview-tree-item">
+                            <i data-lucide="chevron-down" style="width: 14px; height: 14px;"></i>
+                            <i data-lucide="folder" style="width: 14px; height: 14px;"></i>
+                            <span>Project Veloca</span>
+                        </div>
+                        <div class="preview-tree-item active" style="margin-left: 40px;">
+                            <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                            <span>manifesto.md</span>
+                        </div>
+                        <div class="preview-tree-item" style="margin-left: 40px;">
+                            <i data-lucide="file-text" style="width: 14px; height: 14px;"></i>
+                            <span>design_system.md</span>
+                        </div>
+                    </div>
+
+                    <div class="preview-sidebar-footer">
+                        <button class="preview-settings-btn">
+                            <i data-lucide="settings" style="width: 16px; height: 16px;"></i>
+                            <span>Settings</span>
+                        </button>
+                    </div>
+                </aside>
+
+                <main class="preview-editor">
+                    <header class="preview-editor-header">
+                        <div class="preview-breadcrumb">
+                            docs <i data-lucide="chevron-right" style="width: 12px; height: 12px;"></i> manifesto.md
+                        </div>
+
+                        <div class="preview-editor-actions">
+                            <button class="preview-demo-btn">Success</button>
+                            <button class="preview-demo-btn">Info</button>
+                            <button class="preview-demo-btn">Warn</button>
+                            <button class="preview-demo-btn">Error</button>
+                            <div style="width: 1px; height: 20px; background: var(--border); margin: 0 4px;"></div>
+                            <button class="preview-icon-btn" title="Search">
+                                <i data-lucide="search" style="width: 16px; height: 16px;"></i>
+                            </button>
+                        </div>
+                    </header>
+
+                    <div class="preview-scroll-area">
+                        <div class="preview-markdown-body">
+                            <h1>Veloca Manifesto (Light)</h1>
+                            <p>Writing should be completely frictionless. Veloca is built on a simple philosophy: the interface should dissolve, leaving only you and your typography.</p>
+
+                            <blockquote>
+                                "Perfection is achieved, not when there is nothing more to add, but when there is nothing left to take away."
+                            </blockquote>
+
+                            <h2>Premium Light Mode</h2>
+                            <p>Unlike standard light modes that blast pure white into your eyes, we balance <code>#FFFFFF</code> with precise layers of <code>#F4F4F5</code> and incredibly subtle <code>#E4E4E7</code> borders.</p>
+
+                            <pre><code>// Shadcn Light Theme Config
+const config = {
+  theme: 'light',
+  colors: {
+    background: '#ffffff',
+    foreground: '#09090b',
+    border: '#e4e4e7'
+  }
+}</code></pre>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </section>
+
+    <!-- 特性介绍区 -->
+    <section class="features-section" id="features">
+        <div class="features-header">
+            <h2>Everything you need, nothing you don't.</h2>
+            <p style="color: var(--muted-fg); font-size: 1.125rem;">Built with Shadcn design principles to keep you in the flow.</p>
+        </div>
+        
+        <div class="bento-grid">
+            <!-- Feature 1 -->
+            <div class="bento-card">
+                <div class="bento-icon"><i data-lucide="sparkles" style="width: 24px; height: 24px; color: #3b82f6;"></i></div>
+                <h3 class="bento-title">Agentic Intelligence</h3>
+                <p class="bento-desc">Select any text and invoke the AI. The agent seamlessly writes, edits, and calls tools inline without breaking your typography.</p>
+            </div>
+            <!-- Feature 2 -->
+            <div class="bento-card">
+                <div class="bento-icon"><i data-lucide="git-branch" style="width: 24px; height: 24px;"></i></div>
+                <h3 class="bento-title">Git Native</h3>
+                <p class="bento-desc">Built-in version control just like VS Code. See modified badges, stage files, and commit directly from the sidebar.</p>
+            </div>
+            <!-- Feature 3 -->
+            <div class="bento-card">
+                <div class="bento-icon"><i data-lucide="pen-tool" style="width: 24px; height: 24px;"></i></div>
+                <h3 class="bento-title">Obsessive Typography</h3>
+                <p class="bento-desc">Perfectly tuned line-heights, negative letter-spacing for headings, and native Mac/Windows font stacks. It's beautiful by default.</p>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        © 2024 Veloca Inc. All rights reserved. Premium Markdown Editor.
+    </footer>
+
+    <script>
+        // 初始化 Lucide 图标
+        lucide.createIcons();
+
+        // 预约表单交互逻辑
+        const form = document.getElementById('waitlistForm');
+        const emailInput = document.getElementById('emailInput');
+        const submitBtn = document.getElementById('submitBtn');
+        const successMessage = document.getElementById('successMessage');
+        const errorMessage = document.getElementById('errorMessage');
+        const waitlistApiUrl = getWaitlistApiUrl();
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault(); 
+            
+            const email = emailInput.value.trim();
+            if (!email) return;
+
+            errorMessage.textContent = '';
+            errorMessage.classList.remove('show');
+            submitBtn.classList.add('loading');
+            emailInput.disabled = true;
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch(waitlistApiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                const result = await response.json().catch(() => null);
+
+                if (!response.ok || !result || result.code !== 0) {
+                    throw new Error(result?.message || 'Unable to join the waitlist right now.');
+                }
+
+                form.classList.add('hidden');
+                successMessage.classList.add('show');
+            } catch (error) {
+                errorMessage.textContent = error.message || 'Unable to join the waitlist right now.';
+                errorMessage.classList.add('show');
+                emailInput.disabled = false;
+                submitBtn.disabled = false;
+            } finally {
+                submitBtn.classList.remove('loading');
+            }
+        });
+
+        function getWaitlistApiUrl() {
+            if (window.VELOCA_WAITLIST_API_URL) {
+                return window.VELOCA_WAITLIST_API_URL;
+            }
+
+            if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+                return '/api/waitlist';
+            }
+
+            return 'http://127.0.0.1:8787/api/waitlist';
+        }
+    </script>
+</body>
+</html>

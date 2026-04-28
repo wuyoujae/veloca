@@ -2,7 +2,7 @@
 
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
-The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, local asset handling for richer Markdown documents, GitHub account binding, and Veloca-owned markdown version management through an isolated shadow repository.
+The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, local asset handling for richer Markdown documents, GitHub account binding, Veloca-owned markdown version management through an isolated shadow repository, and a prototype official landing page with a local waitlist API.
 
 ## Project Overview
 
@@ -46,12 +46,13 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - Settings modal with polished dark/light theme switching.
 - SQLite-backed app setting storage for theme and Auto Save persistence.
 - Toast message component for user feedback.
+- Official landing page prototype with a local Express waitlist endpoint and JSON-file storage.
 
 ## Tech Stack
 
 - Frontend: React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS
 - Desktop shell: Electron, electron-vite
-- Backend: Node.js, TypeScript, isomorphic-git
+- Backend: Node.js, TypeScript, Express, isomorphic-git
 - Database: SQLite through `better-sqlite3`
 - Build tools: TypeScript, Vite, electron-vite
 - Testing: not configured yet; this foundation milestone is verified through typecheck and production build
@@ -71,6 +72,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 │   └── test
 ├── docs
 │   └── models
+├── offical
 ├── propertypes
 ├── resources
 ├── electron.vite.config.ts
@@ -90,6 +92,18 @@ Start the desktop app in development mode:
 
 ```bash
 npm run dev
+```
+
+Start the official landing page prototype and waitlist API:
+
+```bash
+npm run dev:official
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8787/offical.html
 ```
 
 Build the project:
@@ -118,6 +132,8 @@ Available environment variables:
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
 | `VELOCA_GITHUB_CLIENT_ID` | None | GitHub OAuth App client ID used by the Account settings panel to bind a GitHub account through the device authorization flow. Device Flow must be enabled in the OAuth App settings. Veloca requests the `repo` scope so it can create and push to the private `veloca-version-manager` repository. |
+| `VELOCA_OFFICIAL_PORT` | `8787` | Local port for the official landing page prototype and waitlist API. |
+| `VELOCA_WAITLIST_FILE` | `.veloca/waitlist/waitlist.json` | Local JSON file used by the prototype waitlist API. |
 
 Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Header-level new files start as untitled in-memory tabs and are written only after the user chooses a destination through Veloca's workspace-scoped save dialog. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
 
@@ -185,6 +201,7 @@ Manual acceptance checks:
 35. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
 36. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
 37. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+38. Run `npm run dev:official`, open `http://127.0.0.1:8787/offical.html`, submit an email through `Join Waitlist`, and confirm `.veloca/waitlist/waitlist.json` contains the normalized email record.
 
 Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
 
@@ -194,7 +211,7 @@ At this stage, Veloca starts with an empty workspace until folders are added or 
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, and isolated Veloca markdown version management.
+- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, isolated Veloca markdown version management, and official-page waitlist prototype storage.
 - Next: markdown export and search.
 - Later: plugin or extension system if product requirements justify it.
 
