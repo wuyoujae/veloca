@@ -1442,6 +1442,11 @@ const VelocaWritingBehavior = Extension.create({
 function createAiProvenancePlugin() {
   return new Plugin({
     key: aiProvenancePluginKey,
+    props: {
+      handleTextInput(view, from, to, text) {
+        return insertEditedTextInAiBlock(view, from, to, text);
+      }
+    },
     appendTransaction(transactions, _oldState, newState) {
       if (
         transactions.some(
@@ -1510,6 +1515,38 @@ function createAiProvenancePlugin() {
       return changed ? transaction.setMeta(aiProvenanceAppliedMeta, true) : null;
     }
   });
+}
+
+function insertEditedTextInAiBlock(view: EditorView, from: number, to: number, text: string): boolean {
+  if (!text || !rangeTouchesAiGeneratedBlock(view.state.doc, from, Math.max(from, to))) {
+    return false;
+  }
+
+  const editedMark = view.state.schema.marks.velocaAiEdited;
+  const generatedMark = view.state.schema.marks.velocaAiGenerated;
+
+  if (!editedMark) {
+    return false;
+  }
+
+  let transaction = view.state.tr.insertText(text, from, to);
+  const markFrom = from;
+  const markTo = from + text.length;
+
+  if (markTo > markFrom) {
+    const resolvedPos = transaction.doc.resolve(Math.min(markFrom, transaction.doc.content.size));
+
+    if (resolvedPos.parent.type.allowsMarkType(editedMark)) {
+      if (generatedMark) {
+        transaction = transaction.removeMark(markFrom, markTo, generatedMark);
+      }
+
+      transaction = transaction.addMark(markFrom, markTo, editedMark.create());
+    }
+  }
+
+  view.dispatch(transaction.setMeta(aiProvenanceAppliedMeta, true));
+  return true;
 }
 
 function getInsertedTransactionRanges(transactions: readonly Transaction[]): Array<{ from: number; to: number }> {
