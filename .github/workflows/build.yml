@@ -9,20 +9,21 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             target: linux
-            electron_arch: x64
+            arch: x64
           - os: windows-latest
             target: win
-            electron_arch: x64
+            arch: x64
           - os: macos-latest
             target: mac
-            electron_arch: arm64
+            arch: arm64
           - os: macos-latest
             target: mac
-            electron_arch: x64
+            arch: x64
 
     runs-on: ${{ matrix.os }}
 
@@ -34,28 +35,20 @@ jobs:
           node-version: 22
           cache: npm
 
+      - if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2
+
       - run: npm ci
 
       - run: npm run build
 
-      - if: matrix.target == 'mac'
-        run: npx electron-builder --${{ matrix.target }} --${{ matrix.electron_arch }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - if: matrix.target == 'win'
-        run: npx electron-builder --win --x64
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - if: matrix.target == 'linux'
-        run: npx electron-builder --linux --x64
+      - run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Veloca-${{ matrix.target }}-${{ matrix.electron_arch }}
+          name: Veloca-${{ matrix.target }}-${{ matrix.arch }}
           path: release/*
           if-no-files-found: ignore
 
@@ -70,8 +63,6 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-
-      - run: ls -la artifacts/
 
       - uses: softprops/action-gh-release@v2
         with:
