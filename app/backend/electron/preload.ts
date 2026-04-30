@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { ThemeMode } from '../services/settings-store';
+import type { AiModelConfig, ThemeMode } from '../services/settings-store';
 import type { GitHubAuthStatus, GitHubDeviceBinding } from '../services/github-auth-service';
 import type {
   VersionCommitResult,
@@ -31,7 +31,10 @@ contextBridge.exposeInMainWorld('veloca', {
     setTheme: (theme: ThemeMode) => ipcRenderer.invoke('settings:set-theme', theme) as Promise<ThemeMode>,
     getAutoSave: () => ipcRenderer.invoke('settings:get-auto-save') as Promise<boolean>,
     setAutoSave: (enabled: boolean) =>
-      ipcRenderer.invoke('settings:set-auto-save', enabled) as Promise<boolean>
+      ipcRenderer.invoke('settings:set-auto-save', enabled) as Promise<boolean>,
+    getAiConfig: () => ipcRenderer.invoke('settings:get-ai-config') as Promise<AiModelConfig>,
+    setAiConfig: (config: AiModelConfig) =>
+      ipcRenderer.invoke('settings:set-ai-config', config) as Promise<AiModelConfig>
   },
   workspace: {
     get: () => ipcRenderer.invoke('workspace:get') as Promise<WorkspaceSnapshot>,

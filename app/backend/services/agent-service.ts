@@ -5,6 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { veloca } from 'otherone-agent';
 import { getDatabase } from '../database/connection';
 import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
+import { getAiBaseUrl, getAiApiKey, getAiModel, getAiContextWindow } from './settings-store';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
 
@@ -5728,10 +5729,29 @@ function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolea
   const prompt = validateRequest(request);
   const workspaceScope = getAgentSessionWorkspaceScope(request.context);
   assertAgentSessionBelongsToWorkspace(request.sessionId, workspaceScope);
-  const apiKey = getRequiredEnv('VELOCA_AGENT_API_KEY');
-  const baseUrl = getOptionalEnv('VELOCA_AGENT_BASE_URL', defaultAgentBaseUrl);
-  const model = getOptionalEnv('VELOCA_AGENT_MODEL', defaultAgentModel);
-  const contextWindow = getNumberEnv('VELOCA_AGENT_CONTEXT_WINDOW', defaultContextWindow);
+  // Priority: UI settings > .env vars > hardcoded defaults
+  const uiApiKey = getAiApiKey();
+  const uiBaseUrl = getAiBaseUrl();
+  const uiModel = getAiModel();
+  const uiContextWindow = getAiContextWindow();
+
+  loadLocalEnv();
+
+  const apiKey = uiApiKey
+    || process.env.VELOCA_AGENT_API_KEY?.trim()
+    || (() => { throw new Error('VELOCA_AGENT_API_KEY is required. Configure it in Settings > AI Model or the .env file.'); })();
+
+  const baseUrl = uiBaseUrl
+    || process.env.VELOCA_AGENT_BASE_URL?.trim()
+    || defaultAgentBaseUrl;
+
+  const model = uiModel
+    || process.env.VELOCA_AGENT_MODEL?.trim()
+    || defaultAgentModel;
+
+  const contextWindow = (uiContextWindow != null && uiContextWindow > 0)
+    ? uiContextWindow
+    : getNumberEnv('VELOCA_AGENT_CONTEXT_WINDOW', defaultContextWindow);
 
   return {
     ai: {

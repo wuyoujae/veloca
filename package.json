@@ -11,7 +11,76 @@
     "preview": "electron-vite preview",
     "lint": "eslint . --ext .ts,.tsx",
     "test": "node app/test/ai-insert.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "package:mac": "electron-vite build && electron-builder --mac",
+    "package:win": "electron-vite build && electron-builder --win",
+    "package:linux": "electron-vite build && electron-builder --linux",
+    "package:all": "electron-vite build && electron-builder --mac --win --linux"
+  },
+  "build": {
+    "appId": "com.veloca.app",
+    "productName": "Veloca",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "resources/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "resources/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "icon": "resources/icon.png",
+      "category": "Office",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
   },
   "dependencies": {
     "@tiptap/extension-code-block": "^3.22.4",
@@ -58,6 +127,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/turndown": "^5.0.6",
     "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.17.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.5"

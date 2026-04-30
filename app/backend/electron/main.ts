@@ -4,6 +4,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  nativeImage,
   net,
   protocol,
   shell,
@@ -12,10 +13,16 @@ import {
 import { join } from 'node:path';
 import { closeDatabase, getDatabase } from '../database/connection';
 import {
+  getAiBaseUrl,
+  getAiApiKey,
+  getAiModel,
+  getAiContextWindow,
   getAutoSave,
   getTheme,
+  setAiConfig,
   setAutoSave,
   setTheme,
+  type AiModelConfig,
   type ThemeMode
 } from '../services/settings-store';
 import {
@@ -74,6 +81,7 @@ function createMainWindow(): void {
     minWidth: 960,
     minHeight: 620,
     title: 'Veloca',
+    icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.png')),
     backgroundColor: '#09090b',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 13 },
@@ -132,6 +140,28 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:get-auto-save', () => getAutoSave());
   ipcMain.handle('settings:set-auto-save', (_event, enabled: boolean) => {
     return setAutoSave(Boolean(enabled));
+  });
+  ipcMain.handle('settings:get-ai-config', () => {
+    return {
+      baseUrl: getAiBaseUrl() ?? '',
+      apiKey: getAiApiKey() ?? '',
+      model: getAiModel() ?? '',
+      contextWindow: getAiContextWindow() ?? 0
+    };
+  });
+  ipcMain.handle('settings:set-ai-config', (_event, config: AiModelConfig) => {
+    if (
+      !config ||
+      typeof config.baseUrl !== 'string' ||
+      typeof config.apiKey !== 'string' ||
+      typeof config.model !== 'string' ||
+      typeof config.contextWindow !== 'number' ||
+      config.contextWindow <= 0
+    ) {
+      throw new Error('Invalid AI model configuration.');
+    }
+
+    return setAiConfig(config);
   });
   ipcMain.handle('github:get-status', () => getGitHubAuthStatus());
   ipcMain.handle('github:start-binding', async () => {

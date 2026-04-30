@@ -145,6 +145,13 @@ interface VersionCommitResult {
 type AgentUiModel = 'lite' | 'pro' | 'ultra';
 type AgentWorkspaceType = 'database' | 'filesystem' | 'none';
 
+interface AiModelConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  contextWindow: number;
+}
+
 interface AgentAttachmentSummary {
   mimeType: string;
   name: string;
@@ -240,6 +247,8 @@ declare global {
         setTheme: (theme: 'dark' | 'light') => Promise<'dark' | 'light'>;
         getAutoSave: () => Promise<boolean>;
         setAutoSave: (enabled: boolean) => Promise<boolean>;
+        getAiConfig: () => Promise<AiModelConfig>;
+        setAiConfig: (config: AiModelConfig) => Promise<AiModelConfig>;
       };
       workspace: {
         get: () => Promise<WorkspaceSnapshot>;

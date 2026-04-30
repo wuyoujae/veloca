@@ -4896,6 +4896,52 @@ button {
   line-height: 1.5;
 }
 
+.settings-text-input {
+  width: 280px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.settings-text-input:focus {
+  border-color: var(--foreground);
+}
+
+.settings-text-input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.settings-text-input.short {
+  width: 200px;
+}
+
+.settings-panel-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 32px;
+}
+
+.settings-panel-hint {
+  margin-top: 16px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.settings-panel-hint code {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--muted);
+  font-size: 11px;
+}
+
 .account-provider-panel {
   display: flex;
   flex-direction: column;

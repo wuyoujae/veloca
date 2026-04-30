@@ -3,8 +3,19 @@ import { getDatabase } from '../database/connection';
 
 export type ThemeMode = 'dark' | 'light';
 
+export interface AiModelConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  contextWindow: number;
+}
+
 const autoSaveKey = 'autoSave';
 const themeKey = 'theme';
+const aiBaseUrlKey = 'aiBaseUrl';
+const aiApiKeyKey = 'aiApiKey';
+const aiModelKey = 'aiModel';
+const aiContextWindowKey = 'aiContextWindow';
 
 export function getSetting(key: string): string | null {
   const row = getDatabase()
@@ -30,6 +41,40 @@ export function getAutoSave(): boolean {
 export function setAutoSave(enabled: boolean): boolean {
   setSetting(autoSaveKey, enabled ? 'true' : 'false');
   return enabled;
+}
+
+export function getAiBaseUrl(): string | null {
+  return getSetting(aiBaseUrlKey);
+}
+
+export function getAiApiKey(): string | null {
+  return getSetting(aiApiKeyKey);
+}
+
+export function getAiModel(): string | null {
+  return getSetting(aiModelKey);
+}
+
+export function getAiContextWindow(): number | null {
+  const value = getSetting(aiContextWindowKey);
+  if (value === null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function setAiConfig(config: AiModelConfig): AiModelConfig {
+  setSetting(aiBaseUrlKey, config.baseUrl);
+  setSetting(aiApiKeyKey, config.apiKey);
+  setSetting(aiModelKey, config.model);
+  setSetting(aiContextWindowKey, String(config.contextWindow));
+  return config;
+}
+
+export function deleteAiConfig(): void {
+  deleteSetting(aiBaseUrlKey);
+  deleteSetting(aiApiKeyKey);
+  deleteSetting(aiModelKey);
+  deleteSetting(aiContextWindowKey);
 }
 
 export function setSetting(key: string, value: string): void {

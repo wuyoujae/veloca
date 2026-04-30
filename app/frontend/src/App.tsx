@@ -100,7 +100,7 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline' | 'git';
-type SettingsPanel = 'editor' | 'account';
+type SettingsPanel = 'editor' | 'aiModel' | 'account';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
@@ -116,6 +116,13 @@ interface ToastMessage {
   type: ToastType;
   title: string;
   description: string;
+}
+
+interface AiModelConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  contextWindow: number;
 }
 
 interface WorkspaceTreeNode {
@@ -1125,6 +1132,13 @@ export function App(): JSX.Element {
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
+  const [aiConfig, setAiConfig] = useState<AiModelConfig>({
+    baseUrl: '',
+    apiKey: '',
+    model: '',
+    contextWindow: 128000
+  });
+  const [aiConfigLoading, setAiConfigLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>(emptyGitHubStatus);
   const [githubBinding, setGithubBinding] = useState<GitHubDeviceBinding | null>(null);
@@ -1377,6 +1391,11 @@ export function App(): JSX.Element {
       setTheme(storedTheme);
     });
     window.veloca?.settings.getAutoSave().then(setAutoSave);
+    window.veloca?.settings.getAiConfig().then((config) => {
+      if (config.baseUrl || config.apiKey || config.model || config.contextWindow > 0) {
+        setAiConfig(config);
+      }
+    });
     window.veloca?.github.getStatus().then(applyGitHubStatus);
     void refreshVersionManagerStatus();
 
@@ -1386,6 +1405,12 @@ export function App(): JSX.Element {
       applyTheme(fallbackTheme);
       setTheme(fallbackTheme);
       setAutoSave(fallbackAutoSave);
+      setAiConfig({
+        baseUrl: localStorage.getItem('veloca-ai-base-url') ?? '',
+        apiKey: localStorage.getItem('veloca-ai-api-key') ?? '',
+        model: localStorage.getItem('veloca-ai-model') ?? '',
+        contextWindow: Number(localStorage.getItem('veloca-ai-context-window')) || 128000
+      });
     }
   }, []);
 
@@ -1672,6 +1697,20 @@ export function App(): JSX.Element {
       type: 'success',
       title: 'Editor Updated',
       description: `Auto Save is now ${enabled ? 'enabled' : 'disabled'}.`
+    });
+  };
+
+  const updateAiConfig = async (config: AiModelConfig) => {
+    setAiConfig(config);
+    localStorage.setItem('veloca-ai-base-url', config.baseUrl);
+    localStorage.setItem('veloca-ai-api-key', config.apiKey);
+    localStorage.setItem('veloca-ai-model', config.model);
+    localStorage.setItem('veloca-ai-context-window', String(config.contextWindow));
+    await window.veloca?.settings.setAiConfig(config);
+    showToast({
+      type: 'success',
+      title: 'AI Model Updated',
+      description: 'AI model configuration has been saved. Restart any active agent session to apply changes.'
     });
   };
 
@@ -4471,6 +4510,13 @@ export function App(): JSX.Element {
               >
                 Editor
               </button>
+              <button
+                className={settingsPanel === 'aiModel' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('aiModel')}
+              >
+                AI Model
+              </button>
               <button className="settings-nav-item" type="button">
                 Appearance
               </button>
@@ -4504,7 +4550,7 @@ export function App(): JSX.Element {
               </button>
 
               <div className="settings-scroll-area">
-                {settingsPanel === 'editor' ? (
+                {settingsPanel === 'editor' && (
                   <>
                     <h3 className="settings-section-title">Editor Settings</h3>
 
@@ -4569,7 +4615,112 @@ export function App(): JSX.Element {
                       <Switch checked={focusMode} onChange={setFocusMode} />
                     </div>
                   </>
-                ) : (
+                )}
+                {settingsPanel === 'aiModel' && (
+                  <>
+                    <h3 className="settings-section-title">AI Model</h3>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">API Base URL</span>
+                        <span className="setting-desc">OpenAI-compatible API endpoint. Leave empty to use the .env value or built-in default.</span>
+                      </div>
+                      <input
+                        className="settings-text-input"
+                        type="text"
+                        placeholder="https://api.openai.com/v1"
+                        value={aiConfig.baseUrl}
+                        onChange={(e) => setAiConfig({ ...aiConfig, baseUrl: e.target.value })}
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">API Key</span>
+                        <span className="setting-desc">Your API key. Stored locally and never sent to remote servers.</span>
+                      </div>
+                      <input
+                        className="settings-text-input"
+                        type="password"
+                        placeholder="sk-..."
+                        value={aiConfig.apiKey}
+                        onChange={(e) => setAiConfig({ ...aiConfig, apiKey: e.target.value })}
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Model</span>
+                        <span className="setting-desc">Model identifier string (e.g., gpt-4o, claude-sonnet-4-20250514).</span>
+                      </div>
+                      <input
+                        className="settings-text-input"
+                        type="text"
+                        placeholder="google/gemini-3.1-flash-lite-preview"
+                        value={aiConfig.model}
+                        onChange={(e) => setAiConfig({ ...aiConfig, model: e.target.value })}
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Context Window</span>
+                        <span className="setting-desc">Maximum token limit for the model context. Recommended: 128000.</span>
+                      </div>
+                      <input
+                        className="settings-text-input short"
+                        type="number"
+                        min={1024}
+                        max={2000000}
+                        step={1000}
+                        placeholder="128000"
+                        value={aiConfig.contextWindow || ''}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (val > 0 && Number.isFinite(val)) {
+                            setAiConfig({ ...aiConfig, contextWindow: val });
+                          } else if (e.target.value === '') {
+                            setAiConfig({ ...aiConfig, contextWindow: 0 });
+                          }
+                        }}
+                      />
+                    </div>
+
+                    <div className="settings-panel-footer">
+                      <button
+                        className="primary-action"
+                        type="button"
+                        disabled={aiConfigLoading}
+                        onClick={async () => {
+                          setAiConfigLoading(true);
+                          try {
+                            await updateAiConfig(aiConfig);
+                          } finally {
+                            setAiConfigLoading(false);
+                          }
+                        }}
+                      >
+                        {aiConfigLoading ? (
+                          <LoaderCircle className="spinning" size={15} />
+                        ) : (
+                          <Save size={15} />
+                        )}
+                        Save AI Settings
+                      </button>
+                    </div>
+
+                    <p className="settings-panel-hint">
+                      These settings override the environment variables (<code>VELOCA_AGENT_BASE_URL</code>,{' '}
+                      <code>VELOCA_AGENT_API_KEY</code>, <code>VELOCA_AGENT_MODEL</code>,{' '}
+                      <code>VELOCA_AGENT_CONTEXT_WINDOW</code>) from your <code>.env</code> file. Leave fields empty
+                      to fall back to <code>.env</code> or built-in defaults.
+                    </p>
+                  </>
+                )}
+                {settingsPanel === 'account' && (
                   <>
                     <h3 className="settings-section-title">Account</h3>
 

@@ -10,3 +10,6 @@ release/
 .env.*.local
 coverage/
 *.tsbuildinfo
+AGENTS.md
+offical/
+propertypes/
