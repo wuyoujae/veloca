@@ -40,17 +40,20 @@ jobs:
           python-version: '3.12'
 
       - if: matrix.target == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential libfuse2
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python-is-python3 libfuse2 fakeroot dpkg-dev
 
       - run: npm ci
 
       - run: npm run build
 
-      - run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }}
+      - run: DEBUG=electron-builder npx electron-builder --${{ matrix.target }} --${{ matrix.arch }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Veloca-${{ matrix.target }}-${{ matrix.arch }}
           path: release/*
