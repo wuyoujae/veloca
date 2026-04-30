@@ -1,8 +1,29 @@
-# Veloca
+[![Veloca](resources/logo.svg)](https://github.com/wuyoujae/veloca)
+
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/wuyoujae/veloca/blob/main/LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
+[![Electron](https://img.shields.io/badge/electron-33.x-9feaf9.svg)](https://www.electronjs.org/)
 
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
 The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, local asset handling for richer Markdown documents, GitHub account binding, and Veloca-owned markdown version management through an isolated shadow repository.
+
+## Table of Contents
+
+- [Project Overview](#project-overview)
+- [Project Approach](#project-approach)
+- [Core Features](#core-features)
+- [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Development Guide](#development-guide)
+- [Testing Guide](#testing-guide)
+- [Usage Examples](#usage-examples)
+- [Roadmap](#roadmap)
+- [FAQ](#faq)
+- [Contribution Guide](#contribution-guide)
+- [License](#license)
 
 ## Project Overview
 
@@ -14,11 +35,11 @@ The project currently focuses on desktop-first workspace management, rich markdo
 
 Veloca separates desktop, backend, and renderer responsibilities:
 
-- Electron owns the native window, lifecycle, and secure bridge between UI and backend code.
-- React owns the interactive editor interface.
-- Node services own persistent application behavior.
-- SQLite stores local application data with a minimal schema aligned to current requirements, including app settings and workspace folder roots.
-- Version management uses a Veloca-owned Git repository in Electron's user data directory. User project folders are never turned into Git repositories by Veloca, and existing user `.git` folders are not read or modified.
+- **Electron** owns the native window, lifecycle, and secure bridge between UI and backend code.
+- **React** owns the interactive editor interface.
+- **Node services** own persistent application behavior.
+- **SQLite** stores local application data with a minimal schema aligned to current requirements, including app settings and workspace folder roots.
+- **Version management** uses a Veloca-owned Git repository in Electron's user data directory. User project folders are never turned into Git repositories by Veloca, and existing user `.git` folders are not read or modified.
 
 TipTap is used as the editor engine because it is MIT licensed, gives Veloca more control over the final writing experience, and allows the editing surface to fully inherit the application's own layout, typography, and theme tokens.
 
@@ -49,16 +70,18 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 
 ## Tech Stack
 
-- Frontend: React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS
-- Desktop shell: Electron, electron-vite
-- Backend: Node.js, TypeScript, isomorphic-git
-- Database: SQLite through `better-sqlite3`
-- Build tools: TypeScript, Vite, electron-vite
-- Testing: not configured yet; this foundation milestone is verified through typecheck and production build
+| Layer | Technologies |
+| --- | --- |
+| Frontend | React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS |
+| Desktop shell | Electron, electron-vite |
+| Backend | Node.js, TypeScript, isomorphic-git |
+| Database | SQLite through `better-sqlite3` |
+| Build tools | TypeScript, Vite, electron-vite |
+| Testing | not configured yet; this foundation milestone is verified through typecheck and production build |
 
 ## Project Structure
 
-```text
+```
 .
 ├── app
 │   ├── backend
@@ -129,11 +152,11 @@ Auto Save is a user preference stored in the `app_settings` table and defaults t
 
 All application code lives under `app`.
 
-- Put renderer code in `app/frontend`.
-- Put Electron and Node backend code in `app/backend`.
-- Put uncertain temporary implementation work in `app/selection`, then move it once ownership is clear.
-- Put tests and test helpers in `app/test`.
-- Keep feature documentation in `docs/models`, organized by business model.
+- Put **renderer code** in `app/frontend`.
+- Put **Electron and Node backend code** in `app/backend`.
+- Put **uncertain temporary implementation work** in `app/selection`, then move it once ownership is clear.
+- Put **tests and test helpers** in `app/test`.
+- Keep **feature documentation** in `docs/models`, organized by business model.
 
 Database design should stay minimal and match the backend logic being implemented. Do not add speculative tables or fields before the related business behavior exists.
 
@@ -146,7 +169,10 @@ npm run typecheck
 npm run build
 ```
 
-Manual acceptance checks:
+<details>
+<summary><b>Manual acceptance checks</b> (click to expand)</summary>
+
+<br>
 
 1. Run `npm run dev`.
 2. Confirm the Electron window opens with the Veloca editor layout.
@@ -173,7 +199,7 @@ Manual acceptance checks:
 23. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
 24. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
 25. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
-26. Enter `$E=mc^2$` and `$$\\int_0^1 x^2 dx$$` and confirm both formulas render.
+26. Enter `$E=mc^2$` and `$$\int_0^1 x^2 dx$$` and confirm both formulas render.
 27. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
 28. Add `VELOCA_GITHUB_CLIENT_ID` to `.env`, open `Settings` → `Account`, click `Bind GitHub`, enter the displayed code on GitHub, and confirm the connected GitHub account appears in Veloca.
 29. Switch to the sidebar `Git` tab and confirm it prompts for repository setup after GitHub is bound with the required `repo` permission.
@@ -186,6 +212,8 @@ Manual acceptance checks:
 36. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
 37. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
+</details>
+
 Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
 
 ## Usage Examples
@@ -194,31 +222,41 @@ At this stage, Veloca starts with an empty workspace until folders are added or 
 
 ## Roadmap
 
-- Completed: project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, and isolated Veloca markdown version management.
-- Next: markdown export and search.
-- Later: plugin or extension system if product requirements justify it.
+- **Completed:** project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, and isolated Veloca markdown version management.
+- **Next:** markdown export and search.
+- **Later:** plugin or extension system if product requirements justify it.
 
 ## FAQ
 
-### Is Veloca production-ready?
+<details>
+<summary><b>Is Veloca production-ready?</b></summary>
 
 No. This is the initial foundation build. It is suitable for continuing development, not for end-user release.
+</details>
 
-### Why is SQLite already included?
+<details>
+<summary><b>Why is SQLite already included?</b></summary>
 
 Theme settings need durable local persistence. The schema is intentionally small and can evolve only when new backend behavior requires it.
+</details>
 
-### Why do no files appear after launch?
+<details>
+<summary><b>Why do no files appear after launch?</b></summary>
 
 Veloca now loads real markdown files from added workspace folders. Click the add-folder icon beside `Workspace` and choose a folder that contains `.md` files.
+</details>
 
-### How are edits saved?
+<details>
+<summary><b>How are edits saved?</b></summary>
 
 Auto Save is enabled by default and writes changes after a short pause. You can turn it off in `Settings`; when it is off, use `Cmd/Ctrl+S` to save the active markdown file.
+</details>
 
-### Does Veloca modify my project's Git repository?
+<details>
+<summary><b>Does Veloca modify my project's Git repository?</b></summary>
 
 No. Veloca version management uses a separate shadow repository in Electron's user data directory. It copies only Veloca-saved local `.md` files into that repository and does not create, read, or modify `.git` inside user workspace folders.
+</details>
 
 ## Contribution Guide
 
@@ -226,7 +264,7 @@ Use small, focused commits. Keep changes aligned with the requested feature and 
 
 Recommended commit style:
 
-```text
+```
 feat: add markdown editor foundation
 feat: integrate tiptap markdown editing
 fix: persist editor theme setting
@@ -235,4 +273,4 @@ docs: document markdown editor model
 
 ## License
 
-MIT
+[MIT](LICENSE)
