@@ -23,6 +23,9 @@
     "directories": {
       "output": "release"
     },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
     "files": [
       "dist/**/*",
       "resources/**/*",
