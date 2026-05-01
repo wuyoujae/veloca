@@ -432,6 +432,35 @@ function updateRemoteProjectDetails(
     );
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function fetchSupabaseManagementResponse(
+  url: string,
+  init: RequestInit,
+  method: string,
+  path: string
+): Promise<Response> {
+  try {
+    return await net.fetch(url, init);
+  } catch (electronNetError) {
+    console.warn('[remote-supabase] electron net.fetch failed; retrying with node fetch', {
+      error: getErrorMessage(electronNetError),
+      method,
+      path
+    });
+
+    try {
+      return await fetch(url, init);
+    } catch (nodeFetchError) {
+      throw new Error(
+        `Supabase Management API ${method} ${path} network failed: ${getErrorMessage(nodeFetchError)}`
+      );
+    }
+  }
+}
+
 async function fetchSupabaseManagement<T>(
   personalAccessToken: string,
   path: string,
@@ -447,10 +476,10 @@ async function fetchSupabaseManagement<T>(
     headers.set('Content-Type', 'application/json');
   }
 
-  const response = await net.fetch(`${supabaseManagementApiBaseUrl}${path}`, {
+  const response = await fetchSupabaseManagementResponse(`${supabaseManagementApiBaseUrl}${path}`, {
     ...init,
     headers
-  });
+  }, method, path);
   const responseText = await response.text();
   let payload = {} as T;
 
