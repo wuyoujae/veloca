@@ -706,7 +706,8 @@ function isTransientPostgresConnectionError(error: unknown): boolean {
     message.includes('etimedout') ||
     message.includes('timeout expired') ||
     message.includes('server closed the connection') ||
-    message.includes('the database system is starting up')
+    message.includes('the database system is starting up') ||
+    (message.includes('tenant/user') && message.includes('not found'))
   );
 }
 
@@ -716,22 +717,39 @@ function getRemoteSchemaConnectionTargets(
 ): PostgresConnectionTarget[] {
   const projectRef = project.ref ?? '';
   const directHost = project.database?.host || `db.${projectRef}.supabase.co`;
-  const poolerHost = `aws-0-${region}.pooler.supabase.com`;
+  const poolerHosts = [
+    `aws-0-${region}.pooler.supabase.com`,
+    `aws-1-${region}.pooler.supabase.com`
+  ];
 
-  return [
+  const targets: PostgresConnectionTarget[] = [
     {
       host: directHost,
       label: 'direct',
       port: 5432,
       user: 'postgres'
-    },
-    {
-      host: poolerHost,
+    }
+  ];
+
+  for (const host of poolerHosts) {
+    targets.push({
+      host,
       label: 'session-pooler',
       port: 5432,
       user: `postgres.${projectRef}`
-    }
-  ];
+    });
+  }
+
+  for (const host of poolerHosts) {
+    targets.push({
+      host,
+      label: 'transaction-pooler',
+      port: 6543,
+      user: `postgres.${projectRef}`
+    });
+  }
+
+  return targets;
 }
 
 async function initializeRemoteSchema(
