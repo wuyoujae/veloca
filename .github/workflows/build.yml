@@ -25,7 +25,7 @@ jobs:
             arch: x64
           - os: windows-latest
             target: win
-            package_target: zip
+            package_target: nsis zip
             arch: x64
           - os: macos-15
             target: mac
@@ -82,12 +82,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Create draft release
+      - name: Create release
         run: |
-          mapfile -t release_files < <(find artifacts -type f \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.zip' \) -print)
+          mapfile -t release_files < <(find artifacts -type f \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.yml' -o -name '*.blockmap' \) -print)
           printf 'Release files:\n'
           printf '%s\n' "${release_files[@]}"
           test "${#release_files[@]}" -gt 0
-          gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "$GITHUB_REF_NAME"
+          gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$GITHUB_REF_NAME"
         env:
           GH_TOKEN: ${{ github.token }}

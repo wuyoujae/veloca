@@ -25,8 +25,8 @@ import type {
 import type {
   AppInfo,
   OpenSourceComponent,
-  UpdateCheckResult
 } from '../services/app-info-service';
+import type { AppUpdateStatus } from '../services/auto-update-service';
 import type {
   FileOperationResult,
   DocumentProvenanceSnapshot,
@@ -129,11 +129,19 @@ contextBridge.exposeInMainWorld('veloca', {
     }
   },
   app: {
-    checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates') as Promise<UpdateCheckResult>,
+    checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates') as Promise<AppUpdateStatus>,
     getInfo: () => ipcRenderer.invoke('app:get-info') as Promise<AppInfo>,
+    installUpdate: () => ipcRenderer.invoke('app:install-update') as Promise<AppUpdateStatus>,
     listOpenSourceComponents: () =>
       ipcRenderer.invoke('app:list-open-source-components') as Promise<OpenSourceComponent[]>,
     openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url) as Promise<void>,
+    onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => {
+      const listener = (_event: IpcRendererEvent, status: AppUpdateStatus) => callback(status);
+
+      ipcRenderer.on('app:update-status', listener);
+
+      return () => ipcRenderer.removeListener('app:update-status', listener);
+    },
     platform: process.platform
   },
   windowControls: {

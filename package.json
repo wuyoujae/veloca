@@ -29,9 +29,17 @@
     "directories": {
       "output": "release"
     },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "electronDownload": {
       "mirror": "https://npmmirror.com/mirrors/electron/"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "wuyoujae",
+        "repo": "veloca"
+      }
+    ],
     "npmRebuild": false,
     "files": [
       "dist/**/*",
@@ -69,12 +77,23 @@
       "icon": "resources/icon.ico",
       "target": [
         {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "zip",
           "arch": [
             "x64"
           ]
         }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
     },
     "linux": {
       "icon": "resources/icon.png",
@@ -116,6 +135,7 @@
     "better-sqlite3": "^11.9.1",
     "call-bind-apply-helpers": "^1.0.2",
     "dompurify": "^3.4.0",
+    "electron-updater": "^6.8.3",
     "electron-vite": "^3.0.0",
     "isomorphic-git": "^1.37.5",
     "katex": "^0.16.45",

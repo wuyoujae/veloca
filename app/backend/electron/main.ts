@@ -97,7 +97,13 @@ import {
   saveRemoteSyncConfig,
   type RemoteSyncConfig
 } from '../services/remote-sync-service';
-import { checkForUpdates, getAppInfo, listOpenSourceComponents } from '../services/app-info-service';
+import { getAppInfo, listOpenSourceComponents } from '../services/app-info-service';
+import {
+  checkForAppUpdates,
+  initializeAutoUpdates,
+  installDownloadedAppUpdate,
+  onUpdateStatusChanged
+} from '../services/auto-update-service';
 
 interface WatchedMarkdownFile {
   timer: ReturnType<typeof setTimeout> | null;
@@ -333,7 +339,8 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:get-theme', () => getTheme());
   ipcMain.handle('app:get-info', () => getAppInfo());
-  ipcMain.handle('app:check-for-updates', () => checkForUpdates());
+  ipcMain.handle('app:check-for-updates', () => checkForAppUpdates());
+  ipcMain.handle('app:install-update', () => installDownloadedAppUpdate());
   ipcMain.handle('app:list-open-source-components', () => listOpenSourceComponents());
   ipcMain.handle('app:open-external', async (_event, url: string) => {
     const parsedUrl = new URL(url);
@@ -773,6 +780,14 @@ if (!singleInstanceLock) {
     getDatabase();
     registerIpcHandlers();
     registerAssetProtocol();
+    initializeAutoUpdates();
+    onUpdateStatusChanged((status) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) {
+          window.webContents.send('app:update-status', status);
+        }
+      }
+    });
     createMainWindow();
     runRemoteSyncInBackground('startup');
 

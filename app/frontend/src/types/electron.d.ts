@@ -236,15 +236,19 @@ interface AppInfo {
 }
 
 interface UpdateCheckResult {
-  checkedAt: number;
+  bytesPerSecond: number | null;
+  checkedAt: number | null;
   currentVersion: string;
+  downloadedBytes: number | null;
   errorMessage?: string;
   hasUpdate: boolean;
   latestVersion: string | null;
   publishedAt: string | null;
   releaseName: string | null;
   releaseUrl: string | null;
-  status: 'available' | 'current' | 'unavailable';
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'current' | 'unavailable';
+  totalBytes: number | null;
+  updatePercent: number | null;
 }
 
 interface OpenSourceComponent {
@@ -408,8 +412,10 @@ declare global {
       app: {
         checkForUpdates: () => Promise<UpdateCheckResult>;
         getInfo: () => Promise<AppInfo>;
+        installUpdate: () => Promise<UpdateCheckResult>;
         listOpenSourceComponents: () => Promise<OpenSourceComponent[]>;
         openExternal: (url: string) => Promise<void>;
+        onUpdateStatus: (callback: (status: UpdateCheckResult) => void) => () => void;
         platform: NodeJS.Platform;
       };
       windowControls: {

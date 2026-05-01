@@ -29,6 +29,7 @@ import {
   Code2,
   Copy,
   Database,
+  Download,
   ExternalLink,
   FileText,
   FilePlus,
@@ -119,6 +120,38 @@ const defaultAppInfo: AppInfo = {
   name: 'Veloca',
   version: '0.0.0'
 };
+
+function getUpdateSummary(status: UpdateCheckResult | null): string {
+  if (!status) {
+    return 'Automatically check GitHub Releases and download installer updates.';
+  }
+
+  if (status.status === 'checking') {
+    return 'Checking GitHub Releases...';
+  }
+
+  if (status.status === 'available') {
+    return `Veloca ${status.latestVersion ?? ''} is available. Download will start automatically.`;
+  }
+
+  if (status.status === 'downloading') {
+    return `Downloading update${status.updatePercent === null ? '' : ` ${status.updatePercent}%`}...`;
+  }
+
+  if (status.status === 'downloaded') {
+    return `Veloca ${status.latestVersion ?? ''} is ready to install.`;
+  }
+
+  if (status.status === 'current') {
+    return `Veloca ${status.currentVersion} is up to date.`;
+  }
+
+  if (status.status === 'unavailable') {
+    return status.errorMessage ?? 'Update status is unavailable.';
+  }
+
+  return 'Automatically check GitHub Releases and download installer updates.';
+}
 
 function logAiInsertDebug(message: string, details?: Record<string, unknown>): void {
   console.info(aiInsertLogPrefix, message, details ?? {});
@@ -264,15 +297,19 @@ interface AppInfo {
 }
 
 interface UpdateCheckResult {
-  checkedAt: number;
+  bytesPerSecond: number | null;
+  checkedAt: number | null;
   currentVersion: string;
+  downloadedBytes: number | null;
   errorMessage?: string;
   hasUpdate: boolean;
   latestVersion: string | null;
   publishedAt: string | null;
   releaseName: string | null;
   releaseUrl: string | null;
-  status: 'available' | 'current' | 'unavailable';
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'current' | 'unavailable';
+  totalBytes: number | null;
+  updatePercent: number | null;
 }
 
 interface OpenSourceComponent {
@@ -1477,6 +1514,7 @@ export function App(): JSX.Element {
   const [appInfo, setAppInfo] = useState<AppInfo>(defaultAppInfo);
   const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
   const [licenseDialogOpen, setLicenseDialogOpen] = useState(false);
   const [openSourceComponents, setOpenSourceComponents] = useState<OpenSourceComponent[]>([]);
   const [openSourceLoading, setOpenSourceLoading] = useState(false);
@@ -1506,6 +1544,7 @@ export function App(): JSX.Element {
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const openAiPanelShortcutButtonRef = useRef<HTMLButtonElement>(null);
+  const updateReadyToastKeyRef = useRef<string>('');
 
   const activeTab = useMemo(
     () => openTabs.find((tab) => tab.file.path === activeTabPath) ?? null,
@@ -4660,11 +4699,17 @@ export function App(): JSX.Element {
       const result = await window.veloca.app.checkForUpdates();
       setUpdateStatus(result);
 
-      if (result.status === 'available') {
+      if (result.status === 'available' || result.status === 'downloading') {
         showToast({
           type: 'info',
-          title: 'Update Available',
-          description: `Veloca ${result.latestVersion} is available.`
+          title: 'Update Download Started',
+          description: `Veloca ${result.latestVersion ?? 'update'} is being downloaded.`
+        });
+      } else if (result.status === 'downloaded') {
+        showToast({
+          type: 'success',
+          title: 'Update Ready',
+          description: 'Restart Veloca to install the downloaded update.'
         });
       } else if (source === 'manual' && result.status === 'current') {
         showToast({
@@ -4681,6 +4726,25 @@ export function App(): JSX.Element {
       }
     } finally {
       setUpdateChecking(false);
+    }
+  };
+
+  const installDownloadedUpdate = async () => {
+    if (!window.veloca?.app.installUpdate) {
+      return;
+    }
+
+    setUpdateInstalling(true);
+
+    try {
+      await window.veloca.app.installUpdate();
+    } catch (error) {
+      setUpdateInstalling(false);
+      showToast({
+        type: 'info',
+        title: 'Update Install Failed',
+        description: error instanceof Error ? error.message : 'Veloca could not restart into the downloaded update.'
+      });
     }
   };
 
@@ -4727,6 +4791,23 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    return window.veloca?.app.onUpdateStatus?.((status) => {
+      setUpdateStatus(status);
+      setUpdateChecking(status.status === 'checking');
+
+      const readyToastKey = `${status.latestVersion ?? 'unknown'}-${status.status}`;
+      if (status.status === 'downloaded' && updateReadyToastKeyRef.current !== readyToastKey) {
+        updateReadyToastKeyRef.current = readyToastKey;
+        showToast({
+          type: 'success',
+          title: 'Update Ready',
+          description: 'Restart Veloca to install the downloaded update.'
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -5498,7 +5579,11 @@ export function App(): JSX.Element {
                 onClick={() => setSettingsPanel('about')}
               >
                 <span>About Veloca</span>
-                {updateStatus?.status === 'available' && <span className="settings-nav-badge">New</span>}
+                {updateStatus && ['available', 'downloading', 'downloaded'].includes(updateStatus.status) && (
+                  <span className="settings-nav-badge">
+                    {updateStatus.status === 'downloaded' ? 'Ready' : 'New'}
+                  </span>
+                )}
               </button>
             </aside>
 
@@ -6189,13 +6274,33 @@ export function App(): JSX.Element {
                       </div>
                     </div>
 
-                    {updateStatus?.status === 'available' && (
+                    {updateStatus &&
+                      ['available', 'downloading', 'downloaded'].includes(updateStatus.status) && (
                       <div className="settings-update-banner">
                         <div>
-                          <strong>Veloca {updateStatus.latestVersion} is available</strong>
-                          <span>Your current version is {updateStatus.currentVersion}.</span>
+                          <strong>
+                            {updateStatus.status === 'downloaded'
+                              ? `Veloca ${updateStatus.latestVersion ?? ''} is ready`
+                              : `Veloca ${updateStatus.latestVersion ?? ''} is available`}
+                          </strong>
+                          <span>{getUpdateSummary(updateStatus)}</span>
+                          {updateStatus.status === 'downloading' && (
+                            <span className="settings-update-progress">
+                              <span style={{ width: `${updateStatus.updatePercent ?? 0}%` }} />
+                            </span>
+                          )}
                         </div>
-                        {updateStatus.releaseUrl && (
+                        {updateStatus.status === 'downloaded' ? (
+                          <button
+                            className="primary-action"
+                            type="button"
+                            disabled={updateInstalling}
+                            onClick={() => void installDownloadedUpdate()}
+                          >
+                            {updateInstalling ? <LoaderCircle className="spinning" size={14} /> : <RefreshCw size={14} />}
+                            Restart to Update
+                          </button>
+                        ) : updateStatus.releaseUrl ? (
                           <button
                             className="secondary-action"
                             type="button"
@@ -6204,9 +6309,9 @@ export function App(): JSX.Element {
                             <ExternalLink size={14} />
                             Open Release
                           </button>
-                        )}
+                        ) : null}
                       </div>
-                    )}
+                        )}
 
                     <div className="about-info-grid">
                       <div className="about-info-item">
@@ -6238,18 +6343,38 @@ export function App(): JSX.Element {
                         onClick={() => void checkForAppUpdates('manual')}
                       >
                         <span className="about-action-icon">
-                          <RefreshCw className={updateChecking ? 'spinning' : ''} size={16} />
+                          {updateStatus?.status === 'downloading' ? (
+                            <Download size={16} />
+                          ) : (
+                            <RefreshCw className={updateChecking ? 'spinning' : ''} size={16} />
+                          )}
                         </span>
                         <span className="about-action-copy">
                           <strong>Check for Updates</strong>
                           <small>
-                            {updateStatus?.checkedAt
-                              ? `Last checked ${new Date(updateStatus.checkedAt).toLocaleString()}`
-                              : 'Inspect the latest public GitHub Release.'}
+                            {updateStatus ? getUpdateSummary(updateStatus) : 'Inspect GitHub Releases and download updates.'}
                           </small>
                         </span>
                         <ChevronRight size={16} />
                       </button>
+
+                      {updateStatus?.status === 'downloaded' && (
+                        <button
+                          className="about-action-row"
+                          type="button"
+                          disabled={updateInstalling}
+                          onClick={() => void installDownloadedUpdate()}
+                        >
+                          <span className="about-action-icon">
+                            {updateInstalling ? <LoaderCircle className="spinning" size={16} /> : <RefreshCw size={16} />}
+                          </span>
+                          <span className="about-action-copy">
+                            <strong>Restart to Update</strong>
+                            <small>Close Veloca, run the installer, and reopen the updated app.</small>
+                          </span>
+                          <ChevronRight size={16} />
+                        </button>
+                      )}
 
                       <button className="about-action-row" type="button" onClick={() => void openLicenseDialog()}>
                         <span className="about-action-icon">

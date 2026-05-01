@@ -5331,6 +5331,25 @@ button {
   font-size: 12px;
 }
 
+.settings-update-progress {
+  position: relative;
+  overflow: hidden;
+  width: min(260px, 100%);
+  height: 5px;
+  margin-top: 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--info) 16%, var(--border));
+}
+
+.settings-update-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 4px;
+  border-radius: inherit;
+  background: var(--info);
+  transition: width 0.18s ease;
+}
+
 .about-info-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
