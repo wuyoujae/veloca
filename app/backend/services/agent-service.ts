@@ -6,6 +6,7 @@ import { veloca } from 'otherone-agent';
 import { getDatabase } from '../database/connection';
 import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
 import { getAiBaseUrl, getAiApiKey, getAiModel, getAiContextWindow } from './settings-store';
+import { attachStoredReasoningToMessages, getStoredReasoningContent } from './agent-reasoning';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
 
@@ -137,6 +138,7 @@ const maxReadFileBytes = 10 * 1024 * 1024;
 const maxWriteFileBytes = 10 * 1024 * 1024;
 const readFileBinarySampleBytes = 8192;
 const agentStorageDirectory = join(process.cwd(), '.veloca', 'storage');
+const agentStorageFilePath = join(agentStorageDirectory, 'veloca-storage.json');
 const agentSessionWorkspaceIndexPath = join(agentStorageDirectory, 'veloca-session-workspaces.json');
 const agentBrainstormWorkspaceKey = 'brainstorm';
 const maxBrainstormSessionKeyLength = 512;
@@ -177,11 +179,26 @@ interface StoredAgentEntry {
   content?: unknown;
   create_at?: unknown;
   entry_id?: unknown;
+  reasoning_content?: unknown;
   role?: unknown;
+  token_consumption?: unknown;
+  tools?: unknown;
 }
 
 interface StoredAgentSessionData {
   entries?: StoredAgentEntry[];
+}
+
+interface StoredAgentStorageSession {
+  compacted_entries?: unknown[];
+  create_at?: unknown;
+  entries?: StoredAgentEntry[];
+  session_id?: unknown;
+  status?: unknown;
+}
+
+interface StoredAgentStorageData {
+  sessions?: StoredAgentStorageSession[];
 }
 
 interface AgentSessionWorkspaceScope {
@@ -5725,6 +5742,238 @@ function buildUserPrompt(prompt: string, request: AgentSendMessageRequest): stri
   return `${metadata.join('\n\n')}\n\n用户问题：\n${prompt}`;
 }
 
+function readAgentStorageData(): StoredAgentStorageData {
+  if (!existsSync(agentStorageFilePath)) {
+    return { sessions: [] };
+  }
+
+  try {
+    const data = JSON.parse(readFileSync(agentStorageFilePath, 'utf-8')) as StoredAgentStorageData;
+
+    return {
+      sessions: Array.isArray(data.sessions) ? data.sessions : []
+    };
+  } catch {
+    return { sessions: [] };
+  }
+}
+
+function writeAgentStorageData(data: StoredAgentStorageData): void {
+  if (!existsSync(agentStorageDirectory)) {
+    mkdirSync(agentStorageDirectory, { recursive: true });
+  }
+
+  writeFileSync(agentStorageFilePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function writeAgentEntry(options: {
+  content: string;
+  reasoningContent?: string;
+  role: string;
+  sessionId: string;
+  tokenConsumption?: number;
+  tools?: unknown;
+}): void {
+  const storageData = readAgentStorageData();
+  const sessions = storageData.sessions ?? [];
+  let session = sessions.find((candidate) => candidate.session_id === options.sessionId);
+  const now = new Date().toISOString();
+
+  if (!session) {
+    session = {
+      compacted_entries: [],
+      create_at: now,
+      entries: [],
+      session_id: options.sessionId,
+      status: 0
+    };
+    sessions.push(session);
+  }
+
+  const entry: StoredAgentEntry = {
+    content: options.content,
+    create_at: now,
+    entry_id: randomUUID(),
+    role: options.role
+  };
+
+  if (options.tools !== undefined && options.tools !== null) {
+    entry.tools = options.tools;
+  }
+
+  if (options.tokenConsumption !== undefined) {
+    entry.token_consumption = options.tokenConsumption;
+  }
+
+  if (options.reasoningContent) {
+    entry.reasoning_content = options.reasoningContent;
+  }
+
+  session.entries = Array.isArray(session.entries) ? session.entries : [];
+  session.entries.push(entry);
+  storageData.sessions = sessions;
+  writeAgentStorageData(storageData);
+}
+
+function getStoredSessionEntries(sessionId: string): StoredAgentEntry[] {
+  const storageData = readAgentStorageData();
+  const session = storageData.sessions?.find((candidate) => candidate.session_id === sessionId && candidate.status !== 1);
+
+  return Array.isArray(session?.entries) ? session.entries : [];
+}
+
+function getReasoningAwareMessages(messages: unknown, sessionId: string): unknown {
+  if (!Array.isArray(messages)) {
+    return messages;
+  }
+
+  return attachStoredReasoningToMessages(messages, getStoredSessionEntries(sessionId));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseOpenAiAgentResponse(response: unknown): {
+  content: string;
+  reasoningContent?: string;
+  role: string;
+  tokenConsumption: number;
+  tools: { tool_calls: unknown[] } | null;
+} {
+  if (!isRecord(response) || !Array.isArray(response.choices) || !response.choices[0]) {
+    throw new Error('Invalid OpenAI response format: missing choices');
+  }
+
+  const choice = response.choices[0];
+  const message = isRecord(choice) && isRecord(choice.message) ? choice.message : {};
+  const usage = isRecord(response.usage) ? response.usage : {};
+  const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+
+  return {
+    content: typeof message.content === 'string' ? message.content : '',
+    reasoningContent: typeof message.reasoning_content === 'string' ? message.reasoning_content : undefined,
+    role: typeof message.role === 'string' ? message.role : 'assistant',
+    tokenConsumption: typeof usage.total_tokens === 'number' ? usage.total_tokens : 0,
+    tools: toolCalls.length > 0 ? { tool_calls: toolCalls } : null
+  };
+}
+
+function getStreamReasoningDelta(chunk: unknown): string {
+  if (!chunk || typeof chunk !== 'object') {
+    return '';
+  }
+
+  const choices = (chunk as { choices?: Array<{ delta?: { reasoning_content?: unknown } }> }).choices;
+  const reasoningContent = choices?.[0]?.delta?.reasoning_content;
+
+  return typeof reasoningContent === 'string' ? reasoningContent : '';
+}
+
+function getStreamRoleDelta(chunk: unknown): string {
+  if (!chunk || typeof chunk !== 'object') {
+    return '';
+  }
+
+  const choices = (chunk as { choices?: Array<{ delta?: { role?: unknown } }> }).choices;
+  const role = choices?.[0]?.delta?.role;
+
+  return typeof role === 'string' ? role : '';
+}
+
+function getStreamToolCallsDelta(chunk: unknown): Array<{
+  function?: {
+    arguments?: unknown;
+    name?: unknown;
+  };
+  id?: unknown;
+  index?: unknown;
+  type?: unknown;
+}> {
+  if (!chunk || typeof chunk !== 'object') {
+    return [];
+  }
+
+  const choices = (chunk as { choices?: Array<{ delta?: { tool_calls?: unknown } }> }).choices;
+  const toolCalls = choices?.[0]?.delta?.tool_calls;
+
+  return Array.isArray(toolCalls) ? toolCalls : [];
+}
+
+function getChunkTokenConsumption(chunk: unknown): number {
+  if (!isRecord(chunk) || !isRecord(chunk.usage)) {
+    return 0;
+  }
+
+  return typeof chunk.usage.total_tokens === 'number' ? chunk.usage.total_tokens : 0;
+}
+
+function accumulateStreamToolCalls(
+  toolCalls: Array<{
+    function: {
+      arguments: string;
+      name: string;
+    };
+    id: string;
+    type: string;
+  }>,
+  deltaToolCalls: ReturnType<typeof getStreamToolCallsDelta>
+): void {
+  for (const toolCall of deltaToolCalls) {
+    const index = typeof toolCall.index === 'number' ? toolCall.index : toolCalls.length;
+
+    if (!toolCalls[index]) {
+      toolCalls[index] = {
+        function: {
+          arguments: '',
+          name: ''
+        },
+        id: '',
+        type: 'function'
+      };
+    }
+
+    if (typeof toolCall.id === 'string') {
+      toolCalls[index].id = toolCall.id;
+    }
+
+    if (typeof toolCall.type === 'string') {
+      toolCalls[index].type = toolCall.type;
+    }
+
+    if (typeof toolCall.function?.name === 'string') {
+      toolCalls[index].function.name += toolCall.function.name;
+    }
+
+    if (typeof toolCall.function?.arguments === 'string') {
+      toolCalls[index].function.arguments += toolCall.function.arguments;
+    }
+  }
+}
+
+async function writeToolResults(
+  sessionId: string,
+  toolCalls: unknown[],
+  toolsRealize: Record<string, unknown> | undefined
+): Promise<void> {
+  const toolResults = await veloca.ProcessTools(toolCalls, toolsRealize || {});
+
+  for (const toolResult of toolResults) {
+    const resultContent = JSON.stringify(toolResult.result ?? toolResult.error);
+    writeAgentEntry({
+      content: resultContent,
+      role: 'tool',
+      sessionId,
+      tools: {
+        error: toolResult.error,
+        function_name: toolResult.function_name,
+        result: toolResult.result,
+        tool_call_id: toolResult.tool_call_id
+      }
+    });
+  }
+}
+
 function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolean, hooks?: AgentRuntimeHooks) {
   const prompt = validateRequest(request);
   const workspaceScope = getAgentSessionWorkspaceScope(request.context);
@@ -5895,6 +6144,194 @@ function getSessionsForWorkspace(scope: AgentSessionWorkspaceScope): StoredAgent
   return readStoredSessionSummaries().filter((session) => workspaceSessionIds.has(getStoredSessionId(session)));
 }
 
+async function prepareAgentMessages(
+  input: ReturnType<typeof getAgentRuntimeOptions>['input'],
+  ai: ReturnType<typeof getAgentRuntimeOptions>['ai']
+): Promise<void> {
+  veloca.CombineTools(ai);
+  const messages = await veloca.CombineContext({
+    ai,
+    contextWindow: input.contextWindow,
+    loadType: input.contextLoadType,
+    provider: ai.provider,
+    sessionId: input.sessionId,
+    systemPrompt: ai.systemPrompt,
+    thresholdPercentage: input.thresholdPercentage,
+    tools: ai.tools
+  });
+
+  (ai as { messages?: unknown }).messages = getReasoningAwareMessages(messages, input.sessionId);
+}
+
+async function invokeReasoningAwareAgent(
+  input: ReturnType<typeof getAgentRuntimeOptions>['input'],
+  ai: ReturnType<typeof getAgentRuntimeOptions>['ai']
+): Promise<{
+  content: string;
+  reasoningContent?: string;
+  role: string;
+  tokenConsumption: number;
+  tools: { tool_calls: unknown[] } | null;
+}> {
+  if (ai.userPrompt) {
+    writeAgentEntry({
+      content: ai.userPrompt,
+      role: 'user',
+      sessionId: input.sessionId
+    });
+  }
+
+  const maxIterations = input.maxIterations || 999999;
+
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    await prepareAgentMessages(input, ai);
+    const response = await veloca.InvokeModel(ai);
+    const parsedResponse = parseOpenAiAgentResponse(response);
+
+    writeAgentEntry({
+      content: parsedResponse.content,
+      reasoningContent: parsedResponse.reasoningContent,
+      role: parsedResponse.role,
+      sessionId: input.sessionId,
+      tokenConsumption: parsedResponse.tokenConsumption,
+      tools: parsedResponse.tools
+    });
+
+    if (parsedResponse.tools?.tool_calls.length) {
+      await writeToolResults(input.sessionId, parsedResponse.tools.tool_calls, ai.tools_realize);
+      await sleep(1500);
+      continue;
+    }
+
+    return parsedResponse;
+  }
+
+  throw new Error(`Agent循环次数超过限制(${maxIterations}次)，可能陷入无限循环`);
+}
+
+async function* streamReasoningAwareAgent(
+  input: ReturnType<typeof getAgentRuntimeOptions>['input'],
+  ai: ReturnType<typeof getAgentRuntimeOptions>['ai']
+): AsyncGenerator<unknown, void, unknown> {
+  if (ai.userPrompt) {
+    writeAgentEntry({
+      content: ai.userPrompt,
+      role: 'user',
+      sessionId: input.sessionId
+    });
+  }
+
+  const maxIterations = input.maxIterations || 999999;
+
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    try {
+      await prepareAgentMessages(input, ai);
+      const response = await veloca.InvokeModel(ai);
+
+      if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
+        const parsedResponse = parseOpenAiAgentResponse(response);
+        writeAgentEntry({
+          content: parsedResponse.content,
+          reasoningContent: parsedResponse.reasoningContent,
+          role: parsedResponse.role,
+          sessionId: input.sessionId,
+          tokenConsumption: parsedResponse.tokenConsumption,
+          tools: parsedResponse.tools
+        });
+        yield {
+          content: parsedResponse.content,
+          type: 'complete',
+          ...parsedResponse
+        };
+        return;
+      }
+
+      let fullContent = '';
+      let reasoningContent = '';
+      let role = 'assistant';
+      let tokenConsumption = 0;
+      const toolCalls: Array<{
+        function: {
+          arguments: string;
+          name: string;
+        };
+        id: string;
+        type: string;
+      }> = [];
+
+      for await (const chunk of response) {
+        yield chunk;
+
+        const roleDelta = getStreamRoleDelta(chunk);
+        const contentDelta = getStreamDelta(chunk);
+        const reasoningDelta = getStreamReasoningDelta(chunk);
+        const chunkTokens = getChunkTokenConsumption(chunk);
+
+        if (roleDelta) {
+          role = roleDelta;
+        }
+
+        if (contentDelta) {
+          fullContent += contentDelta;
+        }
+
+        if (reasoningDelta) {
+          reasoningContent += reasoningDelta;
+        }
+
+        if (chunkTokens > 0) {
+          tokenConsumption = chunkTokens;
+        }
+
+        accumulateStreamToolCalls(toolCalls, getStreamToolCallsDelta(chunk));
+      }
+
+      const tools = toolCalls.length > 0 ? { tool_calls: toolCalls } : null;
+      writeAgentEntry({
+        content: fullContent,
+        reasoningContent,
+        role,
+        sessionId: input.sessionId,
+        tokenConsumption,
+        tools
+      });
+
+      if (tools?.tool_calls.length) {
+        const toolCallsInfo = tools.tool_calls
+          .map((toolCall) => `${toolCall.function.name}(${toolCall.function.arguments})`)
+          .join(', ');
+
+        yield {
+          content: `[tool_calls:${toolCallsInfo}]`,
+          type: 'tool_calls'
+        };
+
+        await writeToolResults(input.sessionId, tools.tool_calls, ai.tools_realize);
+        await sleep(1500);
+        continue;
+      }
+
+      return;
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      yield {
+        content: `[error:${errorMessage}]`,
+        error: errorMessage,
+        type: 'error'
+      };
+      throw error;
+    }
+  }
+
+  const errorMessage = `Agent循环次数超过限制(${maxIterations}次)，可能陷入无限循环`;
+  yield {
+    content: `[error:${errorMessage}]`,
+    error: errorMessage,
+    type: 'error'
+  };
+  throw new Error(errorMessage);
+}
+
 export function inheritAgentSessions(
   sourceContext: AgentRuntimeContext | undefined,
   targetContext: AgentRuntimeContext | undefined
@@ -5967,10 +6404,10 @@ export async function sendAgentMessage(
 ): Promise<AgentSendMessageResponse> {
   const { ai, input, model } = getAgentRuntimeOptions(request, false, hooks);
 
-  const response = await veloca.InvokeAgent(input, ai);
+  const response = await invokeReasoningAwareAgent(input, ai);
 
   return {
-    answer: String(response?.content ?? ''),
+    answer: response.content,
     model,
     sessionId: request.sessionId
   };
@@ -5999,7 +6436,7 @@ export async function streamAgentMessage(
     const options = getAgentRuntimeOptions(request, true, streamHooks);
     model = options.model;
 
-    const stream = await veloca.InvokeAgent(options.input, options.ai);
+    const stream = streamReasoningAwareAgent(options.input, options.ai);
 
     if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
       throw new Error('Veloca Agent did not return a stream.');

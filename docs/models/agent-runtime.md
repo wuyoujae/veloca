@@ -398,6 +398,19 @@ The sidecar maps `session_id` to a normalized workspace key. Filesystem workspac
 
 `otherone-agent` does not currently store Veloca UI metadata such as the selected Lite / Pro / Ultra badge, upload attachment UI state, or Web Search toggle separately. Persisted history therefore restores the durable user/assistant text from local memory and treats attachment chips as per-turn runtime context until a dedicated metadata layer is added.
 
+## DeepSeek Thinking Mode Compatibility
+
+DeepSeek thinking mode returns assistant thinking text as `reasoning_content`. When an assistant message also contains tool calls, DeepSeek requires the same assistant message to include its original `reasoning_content` in later chat-completion requests. If Veloca stores only `content` and `tool_calls`, follow-up turns can fail with `400 The reasoning_content in the thinking mode must be passed back to the API.`
+
+Veloca therefore wraps the `otherone-agent` OpenAI-compatible loop in the backend service:
+
+- Streaming responses accumulate both `delta.content` and `delta.reasoning_content`.
+- Assistant entries are stored in `.veloca/storage/veloca-storage.json` with a `reasoning_content` field when the provider returns one.
+- Before each follow-up request, backend message preparation reads stored assistant entries and attaches matching `reasoning_content` back onto assistant messages, including assistant messages that carry `tool_calls`.
+- The renderer still receives only answer content and tool-call status events; thinking content is preserved for API protocol correctness rather than displayed as normal assistant text.
+
+This is intentionally scoped to the existing local-file Agent memory. Veloca's SQLite product database does not need a schema change until Agent conversation memory is migrated into first-party tables.
+
 ## Configuration Notes
 
 The package requires provider credentials at call time:

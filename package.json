@@ -1,6 +1,6 @@
 {
   "name": "veloca",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Veloca is an Electron markdown editor inspired by Typora.",
   "main": "dist/backend/main/main.js",
   "type": "module",
@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "node app/test/ai-insert.test.mjs",
+    "test": "node --test app/test/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "package:mac": "electron-vite build && electron-builder --mac",
     "package:win": "electron-vite build && electron-builder --win",
