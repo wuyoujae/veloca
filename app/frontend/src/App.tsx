@@ -1602,6 +1602,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const openOnAgentShortcut = (event: KeyboardEvent) => {
+      if (isAppInputShortcutTarget(event.target)) {
+        return;
+      }
+
       const key = event.key.toLowerCase();
       const isFnKey = event.key === 'Fn' || event.code === 'Fn';
       const isFallbackShortcut = (event.metaKey || event.ctrlKey) && key === 'j';
@@ -4128,6 +4132,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const saveOnShortcut = (event: KeyboardEvent) => {
+      if (isAppInputShortcutTarget(event.target)) {
+        return;
+      }
+
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
         void saveCurrentDocument();
@@ -4789,6 +4797,7 @@ export function App(): JSX.Element {
             className="settings-window"
             aria-label="Settings"
             onMouseDown={(event) => event.stopPropagation()}
+            onPaste={(event) => event.stopPropagation()}
           >
             <aside className="settings-sidebar">
               <h2 className="settings-title">Settings</h2>
@@ -7954,6 +7963,18 @@ function canSubmitRemoteConfig(input: RemoteDatabaseConfigInput, config: RemoteD
       input.region.trim() &&
       ((input.personalAccessToken ?? '').trim() || config.patSaved) &&
       ((input.databasePassword ?? '').trim() || config.databasePasswordSaved)
+  );
+}
+
+function isAppInputShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(
+      'input, textarea, select, [contenteditable="true"], .settings-window, .name-dialog, .save-location-dialog'
+    )
   );
 }
 
