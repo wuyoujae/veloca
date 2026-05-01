@@ -6,6 +6,7 @@ import type {
   RemoteProjectProvisionResult,
   RemoteRegionOption
 } from '../services/remote-database-service';
+import type { RemoteSyncConfig, RemoteSyncStatus } from '../services/remote-sync-service';
 import type { GitHubAuthStatus, GitHubDeviceBinding } from '../services/github-auth-service';
 import type {
   VersionCommitResult,
@@ -48,14 +49,20 @@ contextBridge.exposeInMainWorld('veloca', {
     setAiConfig: (config: AiModelConfig) =>
       ipcRenderer.invoke('settings:set-ai-config', config) as Promise<AiModelConfig>,
     getRemoteConfig: () => ipcRenderer.invoke('settings:get-remote-config') as Promise<RemoteDatabaseConfigView>,
+    getRemoteSyncConfig: () => ipcRenderer.invoke('settings:get-remote-sync-config') as Promise<RemoteSyncConfig>,
     saveRemoteConfig: (config: RemoteDatabaseConfigInput) =>
-      ipcRenderer.invoke('settings:save-remote-config', config) as Promise<RemoteDatabaseConfigView>
+      ipcRenderer.invoke('settings:save-remote-config', config) as Promise<RemoteDatabaseConfigView>,
+    saveRemoteSyncConfig: (config: RemoteSyncConfig) =>
+      ipcRenderer.invoke('settings:save-remote-sync-config', config) as Promise<RemoteSyncConfig>
   },
   remote: {
     createVelocaProject: (config: RemoteDatabaseConfigInput) =>
       ipcRenderer.invoke('remote:create-veloca-project', config) as Promise<RemoteProjectProvisionResult>,
+    getSyncStatus: () => ipcRenderer.invoke('remote:get-sync-status') as Promise<RemoteSyncStatus>,
     listAvailableRegions: (config: RemoteDatabaseConfigInput) =>
       ipcRenderer.invoke('remote:list-available-regions', config) as Promise<RemoteRegionOption[]>,
+    retryFailedSync: () => ipcRenderer.invoke('remote:retry-failed-sync') as Promise<RemoteSyncStatus>,
+    syncNow: () => ipcRenderer.invoke('remote:sync-now') as Promise<RemoteSyncStatus>,
     testConnection: () => ipcRenderer.invoke('remote:test-connection') as Promise<RemoteDatabaseConfigView>
   },
   workspace: {

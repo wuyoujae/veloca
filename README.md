@@ -66,7 +66,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - GitHub account binding through the OAuth device authorization flow.
 - Veloca version management for saved local filesystem `.md` files through a private GitHub repository named `veloca-version-manager`.
 - Sidebar Git tab showing only Veloca-managed markdown changes from the isolated shadow repository.
-- Remote Supabase configuration through Settings, including encrypted local credential storage and automatic initialization of Veloca cloud database tables.
+- Remote Supabase configuration through Settings, including encrypted local credential storage, cloud table initialization, and Remote Sync preferences.
 - Settings modal with polished dark/light theme switching.
 - SQLite-backed app setting storage for theme and Auto Save persistence.
 - Toast message component for user feedback.
@@ -161,6 +161,8 @@ Auto Save is a user preference stored in the `app_settings` table and defaults t
 
 Remote Supabase configuration is also a user preference configured inside Settings rather than through required environment variables. The Remote panel asks for a Supabase personal access token, organization slug, database password, and region. Veloca provides a built-in dropdown of common Supabase regions plus a manual region code input for fallback. Sensitive values are stored with Electron secure storage before writing encrypted values into SQLite. Veloca then uses Supabase Management API to create or reuse a project named `veloca`, initializes the minimum cloud database tables, and keeps only desensitized status visible in the renderer.
 
+Remote Sync is configured in the same panel. Auto Sync, Pull on Startup, Push on Save, local opened/edited Markdown sync, asset sync, provenance sync, and soft-delete sync default to enabled. Veloca always mirrors SQLite-backed database workspaces to the remote project, while filesystem workspaces only sync Markdown files opened or edited inside Veloca. Sync runs in the background and records pending, failed, and conflict counts locally.
+
 ## Release Workflow
 
 Veloca uses npm scripts plus GitHub Actions for desktop releases. Local scripts prepare the version commit and Git tag; GitHub Actions builds platform artifacts and creates a draft GitHub Release.
@@ -203,7 +205,7 @@ All application code lives under `app`.
 
 Database design should stay minimal and match the backend logic being implemented. Do not add speculative tables or fields before the related business behavior exists.
 
-Remote Supabase development is documented in `docs/models/remote-database.md`. The current remote module initializes cloud tables only; local-to-remote sync and conflict resolution are future work.
+Remote Supabase development is documented in `docs/models/remote-database.md`. The current remote module initializes cloud tables, stores sync preferences, queues opened/edited local Markdown files, mirrors database workspaces, uploads assets to a private Supabase Storage bucket, and preserves conflict copies instead of overwriting user content.
 
 ## Testing Guide
 
@@ -249,10 +251,13 @@ npm run release:check
 21. Enter a valid Supabase PAT, organization slug, database password, and region; choose a common region from the dropdown or type a custom region code, then confirm Veloca creates or connects a Supabase project named `veloca`.
 22. Confirm the Supabase SQL editor shows the `veloca_remote_*` tables after initialization.
 23. Restart Veloca and confirm Settings > Remote shows project status without revealing the PAT, database password, or secret key.
-24. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
-25. Wait for Auto Save and confirm the status bar returns to `Saved`.
-26. Select a different file, then return to the edited file and confirm the saved content is still present.
-27. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
+24. In Settings > Remote > Sync, confirm Auto Sync, Pull on Startup, Push on Save, local Markdown sync, asset sync, provenance sync, and soft-delete sync are enabled by default.
+25. Save a local Markdown file that was opened in Veloca, then confirm Remote Sync shows pending or synced queue status.
+26. Create or edit a database workspace file, run Manual Sync Now, and confirm the remote tables contain database workspace rows.
+27. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
+28. Wait for Auto Save and confirm the status bar returns to `Saved`.
+29. Select a different file, then return to the edited file and confirm the saved content is still present.
+30. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
 28. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
 29. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
 30. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.

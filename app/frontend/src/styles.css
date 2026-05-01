@@ -5164,6 +5164,57 @@ button {
   width: 132px;
 }
 
+.remote-sync-panel {
+  margin-top: 14px;
+}
+
+.remote-sync-options {
+  display: grid;
+  gap: 8px;
+}
+
+.remote-sync-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.remote-sync-option input {
+  margin-top: 3px;
+}
+
+.remote-sync-option span {
+  display: grid;
+  gap: 3px;
+}
+
+.remote-sync-option strong {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.remote-sync-option small,
+.remote-sync-policy {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.remote-sync-option.disabled {
+  opacity: 0.72;
+}
+
+.remote-sync-policy {
+  padding-top: 4px;
+}
+
+.remote-sync-policy strong {
+  color: var(--foreground);
+}
+
 .theme-toggle {
   display: inline-flex;
   gap: 4px;

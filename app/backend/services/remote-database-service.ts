@@ -207,6 +207,38 @@ CREATE INDEX IF NOT EXISTS idx_veloca_remote_assets_document_id
   ON veloca_remote_assets(document_id);
 CREATE INDEX IF NOT EXISTS idx_veloca_remote_document_provenance_document_id
   ON veloca_remote_document_provenance(document_id);
+
+ALTER TABLE veloca_remote_workspaces
+  ADD COLUMN IF NOT EXISTS source_type INTEGER NOT NULL DEFAULT 2,
+  ADD COLUMN IF NOT EXISTS source_key TEXT,
+  ADD COLUMN IF NOT EXISTS relative_path TEXT,
+  ADD COLUMN IF NOT EXISTS content_hash TEXT,
+  ADD COLUMN IF NOT EXISTS deleted_at BIGINT,
+  ADD COLUMN IF NOT EXISTS sync_version BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE veloca_remote_documents
+  ADD COLUMN IF NOT EXISTS source_type INTEGER NOT NULL DEFAULT 2,
+  ADD COLUMN IF NOT EXISTS source_key TEXT,
+  ADD COLUMN IF NOT EXISTS relative_path TEXT,
+  ADD COLUMN IF NOT EXISTS content_hash TEXT,
+  ADD COLUMN IF NOT EXISTS deleted_at BIGINT,
+  ADD COLUMN IF NOT EXISTS sync_version BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE veloca_remote_assets
+  ADD COLUMN IF NOT EXISTS source_type INTEGER NOT NULL DEFAULT 2,
+  ADD COLUMN IF NOT EXISTS source_key TEXT,
+  ADD COLUMN IF NOT EXISTS relative_path TEXT,
+  ADD COLUMN IF NOT EXISTS content_hash TEXT,
+  ADD COLUMN IF NOT EXISTS deleted_at BIGINT,
+  ADD COLUMN IF NOT EXISTS sync_version BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE veloca_remote_document_provenance
+  ADD COLUMN IF NOT EXISTS source_type INTEGER NOT NULL DEFAULT 2,
+  ADD COLUMN IF NOT EXISTS source_key TEXT,
+  ADD COLUMN IF NOT EXISTS relative_path TEXT,
+  ADD COLUMN IF NOT EXISTS content_hash TEXT,
+  ADD COLUMN IF NOT EXISTS deleted_at BIGINT,
+  ADD COLUMN IF NOT EXISTS sync_version BIGINT NOT NULL DEFAULT 0;
 `;
 
 function assertSecureCredentialStorage(): void {

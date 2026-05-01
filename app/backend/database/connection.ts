@@ -140,6 +140,39 @@ export function getDatabase(): Database.Database {
       updated_at INTEGER NOT NULL,
       UNIQUE(provider, organization_slug, project_name)
     );
+
+    CREATE TABLE IF NOT EXISTS remote_sync_configs (
+      id TEXT PRIMARY KEY,
+      provider INTEGER NOT NULL UNIQUE,
+      auto_sync_enabled INTEGER NOT NULL DEFAULT 1,
+      pull_on_startup INTEGER NOT NULL DEFAULT 1,
+      push_on_save INTEGER NOT NULL DEFAULT 1,
+      sync_local_opened_markdown INTEGER NOT NULL DEFAULT 1,
+      sync_database_workspaces INTEGER NOT NULL DEFAULT 1,
+      sync_assets INTEGER NOT NULL DEFAULT 1,
+      sync_provenance INTEGER NOT NULL DEFAULT 1,
+      sync_deletes INTEGER NOT NULL DEFAULT 1,
+      conflict_policy INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS remote_sync_items (
+      id TEXT PRIMARY KEY,
+      source_type INTEGER NOT NULL,
+      item_type INTEGER NOT NULL,
+      source_key TEXT NOT NULL UNIQUE,
+      workspace_id TEXT,
+      local_path TEXT,
+      relative_path TEXT,
+      remote_id TEXT,
+      content_hash TEXT,
+      sync_state INTEGER NOT NULL DEFAULT 1,
+      last_error TEXT,
+      last_synced_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
 
   return database;

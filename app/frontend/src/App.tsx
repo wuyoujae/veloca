@@ -175,6 +175,29 @@ interface RemoteRegionOption {
   type: 'smartGroup' | 'specific';
 }
 
+interface RemoteSyncConfig {
+  autoSyncEnabled: boolean;
+  conflictPolicy: 1;
+  pullOnStartup: boolean;
+  pushOnSave: boolean;
+  syncAssets: boolean;
+  syncDatabaseWorkspaces: boolean;
+  syncDeletes: boolean;
+  syncLocalOpenedMarkdown: boolean;
+  syncProvenance: boolean;
+}
+
+interface RemoteSyncStatus {
+  conflictCount: number;
+  failedCount: number;
+  lastError: string;
+  lastRunAt: number | null;
+  pendingPullCount: number;
+  pendingPushCount: number;
+  running: boolean;
+  syncedCount: number;
+}
+
 const defaultRemoteRegionData: Array<[code: string, name: string]> = [
   ['us-east-1', 'East US (North Virginia)'],
   ['us-east-2', 'East US (Ohio)'],
@@ -435,6 +458,29 @@ const emptyRemoteConfig: RemoteDatabaseConfigView = {
   status: 'notConfigured',
   statusCode: 0,
   updatedAt: null
+};
+
+const defaultRemoteSyncConfig: RemoteSyncConfig = {
+  autoSyncEnabled: true,
+  conflictPolicy: 1,
+  pullOnStartup: true,
+  pushOnSave: true,
+  syncAssets: true,
+  syncDatabaseWorkspaces: true,
+  syncDeletes: true,
+  syncLocalOpenedMarkdown: true,
+  syncProvenance: true
+};
+
+const emptyRemoteSyncStatus: RemoteSyncStatus = {
+  conflictCount: 0,
+  failedCount: 0,
+  lastError: '',
+  lastRunAt: null,
+  pendingPullCount: 0,
+  pendingPushCount: 0,
+  running: false,
+  syncedCount: 0
 };
 
 const normalizeTabGroup = (paths: string[]): EditorTabGroup => Array.from(new Set(paths)).slice(0, 2);
@@ -1249,7 +1295,10 @@ export function App(): JSX.Element {
     personalAccessToken: '',
     region: 'us-east-1'
   });
+  const [remoteSyncConfig, setRemoteSyncConfig] = useState<RemoteSyncConfig>(defaultRemoteSyncConfig);
+  const [remoteSyncStatus, setRemoteSyncStatus] = useState<RemoteSyncStatus>(emptyRemoteSyncStatus);
   const [remoteLoading, setRemoteLoading] = useState(false);
+  const [remoteSyncLoading, setRemoteSyncLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>(emptyGitHubStatus);
   const [githubBinding, setGithubBinding] = useState<GitHubDeviceBinding | null>(null);
@@ -1513,6 +1562,8 @@ export function App(): JSX.Element {
     window.veloca?.settings.getRemoteConfig().then((config) => {
       applyRemoteConfig(config);
     });
+    window.veloca?.settings.getRemoteSyncConfig().then(setRemoteSyncConfig);
+    window.veloca?.remote.getSyncStatus().then(setRemoteSyncStatus);
     window.veloca?.github.getStatus().then(applyGitHubStatus);
     void refreshVersionManagerStatus();
 
@@ -1683,6 +1734,21 @@ export function App(): JSX.Element {
 
     void refreshVersionManagerStatus();
   }, [sidebarTab]);
+
+  useEffect(() => {
+    if (!settingsOpen || settingsPanel !== 'remote') {
+      return;
+    }
+
+    const refreshRemoteSyncStatus = () => {
+      window.veloca?.remote.getSyncStatus().then(setRemoteSyncStatus);
+    };
+    const timer = window.setInterval(refreshRemoteSyncStatus, 4000);
+
+    refreshRemoteSyncStatus();
+
+    return () => window.clearInterval(timer);
+  }, [settingsOpen, settingsPanel]);
 
   useEffect(() => {
     if (!agentPaletteOpen) {
@@ -2046,6 +2112,66 @@ export function App(): JSX.Element {
       });
     } finally {
       setRemoteLoading(false);
+    }
+  };
+
+  const updateRemoteSyncConfig = (field: keyof RemoteSyncConfig, value: boolean) => {
+    setRemoteSyncConfig((current) => ({
+      ...current,
+      [field]: value
+    }));
+  };
+
+  const saveRemoteSyncSettings = async () => {
+    if (!window.veloca?.settings || remoteSyncLoading) {
+      return;
+    }
+
+    setRemoteSyncLoading(true);
+
+    try {
+      const config = await window.veloca.settings.saveRemoteSyncConfig(remoteSyncConfig);
+      setRemoteSyncConfig(config);
+      showToast({
+        type: 'success',
+        title: 'Remote Sync Saved',
+        description: 'Remote sync preferences have been saved locally.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Remote Sync Failed',
+        description: getErrorDescription(error, 'Veloca could not save remote sync preferences.')
+      });
+    } finally {
+      setRemoteSyncLoading(false);
+    }
+  };
+
+  const runRemoteSyncAction = async (mode: 'manual' | 'retry') => {
+    if (!window.veloca?.remote || remoteSyncLoading) {
+      return;
+    }
+
+    setRemoteSyncLoading(true);
+
+    try {
+      const status =
+        mode === 'retry' ? await window.veloca.remote.retryFailedSync() : await window.veloca.remote.syncNow();
+      setRemoteSyncStatus(status);
+      showToast({
+        type: 'success',
+        title: mode === 'retry' ? 'Remote Retry Finished' : 'Remote Sync Finished',
+        description: 'Veloca updated the remote sync queue status.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Remote Sync Failed',
+        description: getErrorDescription(error, 'Veloca could not complete remote sync.')
+      });
+    } finally {
+      setRemoteSyncLoading(false);
     }
   };
 
@@ -5328,6 +5454,166 @@ export function App(): JSX.Element {
                         </button>
                       </div>
                     </div>
+
+                    <div className="account-provider-panel remote-sync-panel">
+                      <div className="account-provider-header">
+                        <div className="account-provider-title">
+                          <RefreshCw size={18} />
+                          <span>Sync</span>
+                        </div>
+                        <span className={remoteSyncStatus.failedCount > 0 ? 'account-status' : 'account-status connected'}>
+                          {remoteSyncStatus.running ? 'Syncing' : remoteSyncStatus.failedCount > 0 ? 'Needs Retry' : 'Ready'}
+                        </span>
+                      </div>
+
+                      <div className="remote-status-grid">
+                        <div className="remote-status-item">
+                          <span>Pending Push</span>
+                          <strong>{remoteSyncStatus.pendingPushCount}</strong>
+                        </div>
+                        <div className="remote-status-item">
+                          <span>Conflicts</span>
+                          <strong>{remoteSyncStatus.conflictCount}</strong>
+                        </div>
+                        <div className="remote-status-item">
+                          <span>Failed</span>
+                          <strong>{remoteSyncStatus.failedCount}</strong>
+                        </div>
+                        <div className="remote-status-item">
+                          <span>Last Sync</span>
+                          <strong>{formatRemoteSyncTime(remoteSyncStatus.lastRunAt)}</strong>
+                        </div>
+                      </div>
+
+                      {remoteSyncStatus.lastError && (
+                        <div className="settings-warning">
+                          {remoteSyncStatus.lastError}
+                        </div>
+                      )}
+
+                      <div className="remote-sync-options">
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.autoSyncEnabled}
+                            onChange={(event) => updateRemoteSyncConfig('autoSyncEnabled', event.currentTarget.checked)}
+                          />
+                          <span>
+                            <strong>Auto Sync</strong>
+                            <small>Automatically pull on startup and push after saves.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.pullOnStartup}
+                            onChange={(event) => updateRemoteSyncConfig('pullOnStartup', event.currentTarget.checked)}
+                          />
+                          <span>
+                            <strong>Pull on Startup</strong>
+                            <small>Fetch remote changes when Veloca opens.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.pushOnSave}
+                            onChange={(event) => updateRemoteSyncConfig('pushOnSave', event.currentTarget.checked)}
+                          />
+                          <span>
+                            <strong>Push on Save</strong>
+                            <small>Queue and upload changed documents after saving.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.syncLocalOpenedMarkdown}
+                            onChange={(event) =>
+                              updateRemoteSyncConfig('syncLocalOpenedMarkdown', event.currentTarget.checked)
+                            }
+                          />
+                          <span>
+                            <strong>Sync Local Opened/Edited Markdown</strong>
+                            <small>Only local Markdown files touched inside Veloca are tracked.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option disabled">
+                          <input type="checkbox" checked={remoteSyncConfig.syncDatabaseWorkspaces} disabled />
+                          <span>
+                            <strong>Sync Veloca Database Workspaces</strong>
+                            <small>Database workspace folders, files, assets, and provenance are always mirrored.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.syncAssets}
+                            onChange={(event) => updateRemoteSyncConfig('syncAssets', event.currentTarget.checked)}
+                          />
+                          <span>
+                            <strong>Sync Assets</strong>
+                            <small>Upload database assets and local referenced resources to private Supabase Storage.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.syncProvenance}
+                            onChange={(event) => updateRemoteSyncConfig('syncProvenance', event.currentTarget.checked)}
+                          />
+                          <span>
+                            <strong>Sync Provenance Metadata</strong>
+                            <small>Mirror document provenance snapshots for remote recovery.</small>
+                          </span>
+                        </label>
+                        <label className="remote-sync-option">
+                          <input
+                            type="checkbox"
+                            checked={remoteSyncConfig.syncDeletes}
+                            onChange={(event) => updateRemoteSyncConfig('syncDeletes', event.currentTarget.checked)}
+                          />
+                          <span>
+                            <strong>Sync Deletes</strong>
+                            <small>Mark remote records as deleted instead of removing them.</small>
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className="remote-sync-policy">
+                        Conflict Policy: <strong>Keep Both</strong>
+                      </div>
+
+                      <div className="account-actions">
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={remoteSyncLoading}
+                          onClick={() => void saveRemoteSyncSettings()}
+                        >
+                          {remoteSyncLoading ? <LoaderCircle className="spinning" size={15} /> : <Save size={15} />}
+                          Save Sync
+                        </button>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={remoteSyncLoading || remoteConfig.status !== 'initialized'}
+                          onClick={() => void runRemoteSyncAction('manual')}
+                        >
+                          <RefreshCw className={remoteSyncLoading ? 'spinning' : ''} size={15} />
+                          Manual Sync Now
+                        </button>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={remoteSyncLoading || remoteSyncStatus.failedCount === 0}
+                          onClick={() => void runRemoteSyncAction('retry')}
+                        >
+                          <RefreshCw className={remoteSyncLoading ? 'spinning' : ''} size={15} />
+                          Retry Failed Items
+                        </button>
+                      </div>
+                    </div>
                   </>
                 )}
                 {settingsPanel === 'account' && (
@@ -8105,6 +8391,14 @@ function getRemoteCredentialSummary(config: RemoteDatabaseConfigView): string {
   ].filter(Boolean);
 
   return savedCredentials.length ? savedCredentials.join(', ') : 'Not saved';
+}
+
+function formatRemoteSyncTime(timestamp: number | null): string {
+  if (!timestamp) {
+    return 'Never';
+  }
+
+  return new Date(timestamp).toLocaleString();
 }
 
 function getRemoteRegionSelectOptions(

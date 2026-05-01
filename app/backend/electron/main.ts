@@ -82,6 +82,18 @@ import {
   markWorkspaceVersionConfigRemoved,
   syncMarkdownFile
 } from '../services/version-manager-service';
+import {
+  getRemoteSyncConfig,
+  getRemoteSyncStatus,
+  markRemoteDatabaseWorkspaceDirty,
+  markRemoteMarkdownOpened,
+  markRemoteMarkdownSaved,
+  markRemotePathDeleted,
+  runRemoteSync,
+  runRemoteSyncInBackground,
+  saveRemoteSyncConfig,
+  type RemoteSyncConfig
+} from '../services/remote-sync-service';
 
 interface WatchedMarkdownFile {
   timer: ReturnType<typeof setTimeout> | null;
@@ -254,6 +266,20 @@ function registerIpcHandlers(): void {
 
     return snapshot;
   };
+  const isRemoteSyncConfig = (config: RemoteSyncConfig): boolean => {
+    return Boolean(
+      config &&
+        typeof config.autoSyncEnabled === 'boolean' &&
+        typeof config.pullOnStartup === 'boolean' &&
+        typeof config.pushOnSave === 'boolean' &&
+        typeof config.syncLocalOpenedMarkdown === 'boolean' &&
+        typeof config.syncDatabaseWorkspaces === 'boolean' &&
+        typeof config.syncAssets === 'boolean' &&
+        typeof config.syncProvenance === 'boolean' &&
+        typeof config.syncDeletes === 'boolean' &&
+        config.conflictPolicy === 1
+    );
+  };
 
   ipcMain.handle('settings:get-theme', () => getTheme());
   ipcMain.handle('settings:set-theme', (_event, theme: ThemeMode) => {
@@ -292,6 +318,16 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:get-remote-config', () => {
     return getRemoteDatabaseConfig();
   });
+  ipcMain.handle('settings:get-remote-sync-config', () => {
+    return getRemoteSyncConfig();
+  });
+  ipcMain.handle('settings:save-remote-sync-config', (_event, config: RemoteSyncConfig) => {
+    if (!isRemoteSyncConfig(config)) {
+      throw new Error('Invalid remote sync configuration.');
+    }
+
+    return saveRemoteSyncConfig(config);
+  });
   ipcMain.handle('settings:save-remote-config', (_event, config: RemoteDatabaseConfigInput) => {
     if (
       !config ||
@@ -323,6 +359,15 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('remote:test-connection', () => {
     return testRemoteDatabaseConnection();
+  });
+  ipcMain.handle('remote:get-sync-status', () => {
+    return getRemoteSyncStatus();
+  });
+  ipcMain.handle('remote:sync-now', () => {
+    return runRemoteSync('manual');
+  });
+  ipcMain.handle('remote:retry-failed-sync', () => {
+    return runRemoteSync('retry');
   });
   ipcMain.handle('github:get-status', () => getGitHubAuthStatus());
   ipcMain.handle('github:start-binding', async () => {
@@ -407,10 +452,16 @@ function registerIpcHandlers(): void {
     return addWorkspaceFolders(result.filePaths);
   });
   ipcMain.handle('workspace:create-database-workspace', (_event, name: string) => {
-    return createDatabaseWorkspace(name);
+    const result = createDatabaseWorkspace(name);
+    markRemoteDatabaseWorkspaceDirty();
+    runRemoteSyncInBackground('save');
+    return result;
   });
   ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
-    return readMarkdownFile(filePath);
+    const file = readMarkdownFile(filePath);
+    markRemoteMarkdownOpened(file);
+    runRemoteSyncInBackground('save');
+    return file;
   });
   ipcMain.handle('workspace:set-markdown-watch-paths', (event, filePaths: string[]) => {
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -423,6 +474,11 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('workspace:save-markdown', async (_event, filePath: string, content: string) => {
     const file = saveMarkdownFile(filePath, content);
+    markRemoteMarkdownSaved(file);
+
+    if (file.path.startsWith('veloca-db://')) {
+      markRemoteDatabaseWorkspaceDirty(file.workspaceFolderId);
+    }
 
     try {
       await syncMarkdownFile(file.path);
@@ -430,10 +486,16 @@ function registerIpcHandlers(): void {
       console.error('Veloca version sync failed after saving markdown.', error);
     }
 
+    runRemoteSyncInBackground('save');
     return file;
   });
   ipcMain.handle('workspace:save-markdown-as', async (_event, parentPath: string, name: string, content: string) => {
     const result = saveMarkdownFileAs(parentPath, name, content);
+    markRemoteMarkdownSaved(result.file);
+
+    if (result.file.path.startsWith('veloca-db://')) {
+      markRemoteDatabaseWorkspaceDirty(result.file.workspaceFolderId);
+    }
 
     try {
       await syncMarkdownFile(result.file.path);
@@ -441,16 +503,21 @@ function registerIpcHandlers(): void {
       console.error('Veloca version sync failed after saving markdown as.', error);
     }
 
+    runRemoteSyncInBackground('save');
     return result;
   });
   ipcMain.handle('workspace:read-provenance', (_event, documentKey: string) => {
     return readDocumentProvenanceSnapshot(documentKey);
   });
   ipcMain.handle('workspace:save-provenance', (_event, snapshot: DocumentProvenanceSnapshot) => {
-    return saveDocumentProvenanceSnapshot(snapshot);
+    const saved = saveDocumentProvenanceSnapshot(snapshot);
+    markRemoteDatabaseWorkspaceDirty(saved.workspaceFolderId);
+    runRemoteSyncInBackground('save');
+    return saved;
   });
   ipcMain.handle('workspace:delete-provenance', (_event, documentKey: string) => {
     deleteDocumentProvenanceSnapshot(documentKey);
+    runRemoteSyncInBackground('save');
   });
   ipcMain.handle('version-manager:get-status', () => getVersionManagerStatus());
   ipcMain.handle('version-manager:ensure-repository', () => ensureVersionRepository());
@@ -462,7 +529,14 @@ function registerIpcHandlers(): void {
     return commitAndPushVersionChanges(message);
   });
   ipcMain.handle('workspace:save-asset', (_event, documentPath: string, payload) => {
-    return saveWorkspaceAsset(documentPath, payload);
+    const asset = saveWorkspaceAsset(documentPath, payload);
+
+    if (documentPath.startsWith('veloca-db://')) {
+      markRemoteDatabaseWorkspaceDirty();
+    }
+
+    runRemoteSyncInBackground('save');
+    return asset;
   });
   ipcMain.handle('workspace:resolve-asset', (_event, documentPath: string, assetPath: string) => {
     return resolveWorkspaceAsset(documentPath, assetPath);
@@ -473,29 +547,62 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     'workspace:create-entry',
     (_event, parentPath: string, entryType: 'file' | 'folder', name: string) => {
-      return createWorkspaceEntry(parentPath, entryType, name);
+      const result = createWorkspaceEntry(parentPath, entryType, name);
+
+      if (parentPath.startsWith('veloca-db://')) {
+        markRemoteDatabaseWorkspaceDirty();
+        runRemoteSyncInBackground('save');
+      }
+
+      return result;
     }
   );
   ipcMain.handle('workspace:rename-entry', (_event, filePath: string, name: string) => {
-    return renameWorkspaceEntry(filePath, name);
+    const result = renameWorkspaceEntry(filePath, name);
+
+    if (filePath.startsWith('veloca-db://')) {
+      markRemoteDatabaseWorkspaceDirty();
+    }
+
+    runRemoteSyncInBackground('save');
+    return result;
   });
   ipcMain.handle('workspace:duplicate-entry', (_event, filePath: string) => {
-    return duplicateWorkspaceEntry(filePath);
+    const result = duplicateWorkspaceEntry(filePath);
+
+    if (filePath.startsWith('veloca-db://')) {
+      markRemoteDatabaseWorkspaceDirty();
+      runRemoteSyncInBackground('save');
+    }
+
+    return result;
   });
   ipcMain.handle(
     'workspace:paste-entry',
     (_event, sourcePath: string, targetFolderPath: string, mode: 'copy' | 'cut') => {
-      return pasteWorkspaceEntry(sourcePath, targetFolderPath, mode);
+      const result = pasteWorkspaceEntry(sourcePath, targetFolderPath, mode);
+
+      if (sourcePath.startsWith('veloca-db://') || targetFolderPath.startsWith('veloca-db://')) {
+        markRemoteDatabaseWorkspaceDirty();
+        runRemoteSyncInBackground('save');
+      }
+
+      return result;
     }
   );
   ipcMain.handle('workspace:delete-entry', async (_event, filePath: string) => {
     if (filePath.startsWith('veloca-db://')) {
-      return deleteWorkspaceEntry(filePath);
+      const snapshot = deleteWorkspaceEntry(filePath);
+      markRemoteDatabaseWorkspaceDirty();
+      runRemoteSyncInBackground('save');
+      return snapshot;
     }
 
     const resolvedPath = validateWorkspacePath(filePath);
     deactivateFilesystemDocumentProvenance(resolvedPath);
+    markRemotePathDeleted(resolvedPath);
     await shell.trashItem(resolvedPath);
+    runRemoteSyncInBackground('save');
     return getWorkspaceSnapshot();
   });
   ipcMain.handle('workspace:remove-folder', (_event, workspaceFolderId: string) => {
@@ -552,10 +659,12 @@ app.whenReady().then(() => {
   registerIpcHandlers();
   registerAssetProtocol();
   createMainWindow();
+  runRemoteSyncInBackground('startup');
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
+      runRemoteSyncInBackground('startup');
     }
   });
 });

@@ -200,6 +200,29 @@ interface RemoteRegionOption {
   type: 'smartGroup' | 'specific';
 }
 
+interface RemoteSyncConfig {
+  autoSyncEnabled: boolean;
+  conflictPolicy: 1;
+  pullOnStartup: boolean;
+  pushOnSave: boolean;
+  syncAssets: boolean;
+  syncDatabaseWorkspaces: boolean;
+  syncDeletes: boolean;
+  syncLocalOpenedMarkdown: boolean;
+  syncProvenance: boolean;
+}
+
+interface RemoteSyncStatus {
+  conflictCount: number;
+  failedCount: number;
+  lastError: string;
+  lastRunAt: number | null;
+  pendingPullCount: number;
+  pendingPushCount: number;
+  running: boolean;
+  syncedCount: number;
+}
+
 interface AgentAttachmentSummary {
   mimeType: string;
   name: string;
@@ -298,11 +321,16 @@ declare global {
         getAiConfig: () => Promise<AiModelConfig>;
         setAiConfig: (config: AiModelConfig) => Promise<AiModelConfig>;
         getRemoteConfig: () => Promise<RemoteDatabaseConfigView>;
+        getRemoteSyncConfig: () => Promise<RemoteSyncConfig>;
         saveRemoteConfig: (config: RemoteDatabaseConfigInput) => Promise<RemoteDatabaseConfigView>;
+        saveRemoteSyncConfig: (config: RemoteSyncConfig) => Promise<RemoteSyncConfig>;
       };
       remote: {
         createVelocaProject: (config: RemoteDatabaseConfigInput) => Promise<RemoteProjectProvisionResult>;
+        getSyncStatus: () => Promise<RemoteSyncStatus>;
         listAvailableRegions: (config: RemoteDatabaseConfigInput) => Promise<RemoteRegionOption[]>;
+        retryFailedSync: () => Promise<RemoteSyncStatus>;
+        syncNow: () => Promise<RemoteSyncStatus>;
         testConnection: () => Promise<RemoteDatabaseConfigView>;
       };
       workspace: {

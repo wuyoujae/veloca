@@ -6,7 +6,7 @@
 
 Remote v1 的目标是让用户在 Settings > Remote 中填写自己的 Supabase 信息，然后由 Veloca 自动创建或连接一个名为 `veloca` 的 Supabase 项目，并初始化 Veloca 云端所需的基础表结构。
 
-当前版本只负责远程项目配置与基础 schema 初始化，不执行本地 SQLite 数据同步，也不迁移已有本地工作区或文档内容。
+当前版本负责远程项目配置、基础 schema 初始化，以及 Remote Sync v1 的配置和后台同步队列。Remote Sync v1 只同步 Veloca 打开或编辑过的本地 Markdown 文件；Veloca 数据库工作区会全量镜像目录、文件、资源和 provenance 数据。
 
 ## API Strategy
 
@@ -22,6 +22,8 @@ Supabase Management API 的 database migration endpoint 目前标注为仅 selec
 
 Remote v1 不依赖 `available-regions` endpoint。Settings 面板内置 Supabase 常用 AWS region 列表，并提供手动 region code 输入兜底，避免账号、接口版本或平台权限差异导致地区加载失败。
 
+Remote Sync v1 使用 Supabase JavaScript client 访问数据表和 Storage。资源文件写入私有 bucket `veloca-assets`，文件 metadata 记录在 `veloca_remote_assets` 表中。
+
 ## Local Persistence And Security
 
 本地 SQLite 表 `remote_database_configs` 保存单个 Supabase remote 配置：
@@ -34,6 +36,11 @@ Remote v1 不依赖 `available-regions` endpoint。Settings 面板内置 Supabas
 
 如果当前系统无法提供 secure credential storage，Veloca 会拒绝保存敏感凭据，并提示用户启用系统钥匙串或凭据服务。Renderer 只接收脱敏状态，例如 `patSaved`、`databasePasswordSaved`、`secretKeySaved`，不会接收明文密钥。Remote 面板会用掩码显示已保存的 PAT 和 database password；提交保存或创建项目时，掩码值不会覆盖本地加密凭据。
 
+Remote Sync 使用两个本地表：
+
+- `remote_sync_configs` 保存同步偏好，布尔值使用 `0/1`，冲突策略固定为数字枚举 `1` keep both。
+- `remote_sync_items` 跟踪本地文件系统和数据库工作区同步项，`sync_state` 使用数字枚举：`0` synced、`1` pending push、`2` pending pull、`3` conflict、`4` failed。
+
 ## Remote Schema
 
 Remote v1 初始化以下最小表结构：
@@ -45,7 +52,24 @@ Remote v1 初始化以下最小表结构：
 
 所有 ID 字段使用 UUID 文本值，由应用写入前生成。状态字段使用数字枚举。表之间只保存逻辑关系字段，例如 `workspace_id`、`document_id`、`parent_id`，不创建数据库外键约束。
 
-当前 schema 只覆盖远程存储的基础能力。完整同步、冲突处理、用户身份、权限模型、存储桶上传策略和增量合并策略应在后续 Remote Sync 模型中单独设计。
+Remote Sync v1 会为云端表补充同步元数据字段：`source_type`、`source_key`、`relative_path`、`content_hash`、`deleted_at`、`sync_version`。删除通过 `status=1` 和 `deleted_at` 软删除表示，不物理删除云端数据。
+
+当前 schema 不实现用户身份、权限模型或实时协作。完整多用户权限和 Supabase Realtime 应在后续 Remote Sync 模型中单独设计。
+
+## Remote Sync Settings
+
+Remote 面板的 Sync 区域包含以下配置：
+
+- `Auto Sync` 默认开启，控制自动拉取和推送。
+- `Pull on Startup` 默认开启，应用启动或 Remote 初始化后拉取云端变更。
+- `Push on Save` 默认开启，保存文档后推送变更。
+- `Sync Local Opened/Edited Markdown` 默认开启，只跟踪 Veloca 打开或编辑过的本地 Markdown。
+- `Sync Veloca Database Workspaces` 默认开启且不可关闭，数据库工作区全量镜像到云端。
+- `Sync Assets` 默认开启，同步数据库资产和已跟踪本地 Markdown 引用的资源文件。
+- `Sync Provenance Metadata` 默认开启，同步 provenance snapshots。
+- `Sync Deletes` 默认开启，删除同步为软删除。
+- `Conflict Policy` v1 固定为 `Keep Both`。本地文件冲突时在原目录创建 `*.remote-conflict-YYYYMMDD-HHmmss.md`。
+- `Manual Sync Now` 和 `Retry Failed Items` 可手动触发同步或重试失败队列。
 
 ## User Flow
 
@@ -57,6 +81,7 @@ Remote v1 初始化以下最小表结构：
 6. Veloca 校验组织并查找同名项目；存在则复用，不存在则使用该 region code 创建。
 7. Veloca 等待项目 ready，直连 Postgres 初始化基础表。
 8. Veloca 保存项目 ref、URL、host 和 API key 状态。
+9. 如果 Remote Sync 开启，Veloca 启动后台同步队列；启动时拉取，保存后推送。
 
 ## Validation
 
@@ -68,3 +93,7 @@ Remote v1 初始化以下最小表结构：
 - 有效配置会创建或复用 `veloca` Supabase 项目。
 - Supabase SQL editor 能看到 Veloca remote 基础表。
 - 重启应用后 Remote 面板只显示脱敏状态和项目连接信息。
+- Remote Sync 配置保存后能恢复默认开启状态。
+- 打开或保存本地 Markdown 后会进入同步队列。
+- 数据库工作区变更会触发全量镜像推送。
+- 同步失败不阻塞编辑，Remote 面板显示失败数量并允许 retry。
