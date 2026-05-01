@@ -67,8 +67,14 @@ jobs:
         if: always()
         with:
           name: Veloca-${{ matrix.target }}-${{ matrix.arch }}
-          path: release/*
-          if-no-files-found: ignore
+          path: |
+            release/*.AppImage
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.yml
+            release/*.blockmap
+          if-no-files-found: error
 
   release:
     needs: build
@@ -84,10 +90,14 @@ jobs:
 
       - name: Create release
         run: |
-          mapfile -t release_files < <(find artifacts -type f \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.yml' -o -name '*.blockmap' \) -print)
+          mapfile -t release_files < <(find artifacts -type f \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.yml' -o -name '*.blockmap' \) -print | sort)
           printf 'Release files:\n'
           printf '%s\n' "${release_files[@]}"
           test "${#release_files[@]}" -gt 0
-          gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$GITHUB_REF_NAME"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$GITHUB_REF_NAME"
+          fi
         env:
           GH_TOKEN: ${{ github.token }}

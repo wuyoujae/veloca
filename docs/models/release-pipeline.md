@@ -38,9 +38,9 @@ The build matrix is:
 | macOS | `macos-15` | arm64 | dmg and zip |
 | macOS | `macos-15-intel` | x64 | dmg and zip |
 
-Each matrix job installs dependencies with `npm ci`, runs the production build, then calls `electron-builder` with `--publish never`. Publishing is centralized in the release job so artifacts are uploaded once through GitHub CLI.
+Each matrix job installs dependencies with `npm ci`, runs the production build, then calls `electron-builder` with `--publish never`. Publishing is centralized in the release job so artifacts are uploaded once through GitHub CLI. The build job uploads only root release files, such as installers, archives, blockmaps, and updater metadata. It must not upload unpacked app directories because those directories contain internal executables and `app-update.yml` files that are not public release assets.
 
-The release job runs only for `v*` tag refs. It downloads all matrix artifacts, creates a published GitHub Release, uploads the generated files, and asks GitHub to generate release notes.
+The release job runs only for `v*` tag refs. It downloads all matrix artifacts, creates a published GitHub Release, uploads the generated files, and asks GitHub to generate release notes. If a release already exists because a previous run partially succeeded, the job uploads the current artifacts again with `--clobber`.
 
 ## Generated Artifacts
 
