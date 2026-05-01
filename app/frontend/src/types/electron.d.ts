@@ -158,6 +158,10 @@ interface AiModelConfig {
   contextWindow: number;
 }
 
+interface ShortcutSettings {
+  openAiPanel: string;
+}
+
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
 
 interface RemoteDatabaseConfigInput {
@@ -348,6 +352,8 @@ declare global {
         setAutoSave: (enabled: boolean) => Promise<boolean>;
         getAiConfig: () => Promise<AiModelConfig>;
         setAiConfig: (config: AiModelConfig) => Promise<AiModelConfig>;
+        getShortcutSettings: () => Promise<ShortcutSettings>;
+        setShortcutSettings: (settings: ShortcutSettings) => Promise<ShortcutSettings>;
         getRemoteConfig: () => Promise<RemoteDatabaseConfigView>;
         getRemoteSyncConfig: () => Promise<RemoteSyncConfig>;
         saveRemoteConfig: (config: RemoteDatabaseConfigInput) => Promise<RemoteDatabaseConfigView>;

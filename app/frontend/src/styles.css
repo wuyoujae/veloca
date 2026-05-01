@@ -5038,6 +5038,63 @@ button {
   font-size: 11px;
 }
 
+.shortcut-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shortcut-record-button,
+.shortcut-reset-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.shortcut-record-button {
+  min-width: 132px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.shortcut-record-button kbd {
+  font: inherit;
+}
+
+.shortcut-record-button:hover,
+.shortcut-record-button:focus-visible,
+.shortcut-reset-button:hover,
+.shortcut-reset-button:focus-visible {
+  border-color: var(--foreground);
+  outline: 0;
+  transform: translateY(-1px);
+}
+
+.shortcut-record-button.recording {
+  border-color: var(--info);
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+  color: var(--info);
+  animation: contentEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shortcut-reset-button {
+  width: 36px;
+  height: 36px;
+  color: var(--muted-foreground);
+}
+
 .account-provider-panel {
   display: flex;
   flex-direction: column;

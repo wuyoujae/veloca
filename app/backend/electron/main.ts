@@ -19,11 +19,14 @@ import {
   getAiModel,
   getAiContextWindow,
   getAutoSave,
+  getShortcutSettings,
   getTheme,
   setAiConfig,
   setAutoSave,
+  setShortcutSettings,
   setTheme,
   type AiModelConfig,
+  type ShortcutSettings,
   type ThemeMode
 } from '../services/settings-store';
 import {
@@ -324,6 +327,9 @@ function registerIpcHandlers(): void {
         config.conflictPolicy === 1
     );
   };
+  const isShortcutSettings = (settings: ShortcutSettings): boolean => {
+    return Boolean(settings && typeof settings.openAiPanel === 'string' && settings.openAiPanel.trim().length > 0);
+  };
 
   ipcMain.handle('settings:get-theme', () => getTheme());
   ipcMain.handle('app:get-info', () => getAppInfo());
@@ -394,6 +400,18 @@ function registerIpcHandlers(): void {
     }
 
     return setAiConfig(config);
+  });
+  ipcMain.handle('settings:get-shortcut-settings', () => {
+    return getShortcutSettings(process.platform);
+  });
+  ipcMain.handle('settings:set-shortcut-settings', (_event, settings: ShortcutSettings) => {
+    if (!isShortcutSettings(settings)) {
+      throw new Error('Invalid shortcut settings.');
+    }
+
+    return setShortcutSettings({
+      openAiPanel: settings.openAiPanel.trim()
+    });
   });
   ipcMain.handle('settings:get-remote-config', () => {
     return getRemoteDatabaseConfig();

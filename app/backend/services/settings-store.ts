@@ -10,12 +10,17 @@ export interface AiModelConfig {
   contextWindow: number;
 }
 
+export interface ShortcutSettings {
+  openAiPanel: string;
+}
+
 const autoSaveKey = 'autoSave';
 const themeKey = 'theme';
 const aiBaseUrlKey = 'aiBaseUrl';
 const aiApiKeyKey = 'aiApiKey';
 const aiModelKey = 'aiModel';
 const aiContextWindowKey = 'aiContextWindow';
+const openAiPanelShortcutKey = 'shortcutOpenAiPanel';
 
 export function getSetting(key: string): string | null {
   const row = getDatabase()
@@ -68,6 +73,21 @@ export function setAiConfig(config: AiModelConfig): AiModelConfig {
   setSetting(aiModelKey, config.model);
   setSetting(aiContextWindowKey, String(config.contextWindow));
   return config;
+}
+
+export function getDefaultOpenAiPanelShortcut(platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? 'Command+J' : 'Ctrl+J';
+}
+
+export function getShortcutSettings(platform: NodeJS.Platform): ShortcutSettings {
+  return {
+    openAiPanel: getSetting(openAiPanelShortcutKey) ?? getDefaultOpenAiPanelShortcut(platform)
+  };
+}
+
+export function setShortcutSettings(settings: ShortcutSettings): ShortcutSettings {
+  setSetting(openAiPanelShortcutKey, settings.openAiPanel);
+  return settings;
 }
 
 export function deleteAiConfig(): void {

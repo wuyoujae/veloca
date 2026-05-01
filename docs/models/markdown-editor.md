@@ -24,7 +24,8 @@
   - 当画布折叠回 prompt 时，编辑器会尽量反向滚动以展示更多被选中文本；如果选区已经完整可见，或 prompt 已经到达最低安全位置，则停止移动；
   - 浮层 X 轴始终按当前编辑器视口居中，不跟随选区最后一行的横向位置，并根据编辑器视口宽度收敛自身宽度，避免超出编辑器区域。
   - Agent 打开后会用浏览器 CSS Highlight API 保留选中文本的浅蓝选中效果，避免 prompt 获得焦点后用户失去上下文。
-- 当前原型监听 `Fn` 键；由于不同系统和 Electron 版本可能不会向渲染进程暴露独立 `Fn` 事件，主进程也会通过 `before-input-event` 尝试捕获并转发，同时提供 `Cmd/Ctrl + J` 作为开发验收兜底快捷键。
+- 当前原型监听 `Fn` 键；由于不同系统和 Electron 版本可能不会向渲染进程暴露独立 `Fn` 事件，主进程也会通过 `before-input-event` 尝试捕获并转发。
+- Settings 现在提供 `Shortcuts` 面板，首个应用内快捷键为 `Open AI Panel`：macOS 默认 `Command+J`，Windows/Linux 默认 `Ctrl+J`。用户可以在设置中重新录入组合键，配置会保存到本地 `app_settings`，不会注册为系统级全局快捷键。
 - Prompt 框包含：
   - 左侧 `+` 菜单，当前支持 `Web Search` 复选开关和本地文件选择；
   - 模型选择菜单，提供 `Lite`、`Pro`、`Ultra` 三档模型，并用不同图标与颜色标识，默认使用 `Lite`；

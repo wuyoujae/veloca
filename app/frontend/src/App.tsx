@@ -104,7 +104,7 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline' | 'git';
-type SettingsPanel = 'editor' | 'aiModel' | 'remote' | 'account' | 'about';
+type SettingsPanel = 'editor' | 'shortcuts' | 'aiModel' | 'remote' | 'account' | 'about';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
@@ -126,6 +126,126 @@ function logAiInsertDebug(message: string, details?: Record<string, unknown>): v
 
 function logRemoteSettingsDebug(message: string, details?: Record<string, unknown>): void {
   console.info(remoteSettingsLogPrefix, message, details ?? {});
+}
+
+function getDefaultOpenAiPanelShortcut(platform: string): string {
+  return platform === 'darwin' ? 'Command+J' : 'Ctrl+J';
+}
+
+function getFallbackShortcutSettings(platform: string): ShortcutSettings {
+  return {
+    openAiPanel: getDefaultOpenAiPanelShortcut(platform)
+  };
+}
+
+function normalizeShortcutKeyLabel(key: string): string | null {
+  const trimmedKey = key.trim();
+  const lowerKey = trimmedKey.toLowerCase();
+
+  if (!trimmedKey || ['meta', 'control', 'ctrl', 'shift', 'alt', 'option', 'fn', 'fnlock'].includes(lowerKey)) {
+    return null;
+  }
+
+  const namedKeys: Record<string, string> = {
+    ' ': 'Space',
+    arrowdown: 'ArrowDown',
+    arrowleft: 'ArrowLeft',
+    arrowright: 'ArrowRight',
+    arrowup: 'ArrowUp',
+    backspace: 'Backspace',
+    del: 'Delete',
+    delete: 'Delete',
+    end: 'End',
+    enter: 'Enter',
+    escape: 'Esc',
+    esc: 'Esc',
+    home: 'Home',
+    pageup: 'PageUp',
+    pagedown: 'PageDown',
+    return: 'Enter',
+    space: 'Space',
+    spacebar: 'Space',
+    tab: 'Tab'
+  };
+
+  if (namedKeys[lowerKey]) {
+    return namedKeys[lowerKey];
+  }
+
+  if (/^f\d{1,2}$/i.test(trimmedKey)) {
+    return trimmedKey.toUpperCase();
+  }
+
+  if (trimmedKey.length === 1) {
+    return trimmedKey.toUpperCase();
+  }
+
+  return trimmedKey[0].toUpperCase() + trimmedKey.slice(1);
+}
+
+function getShortcutFromKeyboardEvent(event: KeyboardEvent | ReactKeyboardEvent<HTMLElement>): string | null {
+  const key = normalizeShortcutKeyLabel(event.key);
+
+  if (!key) {
+    return null;
+  }
+
+  const modifiers = [
+    event.metaKey ? 'Command' : '',
+    event.ctrlKey ? 'Ctrl' : '',
+    event.altKey ? 'Alt' : '',
+    event.shiftKey ? 'Shift' : ''
+  ].filter(Boolean);
+
+  if (!modifiers.length) {
+    return null;
+  }
+
+  return [...modifiers, key].join('+');
+}
+
+function doesShortcutMatchKeyboardEvent(shortcut: string, event: KeyboardEvent): boolean {
+  const parts = shortcut
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) {
+    return false;
+  }
+
+  const required = {
+    alt: false,
+    ctrl: false,
+    meta: false,
+    shift: false
+  };
+  let requiredKey = '';
+
+  for (const part of parts) {
+    const lowerPart = part.toLowerCase();
+
+    if (lowerPart === 'command' || lowerPart === 'cmd' || lowerPart === 'meta') {
+      required.meta = true;
+    } else if (lowerPart === 'ctrl' || lowerPart === 'control') {
+      required.ctrl = true;
+    } else if (lowerPart === 'alt' || lowerPart === 'option') {
+      required.alt = true;
+    } else if (lowerPart === 'shift') {
+      required.shift = true;
+    } else {
+      requiredKey = normalizeShortcutKeyLabel(part) ?? '';
+    }
+  }
+
+  return Boolean(
+    requiredKey &&
+      requiredKey === normalizeShortcutKeyLabel(event.key) &&
+      required.meta === event.metaKey &&
+      required.ctrl === event.ctrlKey &&
+      required.alt === event.altKey &&
+      required.shift === event.shiftKey
+  );
 }
 
 interface ToastMessage {
@@ -168,6 +288,10 @@ interface AiModelConfig {
   apiKey: string;
   model: string;
   contextWindow: number;
+}
+
+interface ShortcutSettings {
+  openAiPanel: string;
 }
 
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
@@ -1282,6 +1406,7 @@ function relaxSelectionAfterCanvasClose(rangeOverride?: Range | null): boolean {
 }
 
 export function App(): JSX.Element {
+  const appPlatform = window.veloca?.app.platform ?? 'darwin';
   const [theme, setTheme] = useState<ThemeMode>('dark');
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('files');
   const [sidebarWidth, setSidebarWidth] = useState(sidebarDefaultWidth);
@@ -1320,6 +1445,10 @@ export function App(): JSX.Element {
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
+  const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() =>
+    getFallbackShortcutSettings(appPlatform)
+  );
+  const [recordingShortcutAction, setRecordingShortcutAction] = useState<keyof ShortcutSettings | null>(null);
   const [aiConfig, setAiConfig] = useState<AiModelConfig>({
     baseUrl: '',
     apiKey: '',
@@ -1376,13 +1505,13 @@ export function App(): JSX.Element {
   const watchedMarkdownFileChangeHandlerRef = useRef<(change: WatchedMarkdownFileChange) => void>(() => {});
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
+  const openAiPanelShortcutButtonRef = useRef<HTMLButtonElement>(null);
 
   const activeTab = useMemo(
     () => openTabs.find((tab) => tab.file.path === activeTabPath) ?? null,
     [activeTabPath, openTabs]
   );
   const activeFile = activeTab?.file ?? null;
-  const appPlatform = window.veloca?.app.platform ?? 'darwin';
   const usesCustomWindowControls = appPlatform === 'win32' || appPlatform === 'linux';
   const activeSaveActionState = activeTabPath ? saveActionStatesByPath[activeTabPath] ?? 'idle' : 'idle';
   const activeDocumentViewMode = activeTabPath
@@ -1601,6 +1730,7 @@ export function App(): JSX.Element {
       setTheme(storedTheme);
     });
     window.veloca?.settings.getAutoSave().then(setAutoSave);
+    window.veloca?.settings.getShortcutSettings().then(setShortcutSettings);
     window.veloca?.settings.getAiConfig().then((config) => {
       if (config.baseUrl || config.apiKey || config.model || config.contextWindow > 0) {
         setAiConfig(config);
@@ -1617,9 +1747,13 @@ export function App(): JSX.Element {
     if (!window.veloca) {
       const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
       const fallbackAutoSave = localStorage.getItem('veloca-auto-save') !== 'false';
+      const fallbackShortcutSettings = getFallbackShortcutSettings(appPlatform);
       applyTheme(fallbackTheme);
       setTheme(fallbackTheme);
       setAutoSave(fallbackAutoSave);
+      setShortcutSettings({
+        openAiPanel: localStorage.getItem('veloca-shortcut-open-ai-panel') ?? fallbackShortcutSettings.openAiPanel
+      });
       setAiConfig({
         baseUrl: localStorage.getItem('veloca-ai-base-url') ?? '',
         apiKey: localStorage.getItem('veloca-ai-api-key') ?? '',
@@ -1627,7 +1761,7 @@ export function App(): JSX.Element {
         contextWindow: Number(localStorage.getItem('veloca-ai-context-window')) || 128000
       });
     }
-  }, []);
+  }, [appPlatform]);
 
   useEffect(() => {
     if (!usesCustomWindowControls || !window.veloca?.windowControls) {
@@ -1637,6 +1771,14 @@ export function App(): JSX.Element {
     void window.veloca.windowControls.isMaximized().then(setIsWindowMaximized);
     return window.veloca.windowControls.onMaximizedChange(setIsWindowMaximized);
   }, [usesCustomWindowControls]);
+
+  useEffect(() => {
+    if (recordingShortcutAction !== 'openAiPanel') {
+      return;
+    }
+
+    window.requestAnimationFrame(() => openAiPanelShortcutButtonRef.current?.focus());
+  }, [recordingShortcutAction]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -1754,11 +1896,10 @@ export function App(): JSX.Element {
         return;
       }
 
-      const key = event.key.toLowerCase();
       const isFnKey = event.key === 'Fn' || event.code === 'Fn';
-      const isFallbackShortcut = (event.metaKey || event.ctrlKey) && key === 'j';
+      const isConfiguredShortcut = doesShortcutMatchKeyboardEvent(shortcutSettings.openAiPanel, event);
 
-      if (!isFnKey && !isFallbackShortcut) {
+      if (!isFnKey && !isConfiguredShortcut) {
         return;
       }
 
@@ -1768,7 +1909,7 @@ export function App(): JSX.Element {
 
     window.addEventListener('keydown', openOnAgentShortcut);
     return () => window.removeEventListener('keydown', openOnAgentShortcut);
-  }, [openAgentPalette]);
+  }, [openAgentPalette, shortcutSettings.openAiPanel]);
 
   useEffect(() => {
     return window.veloca?.agent.onOpenPalette(openAgentPalette);
@@ -1981,6 +2122,47 @@ export function App(): JSX.Element {
       type: 'success',
       title: 'Editor Updated',
       description: `Auto Save is now ${enabled ? 'enabled' : 'disabled'}.`
+    });
+  };
+
+  const updateShortcutSettings = async (settings: ShortcutSettings) => {
+    setShortcutSettings(settings);
+    localStorage.setItem('veloca-shortcut-open-ai-panel', settings.openAiPanel);
+    await window.veloca?.settings.setShortcutSettings(settings);
+    showToast({
+      type: 'success',
+      title: 'Shortcut Updated',
+      description: `Open AI Panel is now ${settings.openAiPanel}.`
+    });
+  };
+
+  const recordOpenAiPanelShortcut = async (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.key === 'Escape') {
+      setRecordingShortcutAction(null);
+      return;
+    }
+
+    const shortcut = getShortcutFromKeyboardEvent(event);
+
+    if (!shortcut) {
+      return;
+    }
+
+    await updateShortcutSettings({
+      ...shortcutSettings,
+      openAiPanel: shortcut
+    });
+    setRecordingShortcutAction(null);
+  };
+
+  const resetOpenAiPanelShortcut = async () => {
+    setRecordingShortcutAction(null);
+    await updateShortcutSettings({
+      ...shortcutSettings,
+      openAiPanel: getDefaultOpenAiPanelShortcut(appPlatform)
     });
   };
 
@@ -5289,6 +5471,13 @@ export function App(): JSX.Element {
                 Editor
               </button>
               <button
+                className={settingsPanel === 'shortcuts' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('shortcuts')}
+              >
+                Shortcuts
+              </button>
+              <button
                 className={settingsPanel === 'aiModel' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('aiModel')}
@@ -5388,6 +5577,56 @@ export function App(): JSX.Element {
                       </div>
                       <Switch checked={focusMode} onChange={setFocusMode} />
                     </div>
+                  </>
+                )}
+                {settingsPanel === 'shortcuts' && (
+                  <>
+                    <h3 className="settings-section-title">Shortcuts</h3>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Open AI Panel</span>
+                        <span className="setting-desc">
+                          Application-only shortcut for opening the AI panel while editing.
+                        </span>
+                      </div>
+                      <div className="shortcut-control">
+                        <button
+                          ref={openAiPanelShortcutButtonRef}
+                          className={
+                            recordingShortcutAction === 'openAiPanel'
+                              ? 'shortcut-record-button recording'
+                              : 'shortcut-record-button'
+                          }
+                          type="button"
+                          aria-label="Record Open AI Panel shortcut"
+                          onClick={() => setRecordingShortcutAction('openAiPanel')}
+                          onKeyDown={
+                            recordingShortcutAction === 'openAiPanel' ? recordOpenAiPanelShortcut : undefined
+                          }
+                        >
+                          {recordingShortcutAction === 'openAiPanel' ? (
+                            <span>Press keys...</span>
+                          ) : (
+                            <kbd>{shortcutSettings.openAiPanel}</kbd>
+                          )}
+                        </button>
+                        <button
+                          className="shortcut-reset-button"
+                          type="button"
+                          title="Reset to platform default"
+                          aria-label="Reset Open AI Panel shortcut"
+                          onClick={resetOpenAiPanelShortcut}
+                        >
+                          <RefreshCw size={14} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="settings-panel-hint">
+                      Default shortcut: <code>{getDefaultOpenAiPanelShortcut(appPlatform)}</code>. The shortcut is
+                      handled inside Veloca and is not registered as a system-wide hotkey.
+                    </p>
                   </>
                 )}
                 {settingsPanel === 'aiModel' && (
