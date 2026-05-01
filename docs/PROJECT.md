@@ -1,0 +1,1 @@
+这是一个叫veloca的项目，核心基础功能是类似于typora的markdown的编辑能力。
