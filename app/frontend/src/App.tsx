@@ -6703,7 +6703,7 @@ function FileTree({
         <span>Workspace</span>
         <div className="directory-toolbar-actions">
           <button className="toolbar-icon-btn" type="button" aria-label="New database workspace" onClick={onCreateDatabaseWorkspace}>
-            <FolderStarPlusIcon size={16} />
+            <Database size={16} />
           </button>
           <button className="toolbar-icon-btn" type="button" aria-label="Add folder" onClick={onAddFolder}>
             <FolderPlus size={16} />
