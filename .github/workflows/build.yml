@@ -88,6 +88,6 @@ jobs:
           printf 'Release files:\n'
           printf '%s\n' "${release_files[@]}"
           test "${#release_files[@]}" -gt 0
-          gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --draft --generate-notes --title "$GITHUB_REF_NAME"
+          gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --repo "$GITHUB_REPOSITORY" --draft --generate-notes --title "$GITHUB_REF_NAME"
         env:
           GH_TOKEN: ${{ github.token }}
