@@ -136,36 +136,36 @@ const defaultAppInfo: AppInfo = {
   version: '0.0.0'
 };
 
-function getUpdateSummary(status: UpdateCheckResult | null): string {
+function getUpdateSummary(status: UpdateCheckResult | null, t: Translator): string {
   if (!status) {
-    return 'Automatically check GitHub Releases and download installer updates.';
+    return t('about.update.default');
   }
 
   if (status.status === 'checking') {
-    return 'Checking GitHub Releases...';
+    return t('about.update.checking');
   }
 
   if (status.status === 'available') {
-    return `Veloca ${status.latestVersion ?? ''} is available. Download will start automatically.`;
+    return t('about.update.versionAvailable', { version: status.latestVersion ?? '' });
   }
 
   if (status.status === 'downloading') {
-    return `Downloading update${status.updatePercent === null ? '' : ` ${status.updatePercent}%`}...`;
+    return t('about.update.downloading', { percent: status.updatePercent === null ? '' : ` ${status.updatePercent}%` });
   }
 
   if (status.status === 'downloaded') {
-    return `Veloca ${status.latestVersion ?? ''} is ready to install.`;
+    return t('about.update.downloaded', { version: status.latestVersion ?? '' });
   }
 
   if (status.status === 'current') {
-    return `Veloca ${status.currentVersion} is up to date.`;
+    return t('about.update.versionCurrent', { version: status.currentVersion });
   }
 
   if (status.status === 'unavailable') {
-    return status.errorMessage ?? 'Update status is unavailable.';
+    return status.errorMessage ?? t('about.update.unavailable');
   }
 
-  return 'Automatically check GitHub Releases and download installer updates.';
+  return t('about.update.default');
 }
 
 function logAiInsertDebug(message: string, details?: Record<string, unknown>): void {
@@ -4875,26 +4875,26 @@ export function App(): JSX.Element {
       if (result.status === 'available' || result.status === 'downloading') {
         showToast({
           type: 'info',
-          title: 'Update Download Started',
-          description: `Veloca ${result.latestVersion ?? 'update'} is being downloaded.`
+          title: t('toast.update.downloadStartedTitle'),
+          description: t('toast.update.downloadStartedDescription', { version: result.latestVersion ?? 'update' })
         });
       } else if (result.status === 'downloaded') {
         showToast({
           type: 'success',
-          title: 'Update Ready',
-          description: 'Restart Veloca to install the downloaded update.'
+          title: t('toast.update.readyTitle'),
+          description: t('toast.update.readyDescription')
         });
       } else if (source === 'manual' && result.status === 'current') {
         showToast({
           type: 'success',
-          title: 'Veloca is Up to Date',
-          description: `You are running version ${result.currentVersion}.`
+          title: t('toast.update.currentTitle'),
+          description: t('toast.update.currentDescription', { version: result.currentVersion })
         });
       } else if (source === 'manual') {
         showToast({
           type: 'info',
-          title: 'Unable to Check Updates',
-          description: result.errorMessage ?? 'Veloca could not inspect GitHub Releases.'
+          title: t('toast.update.checkFailedTitle'),
+          description: result.errorMessage ?? t('toast.update.checkFailedDescription')
         });
       }
     } finally {
@@ -4936,8 +4936,8 @@ export function App(): JSX.Element {
     } catch (error) {
       showToast({
         type: 'info',
-        title: 'Unable to Load Licenses',
-        description: error instanceof Error ? error.message : 'Veloca could not load open-source component metadata.'
+        title: t('toast.licenses.loadFailedTitle'),
+        description: error instanceof Error ? error.message : t('toast.licenses.loadFailedDescription')
       });
     } finally {
       setOpenSourceLoading(false);
@@ -4976,8 +4976,8 @@ export function App(): JSX.Element {
         updateReadyToastKeyRef.current = readyToastKey;
         showToast({
           type: 'success',
-          title: 'Update Ready',
-          description: 'Restart Veloca to install the downloaded update.'
+          title: t('toast.update.readyTitle'),
+          description: t('toast.update.readyDescription')
         });
       }
     });
@@ -6587,7 +6587,7 @@ export function App(): JSX.Element {
                       )}
                       <div className="about-title-block">
                         <h3>Veloca</h3>
-                        <span>Markdown editor for focused desktop writing.</span>
+                        <span>{t('about.subtitle')}</span>
                       </div>
                     </div>
 
@@ -6597,10 +6597,10 @@ export function App(): JSX.Element {
                         <div>
                           <strong>
                             {updateStatus.status === 'downloaded'
-                              ? `Veloca ${updateStatus.latestVersion ?? ''} is ready`
-                              : `Veloca ${updateStatus.latestVersion ?? ''} is available`}
+                              ? t('about.update.ready', { version: updateStatus.latestVersion ?? '' })
+                              : t('about.update.available', { version: updateStatus.latestVersion ?? '' })}
                           </strong>
-                          <span>{getUpdateSummary(updateStatus)}</span>
+                          <span>{getUpdateSummary(updateStatus, t)}</span>
                           {updateStatus.status === 'downloading' && (
                             <span className="settings-update-progress">
                               <span style={{ width: `${updateStatus.updatePercent ?? 0}%` }} />
@@ -6615,7 +6615,7 @@ export function App(): JSX.Element {
                             onClick={() => void installDownloadedUpdate()}
                           >
                             {updateInstalling ? <LoaderCircle className="spinning" size={14} /> : <RefreshCw size={14} />}
-                            Restart to Update
+                            {t('about.restartUpdate')}
                           </button>
                         ) : updateStatus.releaseUrl ? (
                           <button
@@ -6624,7 +6624,7 @@ export function App(): JSX.Element {
                             onClick={() => void openExternalLink(updateStatus.releaseUrl ?? '')}
                           >
                             <ExternalLink size={14} />
-                            Open Release
+                            {t('about.openRelease')}
                           </button>
                         ) : null}
                       </div>
@@ -6632,15 +6632,15 @@ export function App(): JSX.Element {
 
                     <div className="about-info-grid">
                       <div className="about-info-item">
-                        <span>Version</span>
+                        <span>{t('about.version')}</span>
                         <strong>{appInfo.version}</strong>
                       </div>
                       <div className="about-info-item">
-                        <span>License</span>
+                        <span>{t('about.license')}</span>
                         <strong>{appInfo.license}</strong>
                       </div>
                       <div className="about-info-item wide">
-                        <span>GitHub</span>
+                        <span>{t('about.github')}</span>
                         <button
                           className="about-link-button"
                           type="button"
@@ -6667,9 +6667,9 @@ export function App(): JSX.Element {
                           )}
                         </span>
                         <span className="about-action-copy">
-                          <strong>Check for Updates</strong>
+                          <strong>{t('about.action.checkUpdates')}</strong>
                           <small>
-                            {updateStatus ? getUpdateSummary(updateStatus) : 'Inspect GitHub Releases and download updates.'}
+                            {updateStatus ? getUpdateSummary(updateStatus, t) : t('about.action.inspectReleases')}
                           </small>
                         </span>
                         <ChevronRight size={16} />
@@ -6686,8 +6686,8 @@ export function App(): JSX.Element {
                             {updateInstalling ? <LoaderCircle className="spinning" size={16} /> : <RefreshCw size={16} />}
                           </span>
                           <span className="about-action-copy">
-                            <strong>Restart to Update</strong>
-                            <small>Close Veloca, run the installer, and reopen the updated app.</small>
+                            <strong>{t('about.action.restartUpdate')}</strong>
+                            <small>{t('about.action.restartDesc')}</small>
                           </span>
                           <ChevronRight size={16} />
                         </button>
@@ -6698,19 +6698,27 @@ export function App(): JSX.Element {
                           <FileText size={16} />
                         </span>
                         <span className="about-action-copy">
-                          <strong>Open Source Licenses</strong>
-                          <small>{openSourceComponents.length || 'View'} components used by Veloca.</small>
+                          <strong>{t('about.action.openLicenses')}</strong>
+                          <small>
+                            {openSourceComponents.length
+                              ? t('about.componentsUsedShort', { count: openSourceComponents.length })
+                              : t('about.componentsViewShort')}
+                          </small>
                         </span>
                         <ChevronRight size={16} />
                       </button>
                     </div>
 
                     {updateStatus?.status === 'current' && (
-                      <p className="settings-panel-hint">Veloca is up to date at version {updateStatus.currentVersion}.</p>
+                      <p className="settings-panel-hint">
+                        {t('about.currentVersion', { version: updateStatus.currentVersion })}
+                      </p>
                     )}
                     {updateStatus?.status === 'unavailable' && (
                       <p className="settings-panel-hint">
-                        Update status is unavailable: {updateStatus.errorMessage ?? 'GitHub Releases could not be checked.'}
+                        {t('about.unavailable', {
+                          message: updateStatus.errorMessage ?? t('about.update.errorFallback')
+                        })}
                       </p>
                     )}
                   </>
@@ -6725,18 +6733,18 @@ export function App(): JSX.Element {
         <div className="license-dialog-overlay" onMouseDown={() => setLicenseDialogOpen(false)}>
           <section
             className="license-dialog"
-            aria-label="Open source licenses"
+            aria-label={t('about.licenses.title')}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="license-dialog-header">
               <div>
-                <h2>Open Source Licenses</h2>
-                <p>{openSourceComponents.length} runtime components used by Veloca.</p>
+                <h2>{t('about.licenses.title')}</h2>
+                <p>{t('about.componentsUsed', { count: openSourceComponents.length })}</p>
               </div>
               <button
                 className="settings-close-btn inline"
                 type="button"
-                aria-label="Close open source licenses"
+                aria-label={t('about.licenses.close')}
                 onClick={() => setLicenseDialogOpen(false)}
               >
                 <X size={18} />
@@ -6747,14 +6755,14 @@ export function App(): JSX.Element {
               {openSourceLoading ? (
                 <div className="license-loading">
                   <LoaderCircle className="spinning" size={18} />
-                  Loading components
+                  {t('about.licenses.loading')}
                 </div>
               ) : (
                 openSourceComponents.map((component) => (
                   <div className="license-component-row" key={`${component.name}-${component.version}`}>
                     <div className="license-component-main">
                       <strong>{component.name}</strong>
-                      <span>{component.version || 'unknown version'}</span>
+                      <span>{component.version || t('about.licenses.unknownVersion')}</span>
                     </div>
                     <span className="license-badge">{component.license}</span>
                     {(component.repositoryUrl || component.homepage) && (
