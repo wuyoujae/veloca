@@ -688,29 +688,72 @@ async function getProjectApiKeys(
   };
 }
 
+function isTransientPostgresConnectionError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('connection terminated') ||
+    message.includes('connection timeout') ||
+    message.includes('connection closed') ||
+    message.includes('econnreset') ||
+    message.includes('etimedout') ||
+    message.includes('timeout expired') ||
+    message.includes('server closed the connection') ||
+    message.includes('the database system is starting up')
+  );
+}
+
 async function initializeRemoteSchema(project: SupabaseProjectResponse, databasePassword: string): Promise<void> {
   if (!project.ref) {
     throw new Error('Supabase did not return a project ref.');
   }
 
-  const client = new Client({
-    database: 'postgres',
-    host: project.database?.host || `db.${project.ref}.supabase.co`,
-    password: databasePassword,
-    port: 5432,
-    ssl: {
-      rejectUnauthorized: false
-    },
-    user: 'postgres'
-  });
+  const host = project.database?.host || `db.${project.ref}.supabase.co`;
+  let lastError: unknown = null;
 
-  await client.connect();
+  for (let attempt = 0; attempt < projectReadyPollAttempts; attempt += 1) {
+    const client = new Client({
+      connectionTimeoutMillis: 10000,
+      database: 'postgres',
+      host,
+      password: databasePassword,
+      port: 5432,
+      query_timeout: 30000,
+      ssl: {
+        rejectUnauthorized: false
+      },
+      user: 'postgres'
+    });
 
-  try {
-    await client.query(remoteSchemaSql);
-  } finally {
-    await client.end();
+    try {
+      await client.connect();
+      await client.query(remoteSchemaSql);
+      return;
+    } catch (error) {
+      lastError = error;
+
+      if (!isTransientPostgresConnectionError(error)) {
+        throw new Error(`Supabase database schema initialization failed: ${getErrorMessage(error)}`);
+      }
+
+      logRemoteSetupStep('database not ready; retrying schema initialization', {
+        attempt: String(attempt + 1),
+        error: getErrorMessage(error),
+        host
+      });
+      await wait(projectReadyPollDelayMs);
+    } finally {
+      try {
+        await client.end();
+      } catch {
+        // Ignore cleanup errors after failed connection attempts.
+      }
+    }
   }
+
+  throw new Error(
+    `Supabase database did not accept schema initialization in time: ${getErrorMessage(lastError)}`
+  );
 }
 
 async function testRemoteSupabaseClient(projectUrl: string, secretKey: string | null): Promise<void> {
