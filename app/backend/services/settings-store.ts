@@ -14,7 +14,11 @@ export interface AiModelConfig {
 }
 
 export interface ShortcutSettings {
+  newBlankFile: string;
   openAiPanel: string;
+  redo: string;
+  toggleSourceMode: string;
+  undo: string;
 }
 
 export interface TypographySettings {
@@ -36,7 +40,11 @@ const aiBaseUrlKey = 'aiBaseUrl';
 const aiApiKeyKey = 'aiApiKey';
 const aiModelKey = 'aiModel';
 const aiContextWindowKey = 'aiContextWindow';
+const newBlankFileShortcutKey = 'shortcutNewBlankFile';
 const openAiPanelShortcutKey = 'shortcutOpenAiPanel';
+const redoShortcutKey = 'shortcutRedo';
+const toggleSourceModeShortcutKey = 'shortcutToggleSourceMode';
+const undoShortcutKey = 'shortcutUndo';
 const editorFontSizeKey = 'editorFontSize';
 const defaultEditorFontSize = 16;
 const minimumEditorFontSize = 13;
@@ -133,18 +141,43 @@ export function setAiConfig(config: AiModelConfig): AiModelConfig {
   return config;
 }
 
+function getPlatformCommandShortcut(platform: NodeJS.Platform, key: string): string {
+  return `${platform === 'darwin' ? 'Command' : 'Ctrl'}+${key}`;
+}
+
 export function getDefaultOpenAiPanelShortcut(platform: NodeJS.Platform): string {
-  return platform === 'darwin' ? 'Command+J' : 'Ctrl+J';
+  return getPlatformCommandShortcut(platform, 'Q');
+}
+
+function getStoredShortcut(settingKey: string, fallback: string, legacyFallback?: string): string {
+  const storedShortcut = getSetting(settingKey);
+
+  if (!storedShortcut || storedShortcut === legacyFallback) {
+    return fallback;
+  }
+
+  return storedShortcut;
 }
 
 export function getShortcutSettings(platform: NodeJS.Platform): ShortcutSettings {
+  const openAiPanelFallback = getDefaultOpenAiPanelShortcut(platform);
+  const legacyOpenAiPanelFallback = getPlatformCommandShortcut(platform, 'J');
+
   return {
-    openAiPanel: getSetting(openAiPanelShortcutKey) ?? getDefaultOpenAiPanelShortcut(platform)
+    newBlankFile: getStoredShortcut(newBlankFileShortcutKey, getPlatformCommandShortcut(platform, 'N')),
+    openAiPanel: getStoredShortcut(openAiPanelShortcutKey, openAiPanelFallback, legacyOpenAiPanelFallback),
+    redo: getStoredShortcut(redoShortcutKey, getPlatformCommandShortcut(platform, 'Shift+Z')),
+    toggleSourceMode: getStoredShortcut(toggleSourceModeShortcutKey, getPlatformCommandShortcut(platform, '/')),
+    undo: getStoredShortcut(undoShortcutKey, getPlatformCommandShortcut(platform, 'Z'))
   };
 }
 
 export function setShortcutSettings(settings: ShortcutSettings): ShortcutSettings {
+  setSetting(newBlankFileShortcutKey, settings.newBlankFile);
   setSetting(openAiPanelShortcutKey, settings.openAiPanel);
+  setSetting(redoShortcutKey, settings.redo);
+  setSetting(toggleSourceModeShortcutKey, settings.toggleSourceMode);
+  setSetting(undoShortcutKey, settings.undo);
   return settings;
 }
 

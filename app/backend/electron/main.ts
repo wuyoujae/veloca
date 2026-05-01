@@ -445,7 +445,19 @@ function registerIpcHandlers(): void {
     );
   };
   const isShortcutSettings = (settings: ShortcutSettings): boolean => {
-    return Boolean(settings && typeof settings.openAiPanel === 'string' && settings.openAiPanel.trim().length > 0);
+    return Boolean(
+      settings &&
+        typeof settings.newBlankFile === 'string' &&
+        settings.newBlankFile.trim().length > 0 &&
+        typeof settings.openAiPanel === 'string' &&
+        settings.openAiPanel.trim().length > 0 &&
+        typeof settings.redo === 'string' &&
+        settings.redo.trim().length > 0 &&
+        typeof settings.toggleSourceMode === 'string' &&
+        settings.toggleSourceMode.trim().length > 0 &&
+        typeof settings.undo === 'string' &&
+        settings.undo.trim().length > 0
+    );
   };
   const isTypographySettings = (settings: TypographySettings): boolean => {
     return Boolean(settings && typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize));
@@ -549,7 +561,11 @@ function registerIpcHandlers(): void {
     }
 
     const savedSettings = setShortcutSettings({
-      openAiPanel: settings.openAiPanel.trim()
+      newBlankFile: settings.newBlankFile.trim(),
+      openAiPanel: settings.openAiPanel.trim(),
+      redo: settings.redo.trim(),
+      toggleSourceMode: settings.toggleSourceMode.trim(),
+      undo: settings.undo.trim()
     });
     openAiPanelShortcutCache = savedSettings.openAiPanel;
     return savedSettings;

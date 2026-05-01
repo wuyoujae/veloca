@@ -176,13 +176,38 @@ function logRemoteSettingsDebug(message: string, details?: Record<string, unknow
   console.info(remoteSettingsLogPrefix, message, details ?? {});
 }
 
+function getPlatformCommandShortcut(platform: string, key: string): string {
+  return `${platform === 'darwin' ? 'Command' : 'Ctrl'}+${key}`;
+}
+
 function getDefaultOpenAiPanelShortcut(platform: string): string {
-  return platform === 'darwin' ? 'Command+J' : 'Ctrl+J';
+  return getPlatformCommandShortcut(platform, 'Q');
 }
 
 function getFallbackShortcutSettings(platform: string): ShortcutSettings {
   return {
-    openAiPanel: getDefaultOpenAiPanelShortcut(platform)
+    newBlankFile: getPlatformCommandShortcut(platform, 'N'),
+    openAiPanel: getDefaultOpenAiPanelShortcut(platform),
+    redo: getPlatformCommandShortcut(platform, 'Shift+Z'),
+    toggleSourceMode: getPlatformCommandShortcut(platform, '/'),
+    undo: getPlatformCommandShortcut(platform, 'Z')
+  };
+}
+
+function normalizeShortcutSettings(settings: Partial<ShortcutSettings>, platform: string): ShortcutSettings {
+  const fallback = getFallbackShortcutSettings(platform);
+  const legacyOpenAiPanelFallback = getPlatformCommandShortcut(platform, 'J');
+  const openAiPanel =
+    settings.openAiPanel && settings.openAiPanel !== legacyOpenAiPanelFallback
+      ? settings.openAiPanel
+      : fallback.openAiPanel;
+
+  return {
+    newBlankFile: settings.newBlankFile || fallback.newBlankFile,
+    openAiPanel,
+    redo: settings.redo || fallback.redo,
+    toggleSourceMode: settings.toggleSourceMode || fallback.toggleSourceMode,
+    undo: settings.undo || fallback.undo
   };
 }
 
@@ -384,8 +409,15 @@ interface AiModelConfig {
 }
 
 interface ShortcutSettings {
+  newBlankFile: string;
   openAiPanel: string;
+  redo: string;
+  toggleSourceMode: string;
+  undo: string;
 }
+
+type ShortcutAction = keyof ShortcutSettings;
+const shortcutActions: ShortcutAction[] = ['undo', 'redo', 'newBlankFile', 'openAiPanel', 'toggleSourceMode'];
 
 interface TypographySettings {
   editorFontSize: number;
@@ -1553,7 +1585,7 @@ export function App(): JSX.Element {
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() =>
     getFallbackShortcutSettings(appPlatform)
   );
-  const [recordingShortcutAction, setRecordingShortcutAction] = useState<keyof ShortcutSettings | null>(null);
+  const [recordingShortcutAction, setRecordingShortcutAction] = useState<ShortcutAction | null>(null);
   const [aiConfig, setAiConfig] = useState<AiModelConfig>({
     baseUrl: '',
     apiKey: '',
@@ -1611,7 +1643,7 @@ export function App(): JSX.Element {
   const watchedMarkdownFileChangeHandlerRef = useRef<(change: WatchedMarkdownFileChange) => void>(() => {});
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
-  const openAiPanelShortcutButtonRef = useRef<HTMLButtonElement>(null);
+  const shortcutRecordButtonRefs = useRef<Partial<Record<ShortcutAction, HTMLButtonElement | null>>>({});
   const editorFontSizeSaveTimerRef = useRef<number | null>(null);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
   const updateReadyToastKeyRef = useRef<string>('');
@@ -1884,7 +1916,9 @@ export function App(): JSX.Element {
       setEditorFontSize(nextFontSize);
       applyEditorFontSize(nextFontSize);
     });
-    window.veloca?.settings.getShortcutSettings().then(setShortcutSettings);
+    window.veloca?.settings.getShortcutSettings().then((settings) => {
+      setShortcutSettings(normalizeShortcutSettings(settings, appPlatform));
+    });
     window.veloca?.settings.getAiConfig().then((config) => {
       if (config.baseUrl || config.apiKey || config.model || config.contextWindow > 0) {
         setAiConfig(config);
@@ -1909,7 +1943,6 @@ export function App(): JSX.Element {
         language: normalizeAppLanguage(localStorage.getItem('veloca-app-language')),
         motion: normalizeMotionPreference(localStorage.getItem('veloca-motion-preference'))
       };
-      const fallbackShortcutSettings = getFallbackShortcutSettings(appPlatform);
       applyTheme(fallbackTheme);
       applyAppearanceSettings(fallbackAppearanceSettings);
       applyEditorFontSize(fallbackEditorFontSize);
@@ -1917,9 +1950,18 @@ export function App(): JSX.Element {
       setAppearanceSettings(fallbackAppearanceSettings);
       setAutoSave(fallbackAutoSave);
       setEditorFontSize(fallbackEditorFontSize);
-      setShortcutSettings({
-        openAiPanel: localStorage.getItem('veloca-shortcut-open-ai-panel') ?? fallbackShortcutSettings.openAiPanel
-      });
+      setShortcutSettings(
+        normalizeShortcutSettings(
+          {
+            newBlankFile: localStorage.getItem('veloca-shortcut-new-blank-file') ?? undefined,
+            openAiPanel: localStorage.getItem('veloca-shortcut-open-ai-panel') ?? undefined,
+            redo: localStorage.getItem('veloca-shortcut-redo') ?? undefined,
+            toggleSourceMode: localStorage.getItem('veloca-shortcut-toggle-source-mode') ?? undefined,
+            undo: localStorage.getItem('veloca-shortcut-undo') ?? undefined
+          },
+          appPlatform
+        )
+      );
       setAiConfig({
         baseUrl: localStorage.getItem('veloca-ai-base-url') ?? '',
         apiKey: localStorage.getItem('veloca-ai-api-key') ?? '',
@@ -1939,11 +1981,11 @@ export function App(): JSX.Element {
   }, [usesCustomWindowControls]);
 
   useEffect(() => {
-    if (recordingShortcutAction !== 'openAiPanel') {
+    if (!recordingShortcutAction) {
       return;
     }
 
-    window.requestAnimationFrame(() => openAiPanelShortcutButtonRef.current?.focus());
+    window.requestAnimationFrame(() => shortcutRecordButtonRefs.current[recordingShortcutAction]?.focus());
   }, [recordingShortcutAction]);
 
   useEffect(() => {
@@ -2055,27 +2097,6 @@ export function App(): JSX.Element {
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, []);
-
-  useEffect(() => {
-    const openOnAgentShortcut = (event: KeyboardEvent) => {
-      if (isAppInputShortcutTarget(event.target)) {
-        return;
-      }
-
-      const isFnKey = event.key === 'Fn' || event.code === 'Fn';
-      const isConfiguredShortcut = doesShortcutMatchKeyboardEvent(shortcutSettings.openAiPanel, event);
-
-      if (!isFnKey && !isConfiguredShortcut) {
-        return;
-      }
-
-      event.preventDefault();
-      openAgentPalette();
-    };
-
-    window.addEventListener('keydown', openOnAgentShortcut);
-    return () => window.removeEventListener('keydown', openOnAgentShortcut);
-  }, [openAgentPalette, shortcutSettings.openAiPanel]);
 
   useEffect(() => {
     return window.veloca?.agent.onOpenPalette(openAgentPalette);
@@ -2357,18 +2378,53 @@ export function App(): JSX.Element {
     updateEditorFontSize(defaultEditorFontSize);
   };
 
-  const updateShortcutSettings = async (settings: ShortcutSettings) => {
+  const getShortcutActionLabel = (action: ShortcutAction) => {
+    const labels: Record<ShortcutAction, string> = {
+      newBlankFile: t('settings.shortcuts.newBlankFile'),
+      openAiPanel: t('settings.shortcuts.openAiPanel'),
+      redo: t('settings.shortcuts.redo'),
+      toggleSourceMode: t('settings.shortcuts.toggleSourceMode'),
+      undo: t('settings.shortcuts.undo')
+    };
+
+    return labels[action];
+  };
+
+  const getShortcutActionDesc = (action: ShortcutAction) => {
+    const descriptions: Record<ShortcutAction, string> = {
+      newBlankFile: t('settings.shortcuts.newBlankFileDesc'),
+      openAiPanel: t('settings.shortcuts.openAiPanelDesc'),
+      redo: t('settings.shortcuts.redoDesc'),
+      toggleSourceMode: t('settings.shortcuts.toggleSourceModeDesc'),
+      undo: t('settings.shortcuts.undoDesc')
+    };
+
+    return descriptions[action];
+  };
+
+  const getDefaultShortcutForAction = (action: ShortcutAction) => {
+    return getFallbackShortcutSettings(appPlatform)[action];
+  };
+
+  const updateShortcutSettings = async (settings: ShortcutSettings, changedAction: ShortcutAction) => {
     setShortcutSettings(settings);
+    localStorage.setItem('veloca-shortcut-new-blank-file', settings.newBlankFile);
     localStorage.setItem('veloca-shortcut-open-ai-panel', settings.openAiPanel);
+    localStorage.setItem('veloca-shortcut-redo', settings.redo);
+    localStorage.setItem('veloca-shortcut-toggle-source-mode', settings.toggleSourceMode);
+    localStorage.setItem('veloca-shortcut-undo', settings.undo);
     await window.veloca?.settings.setShortcutSettings(settings);
     showToast({
       type: 'success',
       title: t('toast.shortcut.updatedTitle'),
-      description: t('toast.shortcut.description', { shortcut: settings.openAiPanel })
+      description: t('toast.shortcut.description', {
+        action: getShortcutActionLabel(changedAction),
+        shortcut: settings[changedAction]
+      })
     });
   };
 
-  const recordOpenAiPanelShortcut = async (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+  const recordShortcut = async (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
 
@@ -2385,17 +2441,17 @@ export function App(): JSX.Element {
 
     await updateShortcutSettings({
       ...shortcutSettings,
-      openAiPanel: shortcut
-    });
+      [action]: shortcut
+    }, action);
     setRecordingShortcutAction(null);
   };
 
-  const resetOpenAiPanelShortcut = async () => {
+  const resetShortcut = async (action: ShortcutAction) => {
     setRecordingShortcutAction(null);
     await updateShortcutSettings({
       ...shortcutSettings,
-      openAiPanel: getDefaultOpenAiPanelShortcut(appPlatform)
-    });
+      [action]: getDefaultShortcutForAction(action)
+    }, action);
   };
 
   const updateAiConfig = async (config: AiModelConfig) => {
@@ -4222,6 +4278,92 @@ export function App(): JSX.Element {
     activateEditorTab(nextTab, [filePath]);
   };
 
+  const undoActiveEditor = () => {
+    if (!activeTabPath) {
+      return false;
+    }
+
+    const activeMode = getDocumentViewMode(activeTabPath);
+    const editorHandle =
+      activeMode === 'source'
+        ? sourceEditorHandlesRef.current.get(activeTabPath)
+        : renderedEditorHandlesRef.current.get(activeTabPath);
+
+    return editorHandle?.undo() ?? false;
+  };
+
+  const redoActiveEditor = () => {
+    if (!activeTabPath) {
+      return false;
+    }
+
+    const activeMode = getDocumentViewMode(activeTabPath);
+    const editorHandle =
+      activeMode === 'source'
+        ? sourceEditorHandlesRef.current.get(activeTabPath)
+        : renderedEditorHandlesRef.current.get(activeTabPath);
+
+    return editorHandle?.redo() ?? false;
+  };
+
+  useEffect(() => {
+    const runConfiguredShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if (isAppInputShortcutTarget(event.target)) {
+        return;
+      }
+
+      const isFnKey = event.key === 'Fn' || event.code === 'Fn';
+
+      if (isFnKey || doesShortcutMatchKeyboardEvent(shortcutSettings.openAiPanel, event)) {
+        event.preventDefault();
+        openAgentPalette();
+        return;
+      }
+
+      if (doesShortcutMatchKeyboardEvent(shortcutSettings.undo, event)) {
+        event.preventDefault();
+        undoActiveEditor();
+        return;
+      }
+
+      if (doesShortcutMatchKeyboardEvent(shortcutSettings.redo, event)) {
+        event.preventDefault();
+        redoActiveEditor();
+        return;
+      }
+
+      if (doesShortcutMatchKeyboardEvent(shortcutSettings.newBlankFile, event)) {
+        event.preventDefault();
+        void createNewMarkdownFile();
+        return;
+      }
+
+      if (doesShortcutMatchKeyboardEvent(shortcutSettings.toggleSourceMode, event)) {
+        event.preventDefault();
+        toggleActiveDocumentViewMode();
+      }
+    };
+
+    window.addEventListener('keydown', runConfiguredShortcut);
+    return () => window.removeEventListener('keydown', runConfiguredShortcut);
+  }, [
+    activeTabPath,
+    createNewMarkdownFile,
+    openAgentPalette,
+    redoActiveEditor,
+    shortcutSettings.newBlankFile,
+    shortcutSettings.openAiPanel,
+    shortcutSettings.redo,
+    shortcutSettings.toggleSourceMode,
+    shortcutSettings.undo,
+    toggleActiveDocumentViewMode,
+    undoActiveEditor
+  ]);
+
   const saveAllOpenTabs = async () => {
     if (!window.veloca || !openTabs.length) {
       return;
@@ -5002,6 +5144,10 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const saveOnShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
       if (isAppInputShortcutTarget(event.target)) {
         return;
       }
@@ -5988,47 +6134,55 @@ export function App(): JSX.Element {
                   <>
                     <h3 className="settings-section-title">{t('nav.shortcuts')}</h3>
 
-                    <div className="setting-row">
-                      <div className="setting-info">
-                        <span className="setting-label">{t('settings.shortcuts.openAiPanel')}</span>
-                        <span className="setting-desc">{t('settings.shortcuts.openAiPanelDesc')}</span>
+                    {shortcutActions.map((action) => (
+                      <div className="setting-row" key={action}>
+                        <div className="setting-info">
+                          <span className="setting-label">{getShortcutActionLabel(action)}</span>
+                          <span className="setting-desc">{getShortcutActionDesc(action)}</span>
+                        </div>
+                        <div className="shortcut-control">
+                          <button
+                            ref={(element) => {
+                              shortcutRecordButtonRefs.current[action] = element;
+                            }}
+                            className={
+                              recordingShortcutAction === action
+                                ? 'shortcut-record-button recording'
+                                : 'shortcut-record-button'
+                            }
+                            type="button"
+                            aria-label={t('settings.shortcuts.recordAction', {
+                              action: getShortcutActionLabel(action)
+                            })}
+                            onClick={() => setRecordingShortcutAction(action)}
+                            onKeyDown={
+                              recordingShortcutAction === action
+                                ? (event) => void recordShortcut(action, event)
+                                : undefined
+                            }
+                          >
+                            {recordingShortcutAction === action ? (
+                              <span>{t('settings.shortcuts.pressKeys')}</span>
+                            ) : (
+                              <kbd>{shortcutSettings[action]}</kbd>
+                            )}
+                          </button>
+                          <button
+                            className="shortcut-reset-button"
+                            type="button"
+                            title={t('settings.shortcuts.resetDefault')}
+                            aria-label={t('settings.shortcuts.resetAction', {
+                              action: getShortcutActionLabel(action)
+                            })}
+                            onClick={() => void resetShortcut(action)}
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                        </div>
                       </div>
-                      <div className="shortcut-control">
-                        <button
-                          ref={openAiPanelShortcutButtonRef}
-                          className={
-                            recordingShortcutAction === 'openAiPanel'
-                              ? 'shortcut-record-button recording'
-                              : 'shortcut-record-button'
-                          }
-                          type="button"
-                          aria-label={t('settings.shortcuts.recordOpenAiPanel')}
-                          onClick={() => setRecordingShortcutAction('openAiPanel')}
-                          onKeyDown={
-                            recordingShortcutAction === 'openAiPanel' ? recordOpenAiPanelShortcut : undefined
-                          }
-                        >
-                          {recordingShortcutAction === 'openAiPanel' ? (
-                            <span>{t('settings.shortcuts.pressKeys')}</span>
-                          ) : (
-                            <kbd>{shortcutSettings.openAiPanel}</kbd>
-                          )}
-                        </button>
-                        <button
-                          className="shortcut-reset-button"
-                          type="button"
-                          title={t('settings.shortcuts.resetDefault')}
-                          aria-label={t('settings.shortcuts.resetOpenAiPanel')}
-                          onClick={resetOpenAiPanelShortcut}
-                        >
-                          <RefreshCw size={14} />
-                        </button>
-                      </div>
-                    </div>
+                    ))}
 
-                    <p className="settings-panel-hint">
-                      {t('settings.shortcuts.defaultHint', { shortcut: getDefaultOpenAiPanelShortcut(appPlatform) })}
-                    </p>
+                    <p className="settings-panel-hint">{t('settings.shortcuts.defaultHint')}</p>
                   </>
                 )}
                 {settingsPanel === 'aiModel' && (
@@ -7364,6 +7518,8 @@ interface MarkdownEditorHandle {
   getMarkdownSelectionRange: () => MarkdownSelectionRange | null;
   getProvenanceSnapshot: () => JSONContent | null;
   hasRenderedEdits: () => boolean;
+  redo: () => boolean;
+  undo: () => boolean;
 }
 
 interface SourceMarkdownEditorProps {
@@ -7379,6 +7535,8 @@ interface SourceMarkdownEditorHandle {
   focusAtOffset: (offset: number) => void;
   getCursorOffset: () => number | null;
   getSelectionRange: () => MarkdownSelectionRange | null;
+  redo: () => boolean;
+  undo: () => boolean;
 }
 
 type TableControlsState = {
@@ -7752,14 +7910,30 @@ const SourceMarkdownEditor = forwardRef<SourceMarkdownEditorHandle, SourceMarkdo
       };
     }, []);
 
+    const runHistoryCommand = useCallback((command: 'redo' | 'undo') => {
+      const textarea = textareaRef.current;
+
+      if (!textarea) {
+        return false;
+      }
+
+      textarea.focus();
+      return document.execCommand(command);
+    }, []);
+
+    const redo = useCallback(() => runHistoryCommand('redo'), [runHistoryCommand]);
+    const undo = useCallback(() => runHistoryCommand('undo'), [runHistoryCommand]);
+
     useImperativeHandle(
       ref,
       () => ({
         focusAtOffset,
         getCursorOffset,
-        getSelectionRange
+        getSelectionRange,
+        redo,
+        undo
       }),
-      [focusAtOffset, getCursorOffset, getSelectionRange]
+      [focusAtOffset, getCursorOffset, getSelectionRange, redo, undo]
     );
 
     useEffect(() => {
@@ -8470,6 +8644,18 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
 
   const hasRenderedEdits = useCallback((): boolean => renderedDirtyRef.current, []);
 
+  const redo = useCallback(() => {
+    const currentEditor = editorInstanceRef.current;
+
+    return currentEditor?.commands.redo() ?? false;
+  }, []);
+
+  const undo = useCallback(() => {
+    const currentEditor = editorInstanceRef.current;
+
+    return currentEditor?.commands.undo() ?? false;
+  }, []);
+
   const getAiProvenanceRanges = useCallback((markdown?: string): AiGeneratedMarkdownRange[] => {
     const currentEditor = editorInstanceRef.current;
 
@@ -8498,7 +8684,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       getMarkdownContent,
       getProvenanceSnapshot,
       applyAiProvenanceContent,
-      hasRenderedEdits
+      hasRenderedEdits,
+      redo,
+      undo
     }),
     [
       applyAiProvenanceContent,
@@ -8508,7 +8696,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(fun
       getMarkdownContent,
       getMarkdownSelectionRange,
       getProvenanceSnapshot,
-      hasRenderedEdits
+      hasRenderedEdits,
+      redo,
+      undo
     ]
   );
 
@@ -9486,10 +9676,16 @@ function isAppInputShortcutTarget(target: EventTarget | null): boolean {
     return false;
   }
 
+  if (target.closest('.settings-window, .name-dialog, .save-location-dialog')) {
+    return true;
+  }
+
+  if (target.closest('.ProseMirror, .veloca-source-textarea')) {
+    return false;
+  }
+
   return Boolean(
-    target.closest(
-      'input, textarea, select, [contenteditable="true"], .settings-window, .name-dialog, .save-location-dialog'
-    )
+    target.closest('input, textarea, select, [contenteditable="true"]')
   );
 }
 

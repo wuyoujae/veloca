@@ -159,7 +159,11 @@ interface AiModelConfig {
 }
 
 interface ShortcutSettings {
+  newBlankFile: string;
   openAiPanel: string;
+  redo: string;
+  toggleSourceMode: string;
+  undo: string;
 }
 
 interface TypographySettings {
