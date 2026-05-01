@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AiModelConfig, ShortcutSettings, ThemeMode, TypographySettings } from '../services/settings-store';
+import type {
+  AiModelConfig,
+  AppearanceSettings,
+  ShortcutSettings,
+  ThemeMode,
+  TypographySettings
+} from '../services/settings-store';
 import type {
   RemoteDatabaseConfigInput,
   RemoteDatabaseConfigView,
@@ -47,6 +53,10 @@ contextBridge.exposeInMainWorld('veloca', {
   settings: {
     getTheme: () => ipcRenderer.invoke('settings:get-theme') as Promise<ThemeMode>,
     setTheme: (theme: ThemeMode) => ipcRenderer.invoke('settings:set-theme', theme) as Promise<ThemeMode>,
+    getAppearanceSettings: () =>
+      ipcRenderer.invoke('settings:get-appearance-settings') as Promise<AppearanceSettings>,
+    setAppearanceSettings: (settings: AppearanceSettings) =>
+      ipcRenderer.invoke('settings:set-appearance-settings', settings) as Promise<AppearanceSettings>,
     getAutoSave: () => ipcRenderer.invoke('settings:get-auto-save') as Promise<boolean>,
     setAutoSave: (enabled: boolean) =>
       ipcRenderer.invoke('settings:set-auto-save', enabled) as Promise<boolean>,

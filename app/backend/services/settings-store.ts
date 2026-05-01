@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { getDatabase } from '../database/connection';
 
 export type ThemeMode = 'dark' | 'light';
+export type AppLanguage = 'system' | 'en' | 'zh-CN';
+export type InterfaceDensity = 'comfortable' | 'compact' | 'spacious';
+export type MotionPreference = 'system' | 'full' | 'reduced';
 
 export interface AiModelConfig {
   baseUrl: string;
@@ -18,8 +21,17 @@ export interface TypographySettings {
   editorFontSize: number;
 }
 
+export interface AppearanceSettings {
+  language: AppLanguage;
+  density: InterfaceDensity;
+  motion: MotionPreference;
+}
+
 const autoSaveKey = 'autoSave';
 const themeKey = 'theme';
+const appLanguageKey = 'appLanguage';
+const interfaceDensityKey = 'interfaceDensity';
+const motionPreferenceKey = 'motionPreference';
 const aiBaseUrlKey = 'aiBaseUrl';
 const aiApiKeyKey = 'aiApiKey';
 const aiModelKey = 'aiModel';
@@ -28,7 +40,12 @@ const openAiPanelShortcutKey = 'shortcutOpenAiPanel';
 const editorFontSizeKey = 'editorFontSize';
 const defaultEditorFontSize = 16;
 const minimumEditorFontSize = 13;
-const maximumEditorFontSize = 128;
+const maximumEditorFontSize = 48;
+const defaultAppearanceSettings: AppearanceSettings = {
+  density: 'comfortable',
+  language: 'system',
+  motion: 'system'
+};
 
 export function getSetting(key: string): string | null {
   const row = getDatabase()
@@ -45,6 +62,39 @@ export function getTheme(): ThemeMode {
 export function setTheme(theme: ThemeMode): ThemeMode {
   setSetting(themeKey, theme);
   return theme;
+}
+
+function normalizeAppLanguage(language: string | null): AppLanguage {
+  return language === 'en' || language === 'zh-CN' ? language : 'system';
+}
+
+function normalizeInterfaceDensity(density: string | null): InterfaceDensity {
+  return density === 'compact' || density === 'spacious' ? density : 'comfortable';
+}
+
+function normalizeMotionPreference(motion: string | null): MotionPreference {
+  return motion === 'full' || motion === 'reduced' ? motion : 'system';
+}
+
+export function getAppearanceSettings(): AppearanceSettings {
+  return {
+    density: normalizeInterfaceDensity(getSetting(interfaceDensityKey) ?? defaultAppearanceSettings.density),
+    language: normalizeAppLanguage(getSetting(appLanguageKey) ?? defaultAppearanceSettings.language),
+    motion: normalizeMotionPreference(getSetting(motionPreferenceKey) ?? defaultAppearanceSettings.motion)
+  };
+}
+
+export function setAppearanceSettings(settings: AppearanceSettings): AppearanceSettings {
+  const normalizedSettings = {
+    density: normalizeInterfaceDensity(settings.density),
+    language: normalizeAppLanguage(settings.language),
+    motion: normalizeMotionPreference(settings.motion)
+  };
+
+  setSetting(appLanguageKey, normalizedSettings.language);
+  setSetting(interfaceDensityKey, normalizedSettings.density);
+  setSetting(motionPreferenceKey, normalizedSettings.motion);
+  return normalizedSettings;
 }
 
 export function getAutoSave(): boolean {

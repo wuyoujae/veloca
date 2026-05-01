@@ -105,15 +105,38 @@ import {
 } from './agent-palette';
 
 type ThemeMode = 'dark' | 'light';
+type AppLanguage = 'system' | 'en' | 'zh-CN';
+type InterfaceDensity = 'comfortable' | 'compact' | 'spacious';
+type MotionPreference = 'system' | 'full' | 'reduced';
 type SidebarTab = 'files' | 'outline' | 'git';
-type SettingsPanel = 'editor' | 'typography' | 'shortcuts' | 'aiModel' | 'remote' | 'account' | 'about';
+type SettingsPanel = 'editor' | 'appearance' | 'typography' | 'shortcuts' | 'aiModel' | 'remote' | 'account' | 'about';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
 const defaultEditorFontSize = 16;
 const minimumEditorFontSize = 13;
-const maximumEditorFontSize = 128;
+const maximumEditorFontSize = 48;
+const defaultAppearanceSettings: AppearanceSettings = {
+  density: 'comfortable',
+  language: 'system',
+  motion: 'system'
+};
+const appLanguageOptions: Array<{ label: string; value: AppLanguage }> = [
+  { label: 'System Default', value: 'system' },
+  { label: 'English', value: 'en' },
+  { label: '简体中文', value: 'zh-CN' }
+];
+const interfaceDensityOptions: Array<{ label: string; value: InterfaceDensity }> = [
+  { label: 'Comfortable', value: 'comfortable' },
+  { label: 'Compact', value: 'compact' },
+  { label: 'Spacious', value: 'spacious' }
+];
+const motionPreferenceOptions: Array<{ label: string; value: MotionPreference }> = [
+  { label: 'System Default', value: 'system' },
+  { label: 'Full Motion', value: 'full' },
+  { label: 'Reduced Motion', value: 'reduced' }
+];
 const aiInsertLogPrefix = '[Veloca AI Insert]';
 const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
 const remoteCredentialMask = '********';
@@ -185,6 +208,47 @@ function normalizeEditorFontSize(fontSize: number): number {
 
 function applyEditorFontSize(fontSize: number): void {
   document.documentElement.style.setProperty('--editor-font-size', `${normalizeEditorFontSize(fontSize)}px`);
+}
+
+function normalizeAppLanguage(language: string | null | undefined): AppLanguage {
+  return language === 'en' || language === 'zh-CN' ? language : 'system';
+}
+
+function normalizeInterfaceDensity(density: string | null | undefined): InterfaceDensity {
+  return density === 'compact' || density === 'spacious' ? density : 'comfortable';
+}
+
+function normalizeMotionPreference(motion: string | null | undefined): MotionPreference {
+  return motion === 'full' || motion === 'reduced' ? motion : 'system';
+}
+
+function normalizeAppearanceSettings(settings: Partial<AppearanceSettings>): AppearanceSettings {
+  return {
+    density: normalizeInterfaceDensity(settings.density),
+    language: normalizeAppLanguage(settings.language),
+    motion: normalizeMotionPreference(settings.motion)
+  };
+}
+
+function getResolvedAppLanguage(language: AppLanguage): string {
+  if (language !== 'system') {
+    return language;
+  }
+
+  if (typeof navigator === 'undefined' || !navigator.language) {
+    return 'en';
+  }
+
+  return navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+}
+
+function applyAppearanceSettings(settings: AppearanceSettings): void {
+  const normalizedSettings = normalizeAppearanceSettings(settings);
+
+  document.documentElement.lang = getResolvedAppLanguage(normalizedSettings.language);
+  document.documentElement.dataset.language = normalizedSettings.language;
+  document.documentElement.dataset.density = normalizedSettings.density;
+  document.documentElement.dataset.motion = normalizedSettings.motion;
 }
 
 function normalizeShortcutKeyLabel(key: string): string | null {
@@ -349,6 +413,12 @@ interface ShortcutSettings {
 
 interface TypographySettings {
   editorFontSize: number;
+}
+
+interface AppearanceSettings {
+  density: InterfaceDensity;
+  language: AppLanguage;
+  motion: MotionPreference;
 }
 
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
@@ -1503,6 +1573,7 @@ export function App(): JSX.Element {
   const focusMode = false;
   const [autoSave, setAutoSave] = useState(true);
   const [editorFontSize, setEditorFontSize] = useState(defaultEditorFontSize);
+  const [appearanceSettings, setAppearanceSettings] = useState<AppearanceSettings>(defaultAppearanceSettings);
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() =>
     getFallbackShortcutSettings(appPlatform)
   );
@@ -1791,6 +1862,11 @@ export function App(): JSX.Element {
       applyTheme(storedTheme);
       setTheme(storedTheme);
     });
+    window.veloca?.settings.getAppearanceSettings().then((settings) => {
+      const nextSettings = normalizeAppearanceSettings(settings);
+      setAppearanceSettings(nextSettings);
+      applyAppearanceSettings(nextSettings);
+    });
     window.veloca?.settings.getAutoSave().then(setAutoSave);
     window.veloca?.settings.getTypographySettings().then((settings) => {
       const nextFontSize = normalizeEditorFontSize(settings.editorFontSize);
@@ -1817,10 +1893,17 @@ export function App(): JSX.Element {
       const fallbackEditorFontSize = normalizeEditorFontSize(
         Number(localStorage.getItem('veloca-editor-font-size')) || defaultEditorFontSize
       );
+      const fallbackAppearanceSettings = {
+        density: normalizeInterfaceDensity(localStorage.getItem('veloca-interface-density')),
+        language: normalizeAppLanguage(localStorage.getItem('veloca-app-language')),
+        motion: normalizeMotionPreference(localStorage.getItem('veloca-motion-preference'))
+      };
       const fallbackShortcutSettings = getFallbackShortcutSettings(appPlatform);
       applyTheme(fallbackTheme);
+      applyAppearanceSettings(fallbackAppearanceSettings);
       applyEditorFontSize(fallbackEditorFontSize);
       setTheme(fallbackTheme);
+      setAppearanceSettings(fallbackAppearanceSettings);
       setAutoSave(fallbackAutoSave);
       setEditorFontSize(fallbackEditorFontSize);
       setShortcutSettings({
@@ -2195,6 +2278,26 @@ export function App(): JSX.Element {
       type: 'success',
       title: 'Appearance Updated',
       description: `${nextTheme === 'dark' ? 'Dark' : 'Light'} mode is now active.`
+    });
+  };
+
+  const updateAppearanceSettings = async (nextPartialSettings: Partial<AppearanceSettings>) => {
+    const nextSettings = normalizeAppearanceSettings({
+      ...appearanceSettings,
+      ...nextPartialSettings
+    });
+
+    setAppearanceSettings(nextSettings);
+    applyAppearanceSettings(nextSettings);
+    localStorage.setItem('veloca-app-language', nextSettings.language);
+    localStorage.setItem('veloca-interface-density', nextSettings.density);
+    localStorage.setItem('veloca-motion-preference', nextSettings.motion);
+
+    await window.veloca?.settings.setAppearanceSettings(nextSettings);
+    showToast({
+      type: 'success',
+      title: 'Appearance Updated',
+      description: 'Display preferences have been saved.'
     });
   };
 
@@ -5637,6 +5740,13 @@ export function App(): JSX.Element {
                 Editor
               </button>
               <button
+                className={settingsPanel === 'appearance' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('appearance')}
+              >
+                Appearance
+              </button>
+              <button
                 className={settingsPanel === 'typography' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('typography')}
@@ -5696,31 +5806,6 @@ export function App(): JSX.Element {
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Theme</span>
-                        <span className="setting-desc">Switch the entire editor between dark and light mode.</span>
-                      </div>
-                      <div className="theme-toggle" role="group" aria-label="Theme">
-                        <button
-                          className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
-                          type="button"
-                          onClick={() => updateTheme('dark')}
-                        >
-                          <Moon size={15} />
-                          Dark
-                        </button>
-                        <button
-                          className={theme === 'light' ? 'theme-option active' : 'theme-option'}
-                          type="button"
-                          onClick={() => updateTheme('light')}
-                        >
-                          <Sun size={15} />
-                          Light
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="setting-row">
-                      <div className="setting-info">
                         <span className="setting-label">Font Family</span>
                         <span className="setting-desc">Controls the font family of the Markdown editor.</span>
                       </div>
@@ -5747,6 +5832,106 @@ export function App(): JSX.Element {
                       <Switch checked={lineNumbers} onChange={setLineNumbers} />
                     </div>
 
+                  </>
+                )}
+                {settingsPanel === 'appearance' && (
+                  <>
+                    <h3 className="settings-section-title">Appearance</h3>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Language</span>
+                        <span className="setting-desc">
+                          Choose the preferred application language. Translation wiring will use this setting.
+                        </span>
+                      </div>
+                      <select
+                        className="shadcn-select appearance-select"
+                        value={appearanceSettings.language}
+                        onChange={(event) =>
+                          void updateAppearanceSettings({ language: event.currentTarget.value as AppLanguage })
+                        }
+                        aria-label="Application language"
+                      >
+                        {appLanguageOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Theme</span>
+                        <span className="setting-desc">Switch the entire application between dark and light mode.</span>
+                      </div>
+                      <div className="theme-toggle" role="group" aria-label="Theme">
+                        <button
+                          className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
+                          type="button"
+                          onClick={() => void updateTheme('dark')}
+                        >
+                          <Moon size={15} />
+                          Dark
+                        </button>
+                        <button
+                          className={theme === 'light' ? 'theme-option active' : 'theme-option'}
+                          type="button"
+                          onClick={() => void updateTheme('light')}
+                        >
+                          <Sun size={15} />
+                          Light
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Interface Density</span>
+                        <span className="setting-desc">Tune the spacing and visual weight of the main application UI.</span>
+                      </div>
+                      <select
+                        className="shadcn-select appearance-select"
+                        value={appearanceSettings.density}
+                        onChange={(event) =>
+                          void updateAppearanceSettings({ density: event.currentTarget.value as InterfaceDensity })
+                        }
+                        aria-label="Interface density"
+                      >
+                        {interfaceDensityOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Motion</span>
+                        <span className="setting-desc">Control interface transitions and animations across the app.</span>
+                      </div>
+                      <select
+                        className="shadcn-select appearance-select"
+                        value={appearanceSettings.motion}
+                        onChange={(event) =>
+                          void updateAppearanceSettings({ motion: event.currentTarget.value as MotionPreference })
+                        }
+                        aria-label="Motion preference"
+                      >
+                        {motionPreferenceOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <p className="settings-panel-hint">
+                      Language is stored as a product preference first; full UI translation can connect to this value
+                      when localization is introduced.
+                    </p>
                   </>
                 )}
                 {settingsPanel === 'typography' && (

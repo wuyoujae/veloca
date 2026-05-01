@@ -5861,6 +5861,83 @@ button {
   font-weight: 500;
 }
 
+.appearance-select {
+  width: 180px;
+}
+
+:root[data-density='compact'] .nav-btn,
+:root[data-density='compact'] .settings-nav-item {
+  min-height: 30px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+:root[data-density='compact'] .setting-row {
+  gap: 18px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+:root[data-density='compact'] .editor-action-btn,
+:root[data-density='compact'] .workspace-action-btn {
+  height: 24px;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+:root[data-density='compact'] .editor-tab {
+  min-width: 108px;
+  padding-right: 10px;
+  padding-left: 10px;
+  font-size: 12px;
+}
+
+:root[data-density='spacious'] .nav-btn,
+:root[data-density='spacious'] .settings-nav-item {
+  min-height: 38px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+:root[data-density='spacious'] .setting-row {
+  gap: 30px;
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+:root[data-density='spacious'] .editor-action-btn,
+:root[data-density='spacious'] .workspace-action-btn {
+  height: 32px;
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
+:root[data-density='spacious'] .editor-tab {
+  min-width: 132px;
+  padding-right: 16px;
+  padding-left: 16px;
+}
+
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 1ms !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-motion='system'] *,
+  :root[data-motion='system'] *::before,
+  :root[data-motion='system'] *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
 .toast-viewport {
   position: fixed;
   top: 48px;

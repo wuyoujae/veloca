@@ -18,17 +18,20 @@ import {
   getAiApiKey,
   getAiModel,
   getAiContextWindow,
+  getAppearanceSettings,
   getAutoSave,
   getShortcutSettings,
   getTheme,
   getTypographySettings,
   normalizeEditorFontSize,
   setAiConfig,
+  setAppearanceSettings,
   setAutoSave,
   setShortcutSettings,
   setTheme,
   setTypographySettings,
   type AiModelConfig,
+  type AppearanceSettings,
   type ShortcutSettings,
   type ThemeMode,
   type TypographySettings
@@ -447,8 +450,17 @@ function registerIpcHandlers(): void {
   const isTypographySettings = (settings: TypographySettings): boolean => {
     return Boolean(settings && typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize));
   };
+  const isAppearanceSettings = (settings: AppearanceSettings): boolean => {
+    return Boolean(
+      settings &&
+        ['system', 'en', 'zh-CN'].includes(settings.language) &&
+        ['comfortable', 'compact', 'spacious'].includes(settings.density) &&
+        ['system', 'full', 'reduced'].includes(settings.motion)
+    );
+  };
 
   ipcMain.handle('settings:get-theme', () => getTheme());
+  ipcMain.handle('settings:get-appearance-settings', () => getAppearanceSettings());
   ipcMain.handle('app:get-info', () => getAppInfo());
   ipcMain.handle('app:check-for-updates', () => checkForAppUpdates());
   ipcMain.handle('app:install-update', () => installDownloadedAppUpdate());
@@ -492,6 +504,13 @@ function registerIpcHandlers(): void {
     }
 
     return setTheme(theme);
+  });
+  ipcMain.handle('settings:set-appearance-settings', (_event, settings: AppearanceSettings) => {
+    if (!isAppearanceSettings(settings)) {
+      throw new Error('Invalid appearance settings.');
+    }
+
+    return setAppearanceSettings(settings);
   });
   ipcMain.handle('settings:get-auto-save', () => getAutoSave());
   ipcMain.handle('settings:set-auto-save', (_event, enabled: boolean) => {

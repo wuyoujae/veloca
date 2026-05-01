@@ -166,6 +166,16 @@ interface TypographySettings {
   editorFontSize: number;
 }
 
+type AppLanguage = 'system' | 'en' | 'zh-CN';
+type InterfaceDensity = 'comfortable' | 'compact' | 'spacious';
+type MotionPreference = 'system' | 'full' | 'reduced';
+
+interface AppearanceSettings {
+  density: InterfaceDensity;
+  language: AppLanguage;
+  motion: MotionPreference;
+}
+
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
 
 interface RemoteDatabaseConfigInput {
@@ -362,6 +372,8 @@ declare global {
       settings: {
         getTheme: () => Promise<'dark' | 'light'>;
         setTheme: (theme: 'dark' | 'light') => Promise<'dark' | 'light'>;
+        getAppearanceSettings: () => Promise<AppearanceSettings>;
+        setAppearanceSettings: (settings: AppearanceSettings) => Promise<AppearanceSettings>;
         getAutoSave: () => Promise<boolean>;
         setAutoSave: (enabled: boolean) => Promise<boolean>;
         getAiConfig: () => Promise<AiModelConfig>;
