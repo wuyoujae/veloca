@@ -21,15 +21,19 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux
+            package_target: AppImage
             arch: x64
           - os: windows-latest
             target: win
+            package_target: zip
             arch: x64
           - os: macos-15
             target: mac
+            package_target: dmg zip
             arch: arm64
           - os: macos-15-intel
             target: mac
+            package_target: dmg zip
             arch: x64
 
     runs-on: ${{ matrix.os }}
@@ -55,7 +59,7 @@ jobs:
 
       - run: npm run build
 
-      - run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
+      - run: npx electron-builder --${{ matrix.target }} ${{ matrix.package_target }} --${{ matrix.arch }} --publish never
         env:
           DEBUG: electron-builder
 
