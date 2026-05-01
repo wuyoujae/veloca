@@ -334,6 +334,12 @@ type AgentStreamEvent =
   | {
       model: string;
       sessionId: string;
+      thinking: AgentToolCallMessage;
+      type: 'thinking';
+    }
+  | {
+      model: string;
+      sessionId: string;
       toolCall: AgentToolCallMessage;
       type: 'tool_call';
     }

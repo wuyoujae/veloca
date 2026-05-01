@@ -88,6 +88,12 @@ export type AgentStreamEvent =
   | {
       model: string;
       sessionId: string;
+      thinking: AgentToolCallMessage;
+      type: 'thinking';
+    }
+  | {
+      model: string;
+      sessionId: string;
       toolCall: AgentToolCallMessage;
       type: 'tool_call';
     }
@@ -1071,7 +1077,7 @@ function getToolResultStatus(result: unknown): AgentToolCallStatus {
   return 'success';
 }
 
-function createAgentToolCallId(toolName: AgentToolName): string {
+function createAgentToolCallId(toolName: string): string {
   agentToolCallSequence += 1;
 
   return `tool-${toolName}-${Date.now().toString(36)}-${agentToolCallSequence.toString(36)}`;
@@ -1088,6 +1094,18 @@ function toAgentToolCallMessage(state: AgentToolRunState): AgentToolCallMessage 
     openable: Boolean(state.detail?.trim()) && (config.openable || state.status === 'error'),
     status: state.status,
     summary: state.summary ?? getToolInputSummary(state.toolName, state.input)
+  };
+}
+
+function createAgentThinkingMessage(id: string, detail: string, status: AgentToolCallStatus): AgentToolCallMessage {
+  return {
+    action: '深度思考',
+    detail: truncateToolDisplayText(detail),
+    icon: 'brain',
+    id,
+    openable: Boolean(detail.trim()),
+    status,
+    summary: status === 'running' ? '正在推理' : '推理完成'
   };
 }
 
@@ -5864,8 +5882,33 @@ function getStreamReasoningDelta(chunk: unknown): string {
     return '';
   }
 
-  const choices = (chunk as { choices?: Array<{ delta?: { reasoning_content?: unknown } }> }).choices;
-  const reasoningContent = choices?.[0]?.delta?.reasoning_content;
+  if (isRecord(chunk)) {
+    if (typeof chunk.content === 'string' && chunk.type === 'thinking') {
+      return chunk.content;
+    }
+
+    if (typeof chunk.reasoningContent === 'string') {
+      return chunk.reasoningContent;
+    }
+
+    if (typeof chunk.reasoning_content === 'string') {
+      return chunk.reasoning_content;
+    }
+  }
+
+  const choices = (
+    chunk as {
+      choices?: Array<{
+        delta?: {
+          reasoning?: unknown;
+          reasoning_content?: unknown;
+          thinking?: unknown;
+        };
+      }>;
+    }
+  ).choices;
+  const reasoningContent =
+    choices?.[0]?.delta?.reasoning_content ?? choices?.[0]?.delta?.reasoning ?? choices?.[0]?.delta?.thinking;
 
   return typeof reasoningContent === 'string' ? reasoningContent : '';
 }
@@ -6444,6 +6487,29 @@ export async function streamAgentMessage(
     }
 
     let answer = '';
+    let thinkingContent = '';
+    let thinkingComplete = false;
+    let thinkingId = createAgentToolCallId('thinking');
+
+    const emitThinking = (status: AgentToolCallStatus) => {
+      if (!thinkingContent.trim()) {
+        return;
+      }
+
+      emit({
+        model,
+        sessionId: request.sessionId,
+        thinking: createAgentThinkingMessage(thinkingId, thinkingContent, status),
+        type: 'thinking'
+      });
+    };
+
+    const completeThinking = () => {
+      if (thinkingContent.trim() && !thinkingComplete) {
+        thinkingComplete = true;
+        emitThinking('success');
+      }
+    };
 
     for await (const chunk of stream) {
       const chunkType = chunk && typeof chunk === 'object' ? (chunk as { type?: unknown }).type : null;
@@ -6454,6 +6520,7 @@ export async function streamAgentMessage(
       }
 
       if (chunkType === 'tool_calls') {
+        completeThinking();
         emit({
           content: getChunkTextContent(chunk),
           model,
@@ -6463,12 +6530,26 @@ export async function streamAgentMessage(
         continue;
       }
 
+      const reasoningDelta = getStreamReasoningDelta(chunk);
+
+      if (reasoningDelta) {
+        if (thinkingComplete) {
+          thinkingContent = '';
+          thinkingComplete = false;
+          thinkingId = createAgentToolCallId('thinking');
+        }
+
+        thinkingContent += reasoningDelta;
+        emitThinking('running');
+      }
+
       const delta = getStreamDelta(chunk) || (chunkType === 'complete' ? getChunkTextContent(chunk) : '');
 
       if (!delta) {
         continue;
       }
 
+      completeThinking();
       answer += delta;
       emit({
         content: delta,
@@ -6478,6 +6559,7 @@ export async function streamAgentMessage(
       });
     }
 
+    completeThinking();
     emit({
       answer,
       model,

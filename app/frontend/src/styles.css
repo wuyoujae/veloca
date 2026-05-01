@@ -2492,6 +2492,10 @@ button {
   flex: 0 0 auto;
 }
 
+.agent-tool-call.thinking .agent-tool-main-icon {
+  color: #9333ea;
+}
+
 .agent-tool-name {
   min-width: 0;
   overflow: hidden;

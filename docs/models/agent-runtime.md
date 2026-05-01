@@ -111,7 +111,7 @@ The stream yields raw OpenAI chunks while accumulating the final assistant conte
 
 ## Tool Call UI Events
 
-Veloca also emits a renderer-facing `tool_call` stream event from the backend tool adapters. This event is separate from the raw `otherone-agent` `tool_calls` status chunk and is meant for the Agent canvas UI.
+Veloca also emits renderer-facing `tool_call` and `thinking` stream events. `tool_call` comes from backend tool adapters and is separate from the raw `otherone-agent` `tool_calls` status chunk. `thinking` is built from provider reasoning deltas such as `reasoning_content`. Both are meant for the Agent canvas UI, not for long-term assistant answer text.
 
 ```ts
 type AgentToolCallMessage = {
@@ -124,6 +124,14 @@ type AgentToolCallMessage = {
   detail?: string;
 };
 ```
+
+The renderer stores AI output as an ordered response timeline rather than separate top-level buckets. Text deltas, thinking items, and tool-call items are appended or updated in the same order they arrive, so a tool call that happens after a paragraph appears after that paragraph instead of being moved to the top of the AI message.
+
+Thinking items use the same collapsible item renderer as tool calls:
+
+| Stream event | User-facing action | Default state |
+| --- | --- | --- |
+| `thinking` | 深度思考 | Expanded while streaming, collapsible by the user |
 
 The UI must not display raw tool names such as `read_file` as the primary text. Backend adapters map tool names to user-facing action labels:
 
@@ -407,7 +415,7 @@ Veloca therefore wraps the `otherone-agent` OpenAI-compatible loop in the backen
 - Streaming responses accumulate both `delta.content` and `delta.reasoning_content`.
 - Assistant entries are stored in `.veloca/storage/veloca-storage.json` with a `reasoning_content` field when the provider returns one.
 - Before each follow-up request, backend message preparation reads stored assistant entries and attaches matching `reasoning_content` back onto assistant messages, including assistant messages that carry `tool_calls`.
-- The renderer still receives only answer content and tool-call status events; thinking content is preserved for API protocol correctness rather than displayed as normal assistant text.
+- The renderer receives reasoning deltas as collapsible `thinking` items. Thinking content is not merged into the assistant answer text, but it is displayed in-stream so users can see deep-thinking progress when the provider exposes it.
 
 This is intentionally scoped to the existing local-file Agent memory. Veloca's SQLite product database does not need a schema change until Agent conversation memory is migrated into first-party tables.
 
@@ -449,7 +457,7 @@ The current implementation uses a backend Agent service boundary:
 2. Use `agent:send-message-stream` for streaming Agent responses. The legacy `agent:send-message` invoke path remains available for non-streaming calls.
 3. Resolve model selection to backend config.
 4. Call `veloca.InvokeAgent` from the main process with `stream: true`.
-5. Normalize raw chunks into UI events: `delta`, `tool_calls`, structured `tool_call`, `complete`, and `error`.
+5. Normalize raw chunks into UI events: `delta`, `thinking`, `tool_calls`, structured `tool_call`, `complete`, and `error`.
 6. Use `otherone-agent` local-file session ids directly as Veloca Agent session ids.
 
 The preload layer creates a request id per send operation, listens for `agent:message-event`, filters events by request id, and returns an unsubscribe function to the renderer. The Agent palette appends each `delta` to the active AI message so the canvas updates while the model is still generating.

@@ -12,6 +12,7 @@ import {
   ArrowDown,
   ArrowUp,
   AudioLines,
+  Brain,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -71,6 +72,27 @@ type AgentPopover = 'model' | 'plus' | 'session' | null;
 type AgentToolCallStatus = 'running' | 'success' | 'error';
 type AgentInteractionStatus = 'open' | 'resolved';
 type AgentInteractionKind = 'confirm' | 'input';
+type AgentResponsePart =
+  | {
+      content: string;
+      id: string;
+      type: 'text';
+    }
+  | {
+      id: string;
+      item: AgentToolCallMessage;
+      type: 'tool';
+    }
+  | {
+      id: string;
+      item: AgentToolCallMessage;
+      type: 'thinking';
+    }
+  | {
+      id: string;
+      item: AgentInteractionItem;
+      type: 'interaction';
+    };
 
 interface AgentAttachment {
   id: string;
@@ -86,6 +108,7 @@ interface AgentConversation {
   interactionItems?: AgentInteractionItem[];
   model: AgentModelId;
   prompt: string;
+  responseParts?: AgentResponsePart[];
   status: AgentMessageStatus;
   toolCalls?: AgentToolCallMessage[];
   webSearch: boolean;
@@ -249,6 +272,7 @@ function AgentMarkdown({ content }: { content: string }): JSX.Element {
 
 const agentSupplementIcons: Record<string, LucideIcon> = {
   alert: AlertCircle,
+  brain: Brain,
   'file-pen-line': FilePenLine,
   'file-text': FileText,
   'folder-tree': FolderTree,
@@ -267,6 +291,30 @@ function getAgentSupplementIcon(icon: string): LucideIcon {
   return agentSupplementIcons[icon] ?? Sparkles;
 }
 
+function appendAgentTextPart(parts: AgentResponsePart[] | undefined, content: string): AgentResponsePart[] {
+  const currentParts = parts ?? [];
+  const latestPart = currentParts[currentParts.length - 1];
+
+  if (latestPart?.type === 'text') {
+    return [
+      ...currentParts.slice(0, -1),
+      {
+        ...latestPart,
+        content: latestPart.content + content
+      }
+    ];
+  }
+
+  return [
+    ...currentParts,
+    {
+      content,
+      id: createAgentId('answer-part'),
+      type: 'text'
+    }
+  ];
+}
+
 function upsertAgentToolCall(
   toolCalls: AgentToolCallMessage[] | undefined,
   nextToolCall: AgentToolCallMessage
@@ -281,15 +329,52 @@ function upsertAgentToolCall(
   return currentToolCalls.map((toolCall, currentIndex) => (currentIndex === index ? nextToolCall : toolCall));
 }
 
-function AgentToolCallItem({ toolCall }: { toolCall: AgentToolCallMessage }): JSX.Element {
-  const [open, setOpen] = useState(false);
+function upsertAgentItemPart(
+  parts: AgentResponsePart[] | undefined,
+  type: 'thinking' | 'tool',
+  nextItem: AgentToolCallMessage
+): AgentResponsePart[] {
+  const currentParts = parts ?? [];
+  const index = currentParts.findIndex((part) => part.type === type && part.item.id === nextItem.id);
+
+  if (index < 0) {
+    return [
+      ...currentParts,
+      {
+        id: nextItem.id,
+        item: nextItem,
+        type
+      }
+    ];
+  }
+
+  return currentParts.map((part, currentIndex) =>
+    currentIndex === index && (part.type === 'thinking' || part.type === 'tool')
+      ? {
+          ...part,
+          item: nextItem
+        }
+      : part
+  );
+}
+
+function AgentToolCallItem({
+  defaultOpen = false,
+  toolCall,
+  variant = 'tool'
+}: {
+  defaultOpen?: boolean;
+  toolCall: AgentToolCallMessage;
+  variant?: 'thinking' | 'tool';
+}): JSX.Element {
+  const [open, setOpen] = useState(defaultOpen);
   const ToolIcon = getAgentSupplementIcon(toolCall.icon);
   const canOpen = toolCall.openable && Boolean(toolCall.detail?.trim());
   const StatusIcon = toolCall.status === 'running' ? Loader2 : toolCall.status === 'error' ? AlertCircle : CheckCircle2;
   const contentId = `agent-tool-detail-${toolCall.id}`;
 
   return (
-    <div className={`agent-tool-call${canOpen ? ' interactive' : ''}${open ? ' open' : ''} ${toolCall.status}`}>
+    <div className={`agent-tool-call ${variant}${canOpen ? ' interactive' : ''}${open ? ' open' : ''} ${toolCall.status}`}>
       {canOpen ? (
         <button
           className="agent-tool-header"
@@ -379,6 +464,52 @@ function AgentInteractionCard({ item }: { item: AgentInteractionItem }): JSX.Ele
         </div>
       </div>
     </div>
+  );
+}
+
+function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX.Element {
+  const responseParts = message.responseParts ?? [];
+  const hasResponseParts = responseParts.length > 0;
+
+  return (
+    <>
+      {message.webSearch && (
+        <p className="agent-ai-kicker">
+          <Globe size={13} />
+          Web Search context is enabled for this turn.
+        </p>
+      )}
+
+      {hasResponseParts
+        ? responseParts.map((part) => {
+            if (part.type === 'text') {
+              return <AgentMarkdown content={part.content} key={part.id} />;
+            }
+
+            if (part.type === 'thinking') {
+              return <AgentToolCallItem defaultOpen key={part.id} toolCall={part.item} variant="thinking" />;
+            }
+
+            if (part.type === 'tool') {
+              return <AgentToolCallItem key={part.id} toolCall={part.item} />;
+            }
+
+            return <AgentInteractionCard key={part.id} item={part.item} />;
+          })
+        : message.answer.trim() ? (
+            <AgentMarkdown content={message.answer} />
+          ) : !message.toolCalls?.length ? (
+            <div className="agent-typing-indicator" aria-label="Veloca is typing">
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : null}
+
+      {!hasResponseParts &&
+        Boolean(message.interactionItems?.length) &&
+        (message.interactionItems ?? []).map((item) => <AgentInteractionCard key={item.id} item={item} />)}
+    </>
   );
 }
 
@@ -895,6 +1026,7 @@ export function AgentPalette({
                 ? {
                     ...message,
                     answer: streamedAnswer,
+                    responseParts: appendAgentTextPart(message.responseParts, event.content),
                     status: 'pending'
                   }
                 : message
@@ -908,6 +1040,22 @@ export function AgentPalette({
           return;
         }
 
+        if (event.type === 'thinking') {
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    responseParts: upsertAgentItemPart(message.responseParts, 'thinking', event.thinking)
+                  }
+                : message
+            )
+          }));
+          followStreamToBottom();
+          return;
+        }
+
         if (event.type === 'tool_call') {
           updateSession(sessionId, (session) => ({
             ...session,
@@ -915,6 +1063,7 @@ export function AgentPalette({
               message.id === messageId
                 ? {
                     ...message,
+                    responseParts: upsertAgentItemPart(message.responseParts, 'tool', event.toolCall),
                     toolCalls: upsertAgentToolCall(message.toolCalls, event.toolCall)
                   }
                 : message
@@ -1500,30 +1649,7 @@ export function AgentPalette({
 
               <div className={`agent-ai-msg ${message.status}`}>
                 <div className="agent-ai-content">
-                  {message.webSearch && (
-                    <p className="agent-ai-kicker">
-                      <Globe size={13} />
-                      Web Search context is enabled for this turn.
-                    </p>
-                  )}
-                  {Boolean(message.toolCalls?.length) && (
-                    <div className="agent-tool-call-stack">
-                      {(message.toolCalls ?? []).map((toolCall) => (
-                        <AgentToolCallItem key={toolCall.id} toolCall={toolCall} />
-                      ))}
-                    </div>
-                  )}
-                  {Boolean(message.interactionItems?.length) &&
-                    (message.interactionItems ?? []).map((item) => <AgentInteractionCard key={item.id} item={item} />)}
-                  {message.answer.trim() ? (
-                    <AgentMarkdown content={message.answer} />
-                  ) : !message.toolCalls?.length ? (
-                    <div className="agent-typing-indicator" aria-label="Veloca is typing">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                  ) : null}
+                  <AgentResponseTimeline message={message} />
                 </div>
 
                 {message.status === 'complete' && message.answer.trim() && (
