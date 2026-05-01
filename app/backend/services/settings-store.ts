@@ -28,7 +28,7 @@ const openAiPanelShortcutKey = 'shortcutOpenAiPanel';
 const editorFontSizeKey = 'editorFontSize';
 const defaultEditorFontSize = 16;
 const minimumEditorFontSize = 13;
-const maximumEditorFontSize = 22;
+const maximumEditorFontSize = 128;
 
 export function getSetting(key: string): string | null {
   const row = getDatabase()

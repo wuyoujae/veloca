@@ -13,7 +13,8 @@
 - 编辑器顶部标签栏背景跟随全局页面背景；没有打开文件时不再显示 `No markdown file opened` 占位文本。
 - 文件树没有 workspace 时只显示空状态文字，不展示额外文件夹图标。
 - Settings 侧栏暂时隐藏 Account 入口；GitHub 绑定相关后端能力保留，等账号产品流重新确定后再恢复入口。
-- Settings 提供 `Typography` 面板，用于调整编辑器显示字号。默认字号为 `16px`，可在 `13px` 到 `22px` 范围内调整；设置时单字预览会即时跟随变化，渲染视图、源码视图和分屏编辑器都会使用同一基础字号，并保存到本地 `app_settings`。
+- Settings 提供 `Typography` 面板，用于调整编辑器显示字号。默认字号为 `16px`，可在 `13px` 到 `128px` 范围内调整；设置时单字预览会即时跟随变化，渲染视图、源码视图和分屏编辑器都会使用同一基础字号，并保存到本地 `app_settings`。
+- Settings 的 `Editor` 面板不再展示 `Focus Mode` 开关，编辑器保持普通阅读显示模式。
 
 ## Agent 对话框原型
 
@@ -26,7 +27,7 @@
   - 浮层 X 轴始终按当前编辑器视口居中，不跟随选区最后一行的横向位置，并根据编辑器视口宽度收敛自身宽度，避免超出编辑器区域。
   - Agent 打开后会用浏览器 CSS Highlight API 保留选中文本的浅蓝选中效果，避免 prompt 获得焦点后用户失去上下文。
 - 当前原型监听 `Fn` 键；由于不同系统和 Electron 版本可能不会向渲染进程暴露独立 `Fn` 事件，主进程也会通过 `before-input-event` 尝试捕获并转发。
-- Settings 现在提供 `Shortcuts` 面板，首个应用内快捷键为 `Open AI Panel`：macOS 默认 `Command+J`，Windows/Linux 默认 `Ctrl+J`。用户可以在设置中重新录入组合键，配置会保存到本地 `app_settings`，不会注册为系统级全局快捷键。
+- Settings 现在提供 `Shortcuts` 面板，首个应用内快捷键为 `Open AI Panel`：macOS 默认 `Command+J`，Windows/Linux 默认 `Ctrl+J`。用户可以在设置中重新录入组合键，配置会保存到本地 `app_settings`；renderer 和主进程 `before-input-event` 都会处理该快捷键，但不会注册为系统级全局快捷键。
 - Prompt 框包含：
   - 左侧 `+` 菜单，当前支持 `Web Search` 复选开关和本地文件选择；
   - 模型选择菜单，提供 `Lite`、`Pro`、`Ultra` 三档模型，并用不同图标与颜色标识，默认使用 `Lite`；

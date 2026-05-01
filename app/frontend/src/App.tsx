@@ -112,7 +112,7 @@ type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
 const defaultEditorFontSize = 16;
 const minimumEditorFontSize = 13;
-const maximumEditorFontSize = 22;
+const maximumEditorFontSize = 128;
 const aiInsertLogPrefix = '[Veloca AI Insert]';
 const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
 const remoteCredentialMask = '********';
@@ -1499,7 +1499,7 @@ export function App(): JSX.Element {
   const [savingLocation, setSavingLocation] = useState(false);
   const [editingNode, setEditingNode] = useState<EditingNodeState | null>(null);
   const [lineNumbers, setLineNumbers] = useState(true);
-  const [focusMode, setFocusMode] = useState(false);
+  const focusMode = false;
   const [autoSave, setAutoSave] = useState(true);
   const [editorFontSize, setEditorFontSize] = useState(defaultEditorFontSize);
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() =>
@@ -5736,13 +5736,6 @@ export function App(): JSX.Element {
                       <Switch checked={lineNumbers} onChange={setLineNumbers} />
                     </div>
 
-                    <div className="setting-row">
-                      <div className="setting-info">
-                        <span className="setting-label">Focus Mode</span>
-                        <span className="setting-desc">Dim surrounding text while writing in the active paragraph.</span>
-                      </div>
-                      <Switch checked={focusMode} onChange={setFocusMode} />
-                    </div>
                   </>
                 )}
                 {settingsPanel === 'typography' && (

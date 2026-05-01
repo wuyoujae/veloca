@@ -117,6 +117,107 @@ interface WatchedMarkdownFile {
 const markdownWatchersByWindow = new Map<number, Map<string, WatchedMarkdownFile>>();
 const customWindowControlPlatforms = new Set<NodeJS.Platform>(['win32', 'linux']);
 let mainWindow: BrowserWindow | null = null;
+let openAiPanelShortcutCache = '';
+
+function normalizeShortcutKeyLabel(key: string): string | null {
+  const trimmedKey = key.trim();
+  const lowerKey = trimmedKey.toLowerCase();
+
+  if (!trimmedKey || ['meta', 'control', 'ctrl', 'shift', 'alt', 'option', 'fn', 'fnlock'].includes(lowerKey)) {
+    return null;
+  }
+
+  const namedKeys: Record<string, string> = {
+    ' ': 'Space',
+    arrowdown: 'ArrowDown',
+    arrowleft: 'ArrowLeft',
+    arrowright: 'ArrowRight',
+    arrowup: 'ArrowUp',
+    backspace: 'Backspace',
+    del: 'Delete',
+    delete: 'Delete',
+    end: 'End',
+    enter: 'Enter',
+    escape: 'Esc',
+    esc: 'Esc',
+    home: 'Home',
+    pageup: 'PageUp',
+    pagedown: 'PageDown',
+    return: 'Enter',
+    space: 'Space',
+    spacebar: 'Space',
+    tab: 'Tab'
+  };
+
+  if (namedKeys[lowerKey]) {
+    return namedKeys[lowerKey];
+  }
+
+  if (/^f\d{1,2}$/i.test(trimmedKey)) {
+    return trimmedKey.toUpperCase();
+  }
+
+  if (trimmedKey.length === 1) {
+    return trimmedKey.toUpperCase();
+  }
+
+  return trimmedKey[0].toUpperCase() + trimmedKey.slice(1);
+}
+
+function doesShortcutMatchInput(
+  shortcut: string,
+  input: { alt: boolean; control: boolean; key: string; meta: boolean; shift: boolean }
+): boolean {
+  const parts = shortcut
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) {
+    return false;
+  }
+
+  const required = {
+    alt: false,
+    ctrl: false,
+    meta: false,
+    shift: false
+  };
+  let requiredKey = '';
+
+  for (const part of parts) {
+    const lowerPart = part.toLowerCase();
+
+    if (lowerPart === 'command' || lowerPart === 'cmd' || lowerPart === 'meta') {
+      required.meta = true;
+    } else if (lowerPart === 'ctrl' || lowerPart === 'control') {
+      required.ctrl = true;
+    } else if (lowerPart === 'alt' || lowerPart === 'option') {
+      required.alt = true;
+    } else if (lowerPart === 'shift') {
+      required.shift = true;
+    } else {
+      requiredKey = normalizeShortcutKeyLabel(part) ?? '';
+    }
+  }
+
+  return Boolean(
+    requiredKey &&
+      requiredKey === normalizeShortcutKeyLabel(input.key) &&
+      required.meta === input.meta &&
+      required.ctrl === input.control &&
+      required.alt === input.alt &&
+      required.shift === input.shift
+  );
+}
+
+function getOpenAiPanelShortcut(): string {
+  if (!openAiPanelShortcutCache) {
+    openAiPanelShortcutCache = getShortcutSettings(process.platform).openAiPanel;
+  }
+
+  return openAiPanelShortcutCache;
+}
 
 function closeMarkdownWatchers(windowId: number): void {
   const watchers = markdownWatchersByWindow.get(windowId);
@@ -290,8 +391,9 @@ function createMainWindow(): void {
       normalizedCode === 'fn' ||
       normalizedKey === 'fnlock' ||
       normalizedCode === 'fnlock';
+    const isOpenAiPanelShortcut = doesShortcutMatchInput(getOpenAiPanelShortcut(), input);
 
-    if (input.type !== 'keyDown' || input.isAutoRepeat || !isFnKey) {
+    if (input.type !== 'keyDown' || input.isAutoRepeat || (!isFnKey && !isOpenAiPanelShortcut)) {
       return;
     }
 
@@ -416,16 +518,20 @@ function registerIpcHandlers(): void {
     return setAiConfig(config);
   });
   ipcMain.handle('settings:get-shortcut-settings', () => {
-    return getShortcutSettings(process.platform);
+    const settings = getShortcutSettings(process.platform);
+    openAiPanelShortcutCache = settings.openAiPanel;
+    return settings;
   });
   ipcMain.handle('settings:set-shortcut-settings', (_event, settings: ShortcutSettings) => {
     if (!isShortcutSettings(settings)) {
       throw new Error('Invalid shortcut settings.');
     }
 
-    return setShortcutSettings({
+    const savedSettings = setShortcutSettings({
       openAiPanel: settings.openAiPanel.trim()
     });
+    openAiPanelShortcutCache = savedSettings.openAiPanel;
+    return savedSettings;
   });
   ipcMain.handle('settings:get-typography-settings', () => {
     return getTypographySettings();
