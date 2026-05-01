@@ -181,11 +181,12 @@ function getPlatformCommandShortcut(platform: string, key: string): string {
 }
 
 function getDefaultOpenAiPanelShortcut(platform: string): string {
-  return getPlatformCommandShortcut(platform, 'Q');
+  return getPlatformCommandShortcut(platform, 'J');
 }
 
 function getFallbackShortcutSettings(platform: string): ShortcutSettings {
   return {
+    focusVeloca: getPlatformCommandShortcut(platform, 'Q'),
     newBlankFile: getPlatformCommandShortcut(platform, 'N'),
     openAiPanel: getDefaultOpenAiPanelShortcut(platform),
     redo: getPlatformCommandShortcut(platform, 'Shift+Z'),
@@ -196,13 +197,14 @@ function getFallbackShortcutSettings(platform: string): ShortcutSettings {
 
 function normalizeShortcutSettings(settings: Partial<ShortcutSettings>, platform: string): ShortcutSettings {
   const fallback = getFallbackShortcutSettings(platform);
-  const legacyOpenAiPanelFallback = getPlatformCommandShortcut(platform, 'J');
+  const incorrectOpenAiPanelFallback = getPlatformCommandShortcut(platform, 'Q');
   const openAiPanel =
-    settings.openAiPanel && settings.openAiPanel !== legacyOpenAiPanelFallback
+    settings.openAiPanel && settings.openAiPanel !== incorrectOpenAiPanelFallback
       ? settings.openAiPanel
       : fallback.openAiPanel;
 
   return {
+    focusVeloca: settings.focusVeloca || fallback.focusVeloca,
     newBlankFile: settings.newBlankFile || fallback.newBlankFile,
     openAiPanel,
     redo: settings.redo || fallback.redo,
@@ -409,6 +411,7 @@ interface AiModelConfig {
 }
 
 interface ShortcutSettings {
+  focusVeloca: string;
   newBlankFile: string;
   openAiPanel: string;
   redo: string;
@@ -417,7 +420,7 @@ interface ShortcutSettings {
 }
 
 type ShortcutAction = keyof ShortcutSettings;
-const shortcutActions: ShortcutAction[] = ['undo', 'redo', 'newBlankFile', 'openAiPanel', 'toggleSourceMode'];
+const shortcutActions: ShortcutAction[] = ['undo', 'redo', 'newBlankFile', 'openAiPanel', 'focusVeloca', 'toggleSourceMode'];
 
 interface TypographySettings {
   editorFontSize: number;
@@ -1953,6 +1956,7 @@ export function App(): JSX.Element {
       setShortcutSettings(
         normalizeShortcutSettings(
           {
+            focusVeloca: localStorage.getItem('veloca-shortcut-focus-veloca') ?? undefined,
             newBlankFile: localStorage.getItem('veloca-shortcut-new-blank-file') ?? undefined,
             openAiPanel: localStorage.getItem('veloca-shortcut-open-ai-panel') ?? undefined,
             redo: localStorage.getItem('veloca-shortcut-redo') ?? undefined,
@@ -2380,6 +2384,7 @@ export function App(): JSX.Element {
 
   const getShortcutActionLabel = (action: ShortcutAction) => {
     const labels: Record<ShortcutAction, string> = {
+      focusVeloca: t('settings.shortcuts.focusVeloca'),
       newBlankFile: t('settings.shortcuts.newBlankFile'),
       openAiPanel: t('settings.shortcuts.openAiPanel'),
       redo: t('settings.shortcuts.redo'),
@@ -2392,6 +2397,7 @@ export function App(): JSX.Element {
 
   const getShortcutActionDesc = (action: ShortcutAction) => {
     const descriptions: Record<ShortcutAction, string> = {
+      focusVeloca: t('settings.shortcuts.focusVelocaDesc'),
       newBlankFile: t('settings.shortcuts.newBlankFileDesc'),
       openAiPanel: t('settings.shortcuts.openAiPanelDesc'),
       redo: t('settings.shortcuts.redoDesc'),
@@ -2408,6 +2414,7 @@ export function App(): JSX.Element {
 
   const updateShortcutSettings = async (settings: ShortcutSettings, changedAction: ShortcutAction) => {
     setShortcutSettings(settings);
+    localStorage.setItem('veloca-shortcut-focus-veloca', settings.focusVeloca);
     localStorage.setItem('veloca-shortcut-new-blank-file', settings.newBlankFile);
     localStorage.setItem('veloca-shortcut-open-ai-panel', settings.openAiPanel);
     localStorage.setItem('veloca-shortcut-redo', settings.redo);
@@ -4342,6 +4349,11 @@ export function App(): JSX.Element {
         return;
       }
 
+      if (doesShortcutMatchKeyboardEvent(shortcutSettings.focusVeloca, event)) {
+        event.preventDefault();
+        return;
+      }
+
       if (doesShortcutMatchKeyboardEvent(shortcutSettings.toggleSourceMode, event)) {
         event.preventDefault();
         toggleActiveDocumentViewMode();
@@ -4355,6 +4367,7 @@ export function App(): JSX.Element {
     createNewMarkdownFile,
     openAgentPalette,
     redoActiveEditor,
+    shortcutSettings.focusVeloca,
     shortcutSettings.newBlankFile,
     shortcutSettings.openAiPanel,
     shortcutSettings.redo,

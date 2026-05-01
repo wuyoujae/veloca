@@ -159,6 +159,7 @@ interface AiModelConfig {
 }
 
 interface ShortcutSettings {
+  focusVeloca: string;
   newBlankFile: string;
   openAiPanel: string;
   redo: string;

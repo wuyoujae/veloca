@@ -27,7 +27,7 @@
   - 当画布折叠回 prompt 时，编辑器会尽量反向滚动以展示更多被选中文本；如果选区已经完整可见，或 prompt 已经到达最低安全位置，则停止移动；
   - 浮层 X 轴始终按当前编辑器视口居中，不跟随选区最后一行的横向位置，并根据编辑器视口宽度收敛自身宽度，避免超出编辑器区域。
   - Agent 打开后会用浏览器 CSS Highlight API 保留选中文本的浅蓝选中效果，避免 prompt 获得焦点后用户失去上下文。
-- Settings 现在提供 `Shortcuts` 面板，用于配置应用内快捷键：撤销默认 `Command/Ctrl+Z`，重做默认 `Command/Ctrl+Shift+Z`，新建空白文件默认 `Command/Ctrl+N`，打开 AI 面板默认 `Command/Ctrl+Q`，切换源码模式默认 `Command/Ctrl+/`。用户可以在设置中重新录入组合键，配置会保存到本地 `app_settings`；打开 AI 面板快捷键还会由主进程 `before-input-event` 拦截，以便 macOS 上的 `Command+Q` 不触发默认退出行为。这些快捷键不会注册为系统级全局热键。
+- Settings 现在提供 `Shortcuts` 面板，用于配置快捷键：撤销默认 `Command/Ctrl+Z`，重做默认 `Command/Ctrl+Shift+Z`，新建空白文件默认 `Command/Ctrl+N`，打开 AI 面板恢复为 `Command/Ctrl+J`，唤起 Veloca 默认 `Command/Ctrl+Q`，切换源码模式默认 `Command/Ctrl+/`。用户可以在设置中重新录入组合键，配置会保存到本地 `app_settings`；打开 AI 面板由 renderer 和主进程 `before-input-event` 处理，唤起 Veloca 由主进程尽量注册为运行期快捷键，用于把正在运行的 Veloca 窗口带到前台。
 - 编辑器顶部右侧操作区提供 `Open Agent Panel` 图标按钮，点击后调用与快捷键相同的 `openAgentPalette` 流程，作为快捷键失效或用户不熟悉快捷键时的鼠标入口。
 - Prompt 框包含：
   - 左侧 `+` 菜单，当前支持 `Web Search` 复选开关和本地文件选择；

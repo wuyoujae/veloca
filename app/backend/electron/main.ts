@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeImage,
   net,
@@ -122,7 +123,9 @@ interface WatchedMarkdownFile {
 const markdownWatchersByWindow = new Map<number, Map<string, WatchedMarkdownFile>>();
 const customWindowControlPlatforms = new Set<NodeJS.Platform>(['win32', 'linux']);
 let mainWindow: BrowserWindow | null = null;
+let focusVelocaShortcutCache = '';
 let openAiPanelShortcutCache = '';
+let registeredFocusVelocaShortcut = '';
 
 function normalizeShortcutKeyLabel(key: string): string | null {
   const trimmedKey = key.trim();
@@ -222,6 +225,57 @@ function getOpenAiPanelShortcut(): string {
   }
 
   return openAiPanelShortcutCache;
+}
+
+function getFocusVelocaShortcut(): string {
+  if (!focusVelocaShortcutCache) {
+    focusVelocaShortcutCache = getShortcutSettings(process.platform).focusVeloca;
+  }
+
+  return focusVelocaShortcutCache;
+}
+
+function focusVelocaWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+
+  app.focus();
+  mainWindow.focus();
+}
+
+function registerFocusVelocaShortcut(): void {
+  if (registeredFocusVelocaShortcut) {
+    globalShortcut.unregister(registeredFocusVelocaShortcut);
+    registeredFocusVelocaShortcut = '';
+  }
+
+  const shortcut = getFocusVelocaShortcut();
+
+  if (!shortcut) {
+    return;
+  }
+
+  if (globalShortcut.register(shortcut, focusVelocaWindow)) {
+    registeredFocusVelocaShortcut = shortcut;
+  } else {
+    console.warn(`Veloca failed to register focus shortcut: ${shortcut}`);
+  }
+}
+
+function applyShortcutSettings(settings: ShortcutSettings): void {
+  focusVelocaShortcutCache = settings.focusVeloca;
+  openAiPanelShortcutCache = settings.openAiPanel;
+  registerFocusVelocaShortcut();
 }
 
 function closeMarkdownWatchers(windowId: number): void {
@@ -397,13 +451,20 @@ function createMainWindow(): void {
       normalizedKey === 'fnlock' ||
       normalizedCode === 'fnlock';
     const isOpenAiPanelShortcut = doesShortcutMatchInput(getOpenAiPanelShortcut(), input);
+    const isFocusVelocaShortcut = doesShortcutMatchInput(getFocusVelocaShortcut(), input);
 
-    if (input.type !== 'keyDown' || input.isAutoRepeat || (!isFnKey && !isOpenAiPanelShortcut)) {
+    if (input.type !== 'keyDown' || input.isAutoRepeat || (!isFnKey && !isOpenAiPanelShortcut && !isFocusVelocaShortcut)) {
       return;
     }
 
     event.preventDefault();
-    createdWindow.webContents.send('agent:open-palette');
+
+    if (isFnKey || isOpenAiPanelShortcut) {
+      createdWindow.webContents.send('agent:open-palette');
+      return;
+    }
+
+    focusVelocaWindow();
   });
 
   createdWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
@@ -447,6 +508,8 @@ function registerIpcHandlers(): void {
   const isShortcutSettings = (settings: ShortcutSettings): boolean => {
     return Boolean(
       settings &&
+        typeof settings.focusVeloca === 'string' &&
+        settings.focusVeloca.trim().length > 0 &&
         typeof settings.newBlankFile === 'string' &&
         settings.newBlankFile.trim().length > 0 &&
         typeof settings.openAiPanel === 'string' &&
@@ -552,7 +615,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('settings:get-shortcut-settings', () => {
     const settings = getShortcutSettings(process.platform);
-    openAiPanelShortcutCache = settings.openAiPanel;
+    applyShortcutSettings(settings);
     return settings;
   });
   ipcMain.handle('settings:set-shortcut-settings', (_event, settings: ShortcutSettings) => {
@@ -561,13 +624,14 @@ function registerIpcHandlers(): void {
     }
 
     const savedSettings = setShortcutSettings({
+      focusVeloca: settings.focusVeloca.trim(),
       newBlankFile: settings.newBlankFile.trim(),
       openAiPanel: settings.openAiPanel.trim(),
       redo: settings.redo.trim(),
       toggleSourceMode: settings.toggleSourceMode.trim(),
       undo: settings.undo.trim()
     });
-    openAiPanelShortcutCache = savedSettings.openAiPanel;
+    applyShortcutSettings(savedSettings);
     return savedSettings;
   });
   ipcMain.handle('settings:get-typography-settings', () => {
@@ -946,20 +1010,13 @@ if (!singleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return;
-    }
-
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-    }
-
-    mainWindow.focus();
+    focusVelocaWindow();
   });
 
   app.whenReady().then(() => {
     getDatabase();
     registerIpcHandlers();
+    applyShortcutSettings(getShortcutSettings(process.platform));
     registerAssetProtocol();
     initializeAutoUpdates();
     onUpdateStatusChanged((status) => {
@@ -988,5 +1045,9 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (registeredFocusVelocaShortcut) {
+    globalShortcut.unregister(registeredFocusVelocaShortcut);
+  }
+
   closeDatabase();
 });

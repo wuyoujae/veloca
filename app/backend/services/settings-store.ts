@@ -14,6 +14,7 @@ export interface AiModelConfig {
 }
 
 export interface ShortcutSettings {
+  focusVeloca: string;
   newBlankFile: string;
   openAiPanel: string;
   redo: string;
@@ -40,6 +41,7 @@ const aiBaseUrlKey = 'aiBaseUrl';
 const aiApiKeyKey = 'aiApiKey';
 const aiModelKey = 'aiModel';
 const aiContextWindowKey = 'aiContextWindow';
+const focusVelocaShortcutKey = 'shortcutFocusVeloca';
 const newBlankFileShortcutKey = 'shortcutNewBlankFile';
 const openAiPanelShortcutKey = 'shortcutOpenAiPanel';
 const redoShortcutKey = 'shortcutRedo';
@@ -146,7 +148,7 @@ function getPlatformCommandShortcut(platform: NodeJS.Platform, key: string): str
 }
 
 export function getDefaultOpenAiPanelShortcut(platform: NodeJS.Platform): string {
-  return getPlatformCommandShortcut(platform, 'Q');
+  return getPlatformCommandShortcut(platform, 'J');
 }
 
 function getStoredShortcut(settingKey: string, fallback: string, legacyFallback?: string): string {
@@ -161,11 +163,12 @@ function getStoredShortcut(settingKey: string, fallback: string, legacyFallback?
 
 export function getShortcutSettings(platform: NodeJS.Platform): ShortcutSettings {
   const openAiPanelFallback = getDefaultOpenAiPanelShortcut(platform);
-  const legacyOpenAiPanelFallback = getPlatformCommandShortcut(platform, 'J');
+  const incorrectOpenAiPanelFallback = getPlatformCommandShortcut(platform, 'Q');
 
   return {
+    focusVeloca: getStoredShortcut(focusVelocaShortcutKey, getPlatformCommandShortcut(platform, 'Q')),
     newBlankFile: getStoredShortcut(newBlankFileShortcutKey, getPlatformCommandShortcut(platform, 'N')),
-    openAiPanel: getStoredShortcut(openAiPanelShortcutKey, openAiPanelFallback, legacyOpenAiPanelFallback),
+    openAiPanel: getStoredShortcut(openAiPanelShortcutKey, openAiPanelFallback, incorrectOpenAiPanelFallback),
     redo: getStoredShortcut(redoShortcutKey, getPlatformCommandShortcut(platform, 'Shift+Z')),
     toggleSourceMode: getStoredShortcut(toggleSourceModeShortcutKey, getPlatformCommandShortcut(platform, '/')),
     undo: getStoredShortcut(undoShortcutKey, getPlatformCommandShortcut(platform, 'Z'))
@@ -173,6 +176,7 @@ export function getShortcutSettings(platform: NodeJS.Platform): ShortcutSettings
 }
 
 export function setShortcutSettings(settings: ShortcutSettings): ShortcutSettings {
+  setSetting(focusVelocaShortcutKey, settings.focusVeloca);
   setSetting(newBlankFileShortcutKey, settings.newBlankFile);
   setSetting(openAiPanelShortcutKey, settings.openAiPanel);
   setSetting(redoShortcutKey, settings.redo);
