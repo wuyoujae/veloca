@@ -38,7 +38,7 @@ The build matrix is:
 | macOS | `macos-15` | arm64 | dmg and zip |
 | macOS | `macos-15-intel` | x64 | dmg and zip |
 
-Each matrix job installs dependencies with `npm ci`, runs the production build, then calls `electron-builder` with `--publish never`. Publishing is centralized in the release job so artifacts are uploaded once through `softprops/action-gh-release`.
+Each matrix job installs dependencies with `npm ci`, runs the production build, then calls `electron-builder` with `--publish never`. Publishing is centralized in the release job so artifacts are uploaded once through GitHub CLI.
 
 The release job runs only for `v*` tag refs. It downloads all matrix artifacts, creates a draft GitHub Release, uploads the generated files, and asks GitHub to generate release notes.
 

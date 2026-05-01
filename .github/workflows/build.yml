@@ -82,10 +82,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**
-          draft: true
-          generate_release_notes: true
+      - name: Create draft release
+        run: |
+          mapfile -t release_files < <(find artifacts -type f \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.zip' \) -print)
+          printf 'Release files:\n'
+          printf '%s\n' "${release_files[@]}"
+          test "${#release_files[@]}" -gt 0
+          gh release create "$GITHUB_REF_NAME" "${release_files[@]}" --draft --generate-notes --title "$GITHUB_REF_NAME"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
