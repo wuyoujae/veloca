@@ -1,137 +1,166 @@
-[![Veloca](resources/logo.svg)](https://github.com/wuyoujae/veloca)
+<p align="center">
+  <a href="https://github.com/wuyoujae/veloca">
+    <img src="resources/logo.svg" alt="Veloca" width="128" />
+  </a>
+</p>
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/wuyoujae/veloca/blob/main/LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org/)
-[![Electron](https://img.shields.io/badge/electron-33.x-9feaf9.svg)](https://www.electronjs.org/)
+<h1 align="center">Veloca</h1>
 
-Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
+<p align="center">
+  A desktop-first Markdown editor inspired by Typora, built for focused writing, local workspaces, and richer Markdown documents.
+</p>
 
-The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, local asset handling for richer Markdown documents, GitHub account binding, and Veloca-owned markdown version management through an isolated shadow repository.
-It also includes an early Remote settings path for creating and initializing a user-owned Supabase project named `veloca`.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
+  <a href="https://nodejs.org/"><img alt="Node.js >= 18" src="https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg" /></a>
+  <a href="https://www.electronjs.org/"><img alt="Electron 33" src="https://img.shields.io/badge/electron-33.x-9feaf9.svg" /></a>
+  <img alt="Status: early development" src="https://img.shields.io/badge/status-early%20development-orange.svg" />
+</p>
 
-## Table of Contents
+<p align="center">
+  <a href="README.md">English</a>
+  ·
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-- [Project Overview](#project-overview)
-- [Project Approach](#project-approach)
-- [Core Features](#core-features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Release Workflow](#release-workflow)
-- [Development Guide](#development-guide)
-- [Testing Guide](#testing-guide)
-- [Usage Examples](#usage-examples)
-- [Roadmap](#roadmap)
-- [FAQ](#faq)
-- [Contribution Guide](#contribution-guide)
-- [License](#license)
+---
 
 ## Project Overview
 
-Veloca is positioned as a clean, desktop-first markdown editor. Its first core use case is simple: open the app, write markdown in a Typora-like single-pane editor, and control the editor appearance without visual clutter.
+Veloca is an early-stage desktop Markdown editor. Its core goal is to provide a Typora-like writing surface where Markdown stays close to the final rendered document while still giving users practical desktop workflows: local folders, database-backed workspaces, rich media, source editing, and private version management.
 
-The project currently focuses on desktop-first workspace management, rich markdown editing, media attachment handling, save behavior, and a simple version-management path for local filesystem markdown files. Export and search are planned follow-up modules.
+The project is currently a foundation build for continued product development. It already includes the Electron desktop shell, React renderer, Node backend services, SQLite persistence, workspace management, TipTap-based rich editing, local asset handling, an early Agent palette, GitHub-backed Veloca version management, and Remote Supabase configuration.
+
+Veloca is not production-ready yet. It is suitable for local development, product iteration, and technical validation.
 
 ## Project Approach
 
-Veloca separates desktop, backend, and renderer responsibilities:
+Veloca is designed around a clear separation of responsibility:
 
-- **Electron** owns the native window, lifecycle, and secure bridge between UI and backend code.
-- **React** owns the interactive editor interface.
-- **Node services** own persistent application behavior.
-- **SQLite** stores local application data with a minimal schema aligned to current requirements, including app settings and workspace folder roots.
-- **Version management** uses a Veloca-owned Git repository in Electron's user data directory. User project folders are never turned into Git repositories by Veloca, and existing user `.git` folders are not read or modified.
+| Area | Responsibility |
+| --- | --- |
+| Electron shell | Native window lifecycle, single-instance behavior, secure preload bridge, local protocol handling, and platform-specific desktop packaging. |
+| React renderer | Editor UI, workspace navigation, settings panels, rich Markdown interactions, and user feedback. |
+| Node backend services | Filesystem access, SQLite persistence, encrypted credential handling, GitHub integration, remote sync orchestration, and Agent runtime integration. |
+| SQLite | Local settings, workspace roots, database-backed workspaces, document metadata, sync state, and Veloca-owned version-management mappings. |
+| Shadow Git repository | Private version history for Veloca-saved local Markdown files without touching the user's own Git repositories. |
 
-TipTap is used as the editor engine because it is MIT licensed, gives Veloca more control over the final writing experience, and allows the editing surface to fully inherit the application's own layout, typography, and theme tokens.
+The editor uses TipTap because it is MIT licensed, extensible, and gives Veloca control over the final writing experience. The database schema is intentionally minimal and follows implemented backend behavior instead of speculative future modules.
 
 ## Core Features
 
-- Electron desktop app shell with a macOS-native title bar, custom frameless controls on Windows/Linux, and single-instance startup behavior.
-- React-based editor layout matching the prototype direction.
-- Interactive sidebar with Files and Outline modes.
-- Collapsible workspace file tree with real folder loading.
-- VS Code-style workspace roots where multiple folders can be added.
-- Database-backed workspace roots for quick projects that do not need a system folder.
-- Recursive `.md` file discovery from added folders.
-- Header-level untitled file creation with an in-app save-location picker limited to current workspace folders.
-- Custom file tree context menu for common system-level operations.
-- TipTap-powered rich markdown editor with Veloca-native styling.
-- Per-file source/rendered view switching for editable raw Markdown and Typora-like rich preview.
-- Rich Markdown rendering for tables, task lists, Mermaid diagrams, code highlighting, inline and block math, and emoji input.
-- Local image, audio, video, and iframe embed support.
-- Dual-workspace attachment persistence for both filesystem and SQLite-backed workspaces.
-- Auto Save enabled by default, with `Cmd/Ctrl+S` manual save support.
-- Save status in the editor status bar.
-- GitHub account binding infrastructure through the OAuth device authorization flow. The Settings Account panel is currently hidden while the account experience is being refined.
-- Veloca version management for saved local filesystem `.md` files through a private GitHub repository named `veloca-version-manager`.
-- Sidebar Git tab showing only Veloca-managed markdown changes from the isolated shadow repository.
-- Remote Supabase configuration through Settings, including encrypted local credential storage, cloud table initialization, and Remote Sync preferences.
-- Settings modal with polished dark/light theme switching.
-- About Veloca panel with version details, GitHub release update checks, and open-source license disclosure.
-- SQLite-backed app setting storage for theme and Auto Save persistence.
-- Toast message component for user feedback.
+### Implemented
+
+- Electron desktop application with platform-aware title bar behavior and single-instance startup.
+- React-based Markdown editor interface with a file sidebar, outline sidebar, Git sidebar, status bar, and settings modal.
+- Multi-root workspace support for local filesystem folders.
+- SQLite-backed virtual workspaces for users who do not want to create a system folder.
+- Recursive `.md` discovery in added local workspace folders.
+- File tree interactions for creating, renaming, duplicating, copying, cutting, pasting, deleting, revealing, and removing workspace roots.
+- Untitled Markdown tabs that are saved only after the user chooses a workspace-scoped destination.
+- TipTap-powered rich Markdown editing with Veloca-native styling.
+- Per-file rendered/source view switching.
+- Multi-tab editing and two-pane split editing.
+- Rich Markdown support for tables, task lists, Mermaid diagrams, syntax-highlighted code blocks, math, emoji, links, images, audio, video, YouTube embeds, and iframe embeds.
+- Local asset persistence for filesystem documents through sibling `.assets` folders.
+- SQLite asset persistence for database-backed workspaces through a local Electron protocol.
+- Auto Save enabled by default, plus manual save with `Cmd/Ctrl+S`.
+- Theme settings, Auto Save preference, workspace roots, and remote sync state persisted in SQLite.
+- Agent palette prototype with selected-text context, streaming backend integration, session handling, AI insertion, and provenance metadata for generated content.
+- GitHub OAuth device-flow infrastructure.
+- Veloca-owned Markdown version management through a private GitHub repository named `veloca-version-manager`.
+- Remote Supabase configuration with encrypted local credential storage, cloud table initialization, and sync preferences.
+- About panel with app version details, update checks, GitHub link, and open-source license disclosure.
+
+### Planned
+
+- Markdown export workflows.
+- Search and navigation improvements.
+- A plugin or extension system only if later product requirements justify it.
 
 ## Tech Stack
 
 | Layer | Technologies |
 | --- | --- |
-| Frontend | React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS |
-| Desktop shell | Electron, electron-vite |
-| Backend | Node.js, TypeScript, isomorphic-git, `pg`, `@supabase/supabase-js` |
+| Desktop | Electron 33, electron-vite, electron-builder |
+| Frontend | React 18, TypeScript, Vite, Lucide React, TipTap, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS |
+| Backend | Node.js, TypeScript, Electron main process services, isomorphic-git, `pg`, `@supabase/supabase-js`, `otherone-agent` |
 | Database | SQLite through `better-sqlite3` |
-| Build tools | TypeScript, Vite, electron-vite |
-| Testing | not configured yet; this foundation milestone is verified through typecheck and production build |
+| Testing | Node.js test runner (`node --test`) |
+| Build and release | TypeScript, Vite, electron-vite, electron-builder, GitHub Actions |
+| Internationalization | Not configured yet |
+| License | MIT |
+
+> The project instructions mention Next.js as a target stack, but the current repository implementation is Electron + Vite + React. This README documents the code that currently exists.
 
 ## Project Structure
 
-```
+```text
 .
 ├── app
 │   ├── backend
-│   │   ├── database
-│   │   ├── electron
-│   │   └── services
+│   │   ├── database          # SQLite connection and persistence helpers
+│   │   ├── electron          # Electron main/preload entry points
+│   │   └── services          # Backend services for workspace, sync, versioning, settings, Agent, and app info
 │   ├── frontend
-│   │   └── src
-│   ├── selection
-│   └── test
+│   │   └── src               # React renderer, editor UI, rich Markdown, Agent palette, and styles
+│   ├── selection             # Temporary implementation area when ownership is not settled
+│   └── test                  # Node test files
 ├── docs
-│   └── models
-├── propertypes
-├── resources
+│   └── models                # Feature-model documentation
+├── propertypes               # Prototype designs used as frontend references
+├── resources                 # Icons, logo, and application assets
+├── .github
+│   └── workflows             # GitHub Actions release workflow
 ├── electron.vite.config.ts
 ├── package.json
-└── tsconfig.json
+├── tsconfig.json
+└── README.md
 ```
 
 ## Quick Start
 
-Install dependencies:
+### Requirements
+
+- Node.js 18 or newer.
+- npm.
+- A desktop operating system supported by Electron.
+
+### Install
 
 ```bash
 npm install
 ```
 
-Start the desktop app in development mode:
+### Configure
+
+```bash
+cp .env.example .env
+```
+
+For basic local editor development, the defaults are enough. AI, GitHub, and Remote features require additional credentials.
+
+### Run in Development
 
 ```bash
 npm run dev
 ```
 
-Build the project:
+### Build
 
 ```bash
 npm run build
 ```
 
-Preview the built Electron app:
+### Preview the Built App
 
 ```bash
 npm run preview
 ```
 
-Build local desktop packages on the matching operating system:
+### Create Desktop Packages
+
+Run the package command that matches the target platform:
 
 ```bash
 npm run package:mac
@@ -139,34 +168,126 @@ npm run package:win
 npm run package:linux
 ```
 
+Generated desktop artifacts are written to `release/`, which is ignored by Git.
+
 ## Configuration
 
-Copy `.env.example` if you need local configuration:
+Runtime configuration starts from `.env.example`:
 
-```bash
-cp .env.example .env
-```
-
-Available environment variables:
-
-| Variable | Default | Description |
+| Variable | Default example | Description |
 | --- | --- | --- |
 | `VELOCA_DB_NAME` | `veloca.sqlite` | SQLite database file name stored inside Electron's user data directory. |
-| `VELOCA_GITHUB_CLIENT_ID` | None | GitHub OAuth App client ID used by the Account settings panel to bind a GitHub account through the device authorization flow. Device Flow must be enabled in the OAuth App settings. Veloca requests the `repo` scope so it can create and push to the private `veloca-version-manager` repository. |
+| `VELOCA_AGENT_BASE_URL` | `https://openrouter.ai/api/v1` | Base URL for the Agent model provider. |
+| `VELOCA_AGENT_MODEL` | `google/gemini-3.1-flash-lite-preview` | Default Agent model. Settings inside the app can override this value. |
+| `VELOCA_AGENT_API_KEY` | `your-openrouter-api-key` | API key used by the backend Agent service. |
+| `VELOCA_AGENT_CONTEXT_WINDOW` | `128000` | Context window used by the Agent runtime. |
+| `VELOCA_WEB_SEARCH_BASE_URL` | `https://html.duckduckgo.com/html/` | Search endpoint used by the Agent web-search tool path. |
+| `VELOCA_GITHUB_CLIENT_ID` | `your-github-oauth-app-client-id` | GitHub OAuth App client ID for device-flow account binding and Veloca version management. |
 
-Workspace folders are stored in SQLite. Markdown file content from system folders is read from disk only after selecting a file in the tree, then written back to the same validated `.md` path when saved. Header-level new files start as untitled in-memory tabs and are written only after the user chooses a destination through Veloca's workspace-scoped save dialog. Database-backed workspaces store their virtual folders and markdown files directly in SQLite. Rich media inserted into filesystem documents is saved to a sibling `<document>.assets` directory; rich media inserted into database-backed documents is stored in SQLite and served through a local Electron protocol.
+Local user preferences, workspace roots, database-backed documents, version-management mappings, and sync queues are stored in SQLite under Electron's user data directory.
 
-Version management data is stored under Electron's user data directory at `version-manager/repo`. This shadow repository contains copies of Veloca-saved local filesystem markdown files under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/` plus a workspace `manifest.json`. The directory prefix is generated once per filesystem workspace, stored locally, and shown read-only in the Git tab. Database-backed workspace files are intentionally skipped. Veloca records repository metadata in `version_repositories`, workspace directory prefixes in `version_workspace_configs`, and managed markdown mappings in `version_managed_files`; these tables use UUID IDs and numeric status values.
+Sensitive Remote Supabase values are configured inside `Settings > Remote`. Supabase personal access tokens, database passwords, and secret keys are encrypted with Electron secure storage before being saved locally. The renderer receives only desensitized status values.
 
-Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
+## Development Guide
 
-Remote Supabase configuration is also a user preference configured inside Settings rather than through required environment variables. The Remote panel asks for a Supabase personal access token, organization slug, database password, and region. Veloca provides a built-in dropdown of common Supabase regions plus a manual region code input for fallback. Sensitive values are stored with Electron secure storage before writing encrypted values into SQLite. Veloca then uses Supabase Management API to create or reuse a project named `veloca`, initializes the minimum cloud database tables, and keeps only desensitized status visible in the renderer.
+Use the repository boundaries consistently:
 
-Remote Sync is configured in the same panel. Auto Sync, Pull on Startup, Push on Save, local opened/edited Markdown sync, asset sync, provenance sync, and soft-delete sync default to enabled. Veloca always mirrors SQLite-backed database workspaces to the remote project, while filesystem workspaces only sync Markdown files opened or edited inside Veloca. Sync runs in the background and records pending, failed, and conflict counts locally.
+- Put renderer code in `app/frontend`.
+- Put Electron and Node backend code in `app/backend`.
+- Put temporary uncertain implementation work in `app/selection`, then move it once ownership is clear.
+- Put tests and test helpers in `app/test`.
+- Keep feature documentation in `docs/models`, organized by business model.
+- Keep app assets in `resources`.
+
+Development principles:
+
+- Keep changes small and tied to current product behavior.
+- Do not add speculative database fields, tables, services, or abstractions.
+- Do not create database foreign key constraints; use logical relationship fields instead.
+- Use UUIDs for ID fields and numeric values for status or enum fields.
+- Store configurable runtime values in `.env` and keep `.env.example` updated.
+- Keep `.gitignore` aligned with generated output, credentials, and local-only files.
+- Reference existing prototype and UI patterns before adding frontend surfaces.
+
+Feature model documents currently include:
+
+- `docs/models/markdown-editor.md`
+- `docs/models/agent-runtime.md`
+- `docs/models/remote-database.md`
+- `docs/models/version-management.md`
+- `docs/models/release-pipeline.md`
+- `docs/models/app-about-updates.md`
+- `docs/models/tools.md`
+- `docs/models/agent-context.md`
+
+## Testing Guide
+
+Run the automated checks:
+
+```bash
+npm run typecheck
+npm run test
+npm run build
+```
+
+Run the release-readiness check:
+
+```bash
+npm run release:check
+```
+
+Manual acceptance checks for the editor:
+
+1. Run `npm run dev`.
+2. Confirm the Electron window opens to the Veloca editor layout.
+3. Add a local workspace folder containing `.md` files.
+4. Create a database-backed workspace.
+5. Open, edit, save, close, and reopen Markdown files.
+6. Switch the same file between rendered mode and source mode.
+7. Insert headings, lists, tables, task lists, Mermaid diagrams, code blocks, math, images, and media embeds.
+8. Test Auto Save and manual save with `Cmd/Ctrl+S`.
+9. Use the file tree context menu for create, rename, duplicate, copy path, reveal, delete, and remove workspace flows.
+10. Open two files in split editor mode and confirm each pane keeps its own view state.
+11. Toggle light and dark theme and confirm rich Markdown content remains readable.
+12. Restart the app and confirm workspace roots, database workspaces, preferences, and saved content are restored.
+
+Remote and GitHub features require valid external credentials. Test those flows only with accounts and projects intended for development.
+
+## Usage Examples
+
+### Open a Local Markdown Workspace
+
+1. Start Veloca with `npm run dev`.
+2. Click the add-folder button next to `Workspace`.
+3. Select a folder that contains Markdown files.
+4. Choose a `.md` file from the sidebar.
+5. Edit in rendered mode or switch to source mode from the editor header.
+
+### Create a Database-Backed Workspace
+
+1. Click the new-workspace action beside `Workspace`.
+2. Create a Veloca database workspace.
+3. Add Markdown files inside that workspace.
+4. Save and reopen the app to confirm the workspace is restored from SQLite.
+
+### Insert Rich Markdown
+
+- Type `/` in the editor to open the command menu.
+- Use `/m` for Mermaid diagrams.
+- Use `/t` for a table.
+- Paste or drag local media into the document to persist assets.
+
+### Use Veloca Version Management
+
+1. Configure `VELOCA_GITHUB_CLIENT_ID` in `.env`.
+2. Bind a GitHub account through the device authorization flow when the account UI is enabled.
+3. Create the private `veloca-version-manager` repository from the Git sidebar.
+4. Save local filesystem Markdown files through Veloca.
+5. Commit and push Veloca-managed Markdown copies from the shadow repository.
+
+Veloca does not create, read, or modify `.git` directories inside user workspace folders.
 
 ## Release Workflow
-
-Veloca uses npm scripts plus GitHub Actions for desktop releases. Local scripts prepare the version commit and Git tag; GitHub Actions builds platform artifacts and creates a draft GitHub Release.
 
 Before releasing, run:
 
@@ -190,157 +311,73 @@ Push the current branch and tags:
 npm run release:push
 ```
 
-Pushing a tag that matches `v*` triggers `.github/workflows/build.yml`. The workflow builds Linux x64, Windows x64, macOS arm64, and macOS x64 artifacts, then creates a draft GitHub Release with generated release notes. Review and smoke-test the uploaded artifacts before publishing the draft release.
-
-Release output is generated in `release/`, which is intentionally ignored by Git.
-
-## Development Guide
-
-All application code lives under `app`.
-
-- Put **renderer code** in `app/frontend`.
-- Put **Electron and Node backend code** in `app/backend`.
-- Put **uncertain temporary implementation work** in `app/selection`, then move it once ownership is clear.
-- Put **tests and test helpers** in `app/test`.
-- Keep **feature documentation** in `docs/models`, organized by business model.
-
-Database design should stay minimal and match the backend logic being implemented. Do not add speculative tables or fields before the related business behavior exists.
-
-Remote Supabase development is documented in `docs/models/remote-database.md`. The current remote module initializes cloud tables, stores sync preferences, queues opened/edited local Markdown files, mirrors database workspaces, uploads assets to a private Supabase Storage bucket, and preserves conflict copies instead of overwriting user content.
-
-## Testing Guide
-
-The current foundation can be checked with:
-
-```bash
-npm run typecheck
-npm run test
-npm run build
-```
-
-Release readiness can be checked with:
-
-```bash
-npm run release:check
-```
-
-<details>
-<summary><b>Manual acceptance checks</b> (click to expand)</summary>
-
-<br>
-
-1. Run `npm run dev`.
-2. Confirm the Electron window opens with the Veloca editor layout.
-3. Click the add-folder icon beside `Workspace`.
-4. Select a folder that contains `.md` files.
-5. Click the new-workspace icon beside `Workspace` and create a database-backed workspace.
-6. Confirm the database-backed workspace uses a folder-with-star icon that differs from system folders.
-7. Confirm only markdown files appear as files under system folders.
-8. Use the `Files` tab to collapse and expand folders.
-9. Right-click a folder and try `New File` or `New Folder`; confirm a default item appears in the tree and enters inline rename mode.
-10. Right-click a file and try `Rename`, `Duplicate`, `Copy Path`, or `Reveal in Finder`.
-11. Right-click a root workspace folder and confirm `Remove from Workspace` is available.
-12. Click the editor header `New File` button and confirm an untitled tab opens without immediately appearing in the file tree.
-13. Type content in the untitled tab, click `Save`, choose a workspace folder from the in-app save dialog, and confirm the file appears under that workspace folder.
-14. Repeat the untitled save flow with a database-backed workspace folder and confirm the file is stored in the database workspace.
-15. Select a markdown file and edit headings, paragraphs, lists, blockquotes, tables, task lists, Mermaid diagrams, formulas, and code blocks in the TipTap editor.
-16. Click the code icon to switch the active file into Source Mode, confirm the raw Markdown is editable, make a small change, and confirm the status bar shows `Unsaved`.
-17. Click the document icon to return to rendered mode and confirm the same content is shown in the rich editor.
-18. Open a second markdown file and confirm it still starts in rendered mode even if the first file is in Source Mode.
-19. Open Settings and confirm the sidebar contains `Remote`, while the old placeholder entries `Appearance`, `File & Sync`, and `Shortcuts` are no longer present.
-20. In Settings > Remote, enter an invalid Supabase PAT and confirm setup fails without creating a project.
-21. Enter a valid Supabase PAT, organization slug, database password, and region; choose a common region from the dropdown or type a custom region code, then confirm Veloca creates or connects a Supabase project named `veloca`.
-22. Confirm the Supabase SQL editor shows the `veloca_remote_*` tables after initialization.
-23. Restart Veloca and confirm Settings > Remote shows project status without revealing the PAT, database password, or secret key.
-24. In Settings > Remote > Sync, confirm Auto Sync, Pull on Startup, Push on Save, local Markdown sync, asset sync, provenance sync, and soft-delete sync are enabled by default.
-25. Save a local Markdown file that was opened in Veloca, then confirm Remote Sync shows pending or synced queue status.
-26. Create or edit a database workspace file, run Manual Sync Now, and confirm the remote tables contain database workspace rows.
-27. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
-28. Wait for Auto Save and confirm the status bar returns to `Saved`.
-29. Select a different file, then return to the edited file and confirm the saved content is still present.
-30. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
-28. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
-29. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
-30. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
-31. Enter `$E=mc^2$` and `$$\int_0^1 x^2 dx$$` and confirm both formulas render.
-32. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
-33. Add `VELOCA_GITHUB_CLIENT_ID` to `.env`, open `Settings` → `Account`, click `Bind GitHub`, enter the displayed code on GitHub, and confirm the connected GitHub account appears in Veloca.
-34. Switch to the sidebar `Git` tab and confirm it prompts for repository setup after GitHub is bound with the required `repo` permission.
-35. Click `Create Repository` and confirm GitHub has a private repository named `veloca-version-manager`.
-36. Edit and save a local filesystem `.md` file, then confirm the `Git` tab lists a Veloca markdown change.
-37. Confirm the original workspace folder does not gain a new `.git` folder and an existing user `.git` status is not changed by Veloca.
-38. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/`.
-39. Click `Settings` in the sidebar.
-40. Open `Settings` → `About Veloca`, confirm the logo, version, GitHub URL, license, update check action, and open-source license dialog render correctly.
-41. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-42. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
-43. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
-
-</details>
-
-Automated unit and integration tests should be added around file IO, save failure handling, and editor state transitions as the product surface grows.
-
-## Usage Examples
-
-At this stage, Veloca starts with an empty workspace until folders are added or database-backed workspaces are created. Use the folder button in the `Workspace` toolbar to add one or more system folders, or use the new-workspace button to create a workspace stored entirely in SQLite. Veloca recursively scans system roots and shows only `.md` files as files. Selecting a markdown file opens it in the TipTap editor and updates the breadcrumb, status bar, and outline. Use the editor header's `New File` button to create an untitled in-memory tab, then save it into a local or database workspace folder through Veloca's save-location dialog. Use the editor header's code/document toggle to switch the active file between rendered mode and editable raw Markdown source mode; this view preference is tracked independently for each open file. Right-click file tree items to create, rename, duplicate, copy, cut, paste, reveal, delete, or remove workspace roots. Paste or drag supported media directly into the editor to insert it into the current document. Mermaid diagrams and empty 2 × 2 tables can be inserted from the editor slash command menu by typing `/`, `/m`, or `/t`; saved Mermaid diagrams still use the standard Markdown `mermaid` fenced code block format. After GitHub is bound, the `Git` tab can create the private `veloca-version-manager` repository and commit only Veloca-saved filesystem markdown copies from the shadow repository.
+Pushing a `v*` tag triggers `.github/workflows/build.yml`. The workflow builds Linux x64, Windows x64, macOS arm64, and macOS x64 artifacts, then creates a draft GitHub Release with generated release notes.
 
 ## Roadmap
 
-- **Completed:** project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, isolated Veloca markdown version management, and About/update/license settings.
-- **Next:** markdown export and search.
-- **Later:** plugin or extension system if product requirements justify it.
+| Stage | Status | Notes |
+| --- | --- | --- |
+| Desktop shell and editor foundation | Complete | Electron shell, React renderer, SQLite persistence, workspace roots, and rich Markdown editing are in place. |
+| Workspace and file operations | Complete | Local folders, database workspaces, file tree actions, untitled files, and save flows are implemented. |
+| Rich Markdown editing | Complete | TipTap rendering, source mode, Mermaid, tables, media, math, code, and split editing are implemented. |
+| Version management | In progress | Shadow repository and GitHub private-repository flow exist; account UI is being refined. |
+| Remote Sync | In progress | Supabase setup and sync preferences exist; broader conflict and collaboration behavior will evolve later. |
+| Export and search | Planned | Markdown export and search are the next product modules. |
+| Plugin system | Later | Only if product requirements make it necessary. |
 
 ## FAQ
 
 <details>
-<summary><b>Is Veloca production-ready?</b></summary>
+<summary><strong>Is Veloca production-ready?</strong></summary>
 
-No. This is the initial foundation build. It is suitable for continuing development, not for end-user release.
+No. Veloca is still in early development. It is ready for local development and feature validation, not broad end-user distribution.
 </details>
 
 <details>
-<summary><b>How do I publish a GitHub Release?</b></summary>
+<summary><strong>Why does Veloca use SQLite?</strong></summary>
 
-Run `npm run release:patch`, `npm run release:minor`, or `npm run release:major`, then run `npm run release:push`. The pushed `v*` tag starts the GitHub Actions workflow and creates a draft release for review.
+SQLite gives Veloca durable local state for settings, workspaces, database-backed documents, sync metadata, and version-management mappings without requiring users to run a separate database.
 </details>
 
 <details>
-<summary><b>Why is SQLite already included?</b></summary>
+<summary><strong>Does Veloca modify my own Git repository?</strong></summary>
 
-Theme settings need durable local persistence. The schema is intentionally small and can evolve only when new backend behavior requires it.
+No. Veloca version management uses a separate shadow repository inside Electron's user data directory and can push copies to a private GitHub repository named `veloca-version-manager`. It does not create or modify `.git` folders inside user workspaces.
 </details>
 
 <details>
-<summary><b>Why do no files appear after launch?</b></summary>
+<summary><strong>Why do no files appear after launch?</strong></summary>
 
-Veloca now loads real markdown files from added workspace folders. Click the add-folder icon beside `Workspace` and choose a folder that contains `.md` files.
+Veloca starts without a workspace. Add a folder that contains `.md` files, or create a database-backed workspace from the Workspace toolbar.
 </details>
 
 <details>
-<summary><b>Why might the window take a moment to appear in development?</b></summary>
+<summary><strong>Why might the development window take a moment to appear?</strong></summary>
 
-`npm run dev` starts the Vite renderer and Electron shell together. Veloca keeps the native window hidden until the renderer is ready, so slow dev-server startup shows as a short launch delay instead of a black unrendered window.
+`npm run dev` starts the Vite renderer and Electron shell together. Veloca keeps the native window hidden until the renderer is ready, which avoids showing an unrendered blank window.
 </details>
 
 <details>
-<summary><b>How are edits saved?</b></summary>
+<summary><strong>Where should feature documentation go?</strong></summary>
 
-Auto Save is enabled by default and writes changes after a short pause. You can turn it off in `Settings`; when it is off, use `Cmd/Ctrl+S` to save the active markdown file.
-</details>
-
-<details>
-<summary><b>Does Veloca modify my project's Git repository?</b></summary>
-
-No. Veloca version management uses a separate shadow repository in Electron's user data directory. It copies only Veloca-saved local `.md` files into that repository and does not create, read, or modify `.git` inside user workspace folders.
+Feature documentation belongs in `docs/models`, split by business model. Update the relevant document whenever behavior, architecture, or development guidance changes.
 </details>
 
 ## Contribution Guide
 
-Use small, focused commits. Keep changes aligned with the requested feature and update the relevant documentation when behavior or architecture changes.
+Veloca is currently an early-stage project. Contributions should be small, focused, and tied to an explicit product or engineering goal.
+
+Recommended workflow:
+
+1. Read the relevant document in `docs/models`.
+2. Keep code changes scoped to the requested feature.
+3. Add or update tests when behavior changes.
+4. Update documentation when implementation details, configuration, or user-facing flows change.
+5. Run `npm run typecheck`, `npm run test`, and `npm run build` before opening a pull request.
 
 Recommended commit style:
 
-```
+```text
 feat: add markdown editor foundation
 feat: integrate tiptap markdown editing
 fix: persist editor theme setting
@@ -349,4 +386,4 @@ docs: document markdown editor model
 
 ## License
 
-[MIT](LICENSE)
+Veloca is licensed under the [MIT License](LICENSE).
