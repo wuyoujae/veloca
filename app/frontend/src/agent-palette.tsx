@@ -498,7 +498,7 @@ function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX
           })
         : message.answer.trim() ? (
             <AgentMarkdown content={message.answer} />
-          ) : !message.toolCalls?.length ? (
+          ) : message.status === 'pending' && !message.toolCalls?.length ? (
             <div className="agent-typing-indicator" aria-label="Veloca is typing">
               <span />
               <span />
@@ -547,6 +547,11 @@ export function AgentPalette({
   const timersRef = useRef<number[]>([]);
   const canvasControlsTimerRef = useRef<number | null>(null);
   const autoScrollLockedRef = useRef(false);
+  const activeStreamRef = useRef<{
+    cancel: () => void;
+    messageId: string;
+    sessionId: string;
+  } | null>(null);
   const pointerInsertHandledRef = useRef<string | null>(null);
   const lastCanvasScrollTopRef = useRef(0);
   const programmaticScrollUntilRef = useRef(0);
@@ -567,6 +572,8 @@ export function AgentPalette({
       if (canvasControlsTimerRef.current) {
         window.clearTimeout(canvasControlsTimerRef.current);
       }
+      activeStreamRef.current?.cancel();
+      activeStreamRef.current = null;
     };
   }, []);
 
@@ -978,6 +985,30 @@ export function AgentPalette({
     setInlineDictating(true);
   };
 
+  const stopAgentResponse = () => {
+    const activeStream = activeStreamRef.current;
+
+    if (!activeStream) {
+      return;
+    }
+
+    activeStream.cancel();
+    activeStreamRef.current = null;
+    setSendingMessageId((current) => (current === activeStream.messageId ? null : current));
+    updateSession(activeStream.sessionId, (session) => ({
+      ...session,
+      messages: session.messages.map((message) =>
+        message.id === activeStream.messageId
+          ? {
+              ...message,
+              status: 'complete'
+            }
+          : message
+      )
+    }));
+    scheduleScrollToLatest();
+  };
+
   const requestAgentAnswer = (
     sessionId: string,
     messageId: string,
@@ -990,8 +1021,18 @@ export function AgentPalette({
     setSendingMessageId(messageId);
     let streamedAnswer = '';
     let unsubscribe = () => {};
+    let finished = false;
 
     const finishRequest = () => {
+      if (finished) {
+        return;
+      }
+
+      finished = true;
+      if (activeStreamRef.current?.messageId === messageId) {
+        activeStreamRef.current = null;
+      }
+
       unsubscribe();
       setSendingMessageId((current) => (current === messageId ? null : current));
       scheduleScrollToLatest();
@@ -1073,6 +1114,23 @@ export function AgentPalette({
           return;
         }
 
+        if (event.type === 'aborted') {
+          updateSession(sessionId, (session) => ({
+            ...session,
+            messages: session.messages.map((message) =>
+              message.id === messageId
+                ? {
+                    ...message,
+                    answer: event.answer || streamedAnswer,
+                    status: 'complete'
+                  }
+                : message
+            )
+          }));
+          finishRequest();
+          return;
+        }
+
         if (event.type === 'complete') {
           const answer = event.answer || streamedAnswer || 'Veloca returned an empty response.';
 
@@ -1113,6 +1171,11 @@ export function AgentPalette({
           finishRequest();
         }
       });
+      activeStreamRef.current = {
+        cancel: unsubscribe,
+        messageId,
+        sessionId
+      };
     } catch (error) {
       const description = error instanceof Error ? error.message : 'Agent request failed.';
 
@@ -1138,14 +1201,15 @@ export function AgentPalette({
   };
 
   const sendMessage = () => {
+    if (sendingMessageId) {
+      stopAgentResponse();
+      return;
+    }
+
     const prompt = input.trim();
 
     if (!prompt) {
       toggleFullVoiceMode();
-      return;
-    }
-
-    if (sendingMessageId) {
       return;
     }
 
@@ -1183,6 +1247,10 @@ export function AgentPalette({
     }
 
     event.preventDefault();
+    if (sendingMessageId) {
+      return;
+    }
+
     sendMessage();
   };
 
@@ -1513,13 +1581,20 @@ export function AgentPalette({
               <Mic size={18} />
             </button>
             <button
-              className={`agent-main-action-btn${input.trim() ? ' send' : ' voice'}${voiceMode !== 'idle' ? ' listening' : ''}`}
+              className={`agent-main-action-btn${sendingMessageId ? ' stop' : input.trim() ? ' send' : ' voice'}${voiceMode !== 'idle' ? ' listening' : ''}`}
               type="button"
-              aria-label={input.trim() ? 'Send message' : 'Start voice input'}
-              disabled={Boolean(input.trim() && sendingMessageId)}
+              aria-label={sendingMessageId ? 'Stop response' : input.trim() ? 'Send message' : 'Start voice input'}
               onClick={sendMessage}
             >
-              {input.trim() ? <ArrowUp size={18} /> : voiceMode === 'idle' ? <AudioLines size={18} /> : <Square size={16} />}
+              {sendingMessageId ? (
+                <Square size={16} />
+              ) : input.trim() ? (
+                <ArrowUp size={18} />
+              ) : voiceMode === 'idle' ? (
+                <AudioLines size={18} />
+              ) : (
+                <Square size={16} />
+              )}
             </button>
           </div>
         </div>

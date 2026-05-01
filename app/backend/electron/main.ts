@@ -109,6 +109,8 @@ import {
   onUpdateStatusChanged
 } from '../services/auto-update-service';
 
+const agentStreamControllers = new Map<string, AbortController>();
+
 interface WatchedMarkdownFile {
   timer: ReturnType<typeof setTimeout> | null;
   watcher: FSWatcher;
@@ -646,11 +648,15 @@ function registerIpcHandlers(): void {
     }
 
     const sender = event.sender;
+    const controller = new AbortController();
+
+    agentStreamControllers.get(requestId)?.abort();
+    agentStreamControllers.set(requestId, controller);
 
     void streamAgentMessage(
       request,
       (message) => {
-        if (sender.isDestroyed()) {
+        if (sender.isDestroyed() || controller.signal.aborted) {
           return;
         }
 
@@ -661,8 +667,23 @@ function registerIpcHandlers(): void {
       },
       {
         onWorkspaceChanged: broadcastWorkspaceChanged
+      },
+      controller.signal
+    ).finally(() => {
+      if (agentStreamControllers.get(requestId) === controller) {
+        agentStreamControllers.delete(requestId);
       }
-    );
+    });
+  });
+  ipcMain.on('agent:cancel-message-stream', (_event, requestId: string) => {
+    if (!requestId || typeof requestId !== 'string') {
+      return;
+    }
+
+    const controller = agentStreamControllers.get(requestId);
+
+    controller?.abort();
+    agentStreamControllers.delete(requestId);
   });
   ipcMain.handle('workspace:get', () => getWorkspaceSnapshot());
   ipcMain.handle('workspace:add-folder', async (event) => {

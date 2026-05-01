@@ -461,9 +461,11 @@ The current implementation uses a backend Agent service boundary:
 2. Use `agent:send-message-stream` for streaming Agent responses. The legacy `agent:send-message` invoke path remains available for non-streaming calls.
 3. Resolve model selection to backend config.
 4. Call `veloca.InvokeAgent` from the main process with `stream: true`.
-5. Normalize raw chunks into UI events: `delta`, `thinking`, `tool_calls`, structured `tool_call`, `complete`, and `error`.
+5. Normalize raw chunks into UI events: `delta`, `thinking`, `tool_calls`, structured `tool_call`, `complete`, `aborted`, and `error`.
 6. Use `otherone-agent` local-file session ids directly as Veloca Agent session ids.
 
-The preload layer creates a request id per send operation, listens for `agent:message-event`, filters events by request id, and returns an unsubscribe function to the renderer. The Agent palette appends each `delta` to the active AI message so the canvas updates while the model is still generating.
+The preload layer creates a request id per send operation, listens for `agent:message-event`, filters events by request id, and returns an unsubscribe function to the renderer. Calling that function also sends `agent:cancel-message-stream` with the same request id. The main process stores an `AbortController` per active request id and passes its signal into the backend Agent stream so the prompt button can stop an in-flight response instead of only hiding renderer updates.
+
+The Agent palette appends each `delta` to the active AI message so the canvas updates while the model is still generating. While a message is pending, the prompt action button switches to a stop icon. Clicking it cancels the active stream, marks the current AI turn complete with any partial content already received, and prevents the empty-response typing indicator from remaining visible.
 
 This keeps the UI responsive while preserving security and leaves room to replace the package local-file storage with SQLite later. Real tool execution is the next likely extension point.

@@ -347,7 +347,7 @@ type AgentStreamEvent =
       answer: string;
       model: string;
       sessionId: string;
-      type: 'complete';
+      type: 'aborted' | 'complete';
     }
   | {
       error: string;

@@ -101,7 +101,7 @@ export type AgentStreamEvent =
       answer: string;
       model: string;
       sessionId: string;
-      type: 'complete';
+      type: 'aborted' | 'complete';
     }
   | {
       error: string;
@@ -221,6 +221,13 @@ interface AgentSessionWorkspaceRecord {
   workspace_key?: unknown;
   workspace_root_path?: unknown;
   workspace_type?: unknown;
+}
+
+class AgentStreamAbortError extends Error {
+  constructor() {
+    super('Agent response was stopped by the user.');
+    this.name = 'AgentStreamAbortError';
+  }
 }
 
 interface DirectoryTreeStats {
@@ -693,6 +700,21 @@ function buildAgentChatOptions(baseUrl: string): Record<string, unknown> | undef
       exclude: false
     }
   };
+}
+
+function throwIfAgentStreamAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new AgentStreamAbortError();
+  }
+}
+
+function abortOpenAiStream(stream: unknown): void {
+  const controller = isRecord(stream) ? stream.controller : undefined;
+  const abort = isRecord(controller) ? controller.abort : undefined;
+
+  if (typeof abort === 'function') {
+    abort.call(controller);
+  }
 }
 
 function validateRequest(request: AgentSendMessageRequest): string {
@@ -5921,8 +5943,27 @@ function getReasoningText(value: unknown): string {
   return '';
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AgentStreamAbortError());
+      return;
+    }
+
+    let timer: ReturnType<typeof setTimeout>;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(new AgentStreamAbortError());
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function parseOpenAiAgentResponse(response: unknown): {
@@ -6347,8 +6388,11 @@ async function invokeReasoningAwareAgent(
 
 async function* streamReasoningAwareAgent(
   input: ReturnType<typeof getAgentRuntimeOptions>['input'],
-  ai: ReturnType<typeof getAgentRuntimeOptions>['ai']
+  ai: ReturnType<typeof getAgentRuntimeOptions>['ai'],
+  signal?: AbortSignal
 ): AsyncGenerator<unknown, void, unknown> {
+  throwIfAgentStreamAborted(signal);
+
   if (ai.userPrompt) {
     writeAgentEntry({
       content: ai.userPrompt,
@@ -6361,11 +6405,15 @@ async function* streamReasoningAwareAgent(
 
   for (let iteration = 0; iteration < maxIterations; iteration += 1) {
     try {
+      throwIfAgentStreamAborted(signal);
       await prepareAgentMessages(input, ai);
+      throwIfAgentStreamAborted(signal);
       const response = await veloca.InvokeModel(ai);
+      throwIfAgentStreamAborted(signal);
 
       if (!response || typeof response[Symbol.asyncIterator] !== 'function') {
         const parsedResponse = parseOpenAiAgentResponse(response);
+        throwIfAgentStreamAborted(signal);
         writeAgentEntry({
           content: parsedResponse.content,
           reasoningContent: parsedResponse.reasoningContent,
@@ -6394,33 +6442,43 @@ async function* streamReasoningAwareAgent(
         id: string;
         type: string;
       }> = [];
+      const abortResponse = () => abortOpenAiStream(response);
 
-      for await (const chunk of response) {
-        yield chunk;
+      signal?.addEventListener('abort', abortResponse, { once: true });
 
-        const roleDelta = getStreamRoleDelta(chunk);
-        const contentDelta = getStreamDelta(chunk);
-        const reasoningDelta = getStreamReasoningDelta(chunk);
-        const chunkTokens = getChunkTokenConsumption(chunk);
+      try {
+        for await (const chunk of response) {
+          throwIfAgentStreamAborted(signal);
+          yield chunk;
 
-        if (roleDelta) {
-          role = roleDelta;
+          const roleDelta = getStreamRoleDelta(chunk);
+          const contentDelta = getStreamDelta(chunk);
+          const reasoningDelta = getStreamReasoningDelta(chunk);
+          const chunkTokens = getChunkTokenConsumption(chunk);
+
+          if (roleDelta) {
+            role = roleDelta;
+          }
+
+          if (contentDelta) {
+            fullContent += contentDelta;
+          }
+
+          if (reasoningDelta) {
+            reasoningContent += reasoningDelta;
+          }
+
+          if (chunkTokens > 0) {
+            tokenConsumption = chunkTokens;
+          }
+
+          accumulateStreamToolCalls(toolCalls, getStreamToolCallsDelta(chunk));
         }
-
-        if (contentDelta) {
-          fullContent += contentDelta;
-        }
-
-        if (reasoningDelta) {
-          reasoningContent += reasoningDelta;
-        }
-
-        if (chunkTokens > 0) {
-          tokenConsumption = chunkTokens;
-        }
-
-        accumulateStreamToolCalls(toolCalls, getStreamToolCallsDelta(chunk));
+      } finally {
+        signal?.removeEventListener('abort', abortResponse);
       }
+
+      throwIfAgentStreamAborted(signal);
 
       const tools = toolCalls.length > 0 ? { tool_calls: toolCalls } : null;
       writeAgentEntry({
@@ -6442,13 +6500,18 @@ async function* streamReasoningAwareAgent(
           type: 'tool_calls'
         };
 
+        throwIfAgentStreamAborted(signal);
         await writeToolResults(input.sessionId, tools.tool_calls, ai.tools_realize);
-        await sleep(1500);
+        await sleep(1500, signal);
         continue;
       }
 
       return;
     } catch (error) {
+      if (error instanceof AgentStreamAbortError || signal?.aborted) {
+        throw new AgentStreamAbortError();
+      }
+
       const errorMessage = getErrorMessage(error);
       yield {
         content: `[error:${errorMessage}]`,
@@ -6552,14 +6615,23 @@ export async function sendAgentMessage(
 export async function streamAgentMessage(
   request: AgentSendMessageRequest,
   emit: (event: AgentStreamEvent) => void,
-  hooks?: AgentRuntimeHooks
+  hooks?: AgentRuntimeHooks,
+  signal?: AbortSignal
 ): Promise<void> {
   let model = defaultAgentModel;
+  let answer = '';
+  let thinkingContent = '';
+  let thinkingComplete = false;
+  let thinkingId = createAgentToolCallId('thinking');
 
   try {
     const streamHooks: AgentRuntimeHooks = {
       ...hooks,
       onToolCallItem: (toolCall) => {
+        if (signal?.aborted) {
+          return;
+        }
+
         hooks?.onToolCallItem?.(toolCall);
         emit({
           model,
@@ -6572,16 +6644,11 @@ export async function streamAgentMessage(
     const options = getAgentRuntimeOptions(request, true, streamHooks);
     model = options.model;
 
-    const stream = streamReasoningAwareAgent(options.input, options.ai);
+    const stream = streamReasoningAwareAgent(options.input, options.ai, signal);
 
     if (!stream || typeof stream[Symbol.asyncIterator] !== 'function') {
       throw new Error('Veloca Agent did not return a stream.');
     }
-
-    let answer = '';
-    let thinkingContent = '';
-    let thinkingComplete = false;
-    let thinkingId = createAgentToolCallId('thinking');
 
     const emitThinking = (status: AgentToolCallStatus) => {
       if (!thinkingContent.trim()) {
@@ -6604,6 +6671,7 @@ export async function streamAgentMessage(
     };
 
     for await (const chunk of stream) {
+      throwIfAgentStreamAborted(signal);
       const chunkType = chunk && typeof chunk === 'object' ? (chunk as { type?: unknown }).type : null;
 
       if (chunkType === 'error') {
@@ -6659,6 +6727,25 @@ export async function streamAgentMessage(
       type: 'complete'
     });
   } catch (error) {
+    if (error instanceof AgentStreamAbortError || signal?.aborted) {
+      if (thinkingContent.trim() && !thinkingComplete) {
+        emit({
+          model,
+          sessionId: request.sessionId,
+          thinking: createAgentThinkingMessage(thinkingId, thinkingContent, 'success'),
+          type: 'thinking'
+        });
+      }
+
+      emit({
+        answer,
+        model,
+        sessionId: request.sessionId,
+        type: 'aborted'
+      });
+      return;
+    }
+
     emit({
       error: getErrorMessage(error),
       model,

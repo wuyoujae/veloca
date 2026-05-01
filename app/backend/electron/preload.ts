@@ -206,7 +206,10 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.on('agent:message-event', listener);
       ipcRenderer.send('agent:send-message-stream', requestId, payload);
 
-      return () => ipcRenderer.removeListener('agent:message-event', listener);
+      return () => {
+        ipcRenderer.removeListener('agent:message-event', listener);
+        ipcRenderer.send('agent:cancel-message-stream', requestId);
+      };
     },
     onOpenPalette: (callback: () => void) => {
       const listener = () => callback();

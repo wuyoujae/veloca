@@ -2044,6 +2044,16 @@ button {
   transform: translateY(-1px);
 }
 
+.agent-main-action-btn.stop {
+  background: var(--agent-fg);
+  color: var(--agent-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.agent-main-action-btn.stop:hover {
+  transform: translateY(-1px);
+}
+
 .agent-popover {
   position: absolute;
   top: 100%;
@@ -2203,6 +2213,11 @@ button {
 .agent-session-popover {
   left: 0;
   min-width: 160px;
+  max-width: min(280px, calc(100vw - 32px));
+  max-height: min(320px, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .agent-control-close {
