@@ -28,6 +28,7 @@ import {
 } from '../services/settings-store';
 import {
   getRemoteDatabaseConfig,
+  listAvailableRemoteRegions,
   provisionRemoteVelocaProject,
   saveRemoteDatabaseConfig,
   testRemoteDatabaseConnection,
@@ -316,6 +317,19 @@ function registerIpcHandlers(): void {
     }
 
     return provisionRemoteVelocaProject(config);
+  });
+  ipcMain.handle('remote:list-available-regions', (_event, config: RemoteDatabaseConfigInput) => {
+    if (
+      !config ||
+      typeof config.organizationSlug !== 'string' ||
+      typeof config.region !== 'string' ||
+      (config.personalAccessToken !== undefined && typeof config.personalAccessToken !== 'string') ||
+      (config.databasePassword !== undefined && typeof config.databasePassword !== 'string')
+    ) {
+      throw new Error('Invalid remote database configuration.');
+    }
+
+    return listAvailableRemoteRegions(config);
   });
   ipcMain.handle('remote:test-connection', () => {
     return testRemoteDatabaseConnection();

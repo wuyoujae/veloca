@@ -34,6 +34,16 @@ export interface RemoteProjectProvisionResult {
   reusedExistingProject: boolean;
 }
 
+export interface RemoteRegionOption {
+  code: string;
+  label: string;
+  name: string;
+  provider: string;
+  recommended: boolean;
+  status: string;
+  type: 'smartGroup' | 'specific';
+}
+
 interface RemoteDatabaseConfigRow {
   database_host: string | null;
   encrypted_db_password: string | null;
@@ -74,6 +84,25 @@ interface SupabaseApiKeyResponse {
 
 interface SupabaseProjectListResponse {
   projects?: SupabaseProjectResponse[];
+}
+
+interface SupabaseRegionResponse {
+  code?: string;
+  name?: string;
+  provider?: string;
+  status?: string;
+  type?: string;
+}
+
+interface SupabaseAvailableRegionsResponse {
+  all?: {
+    smartGroup?: SupabaseRegionResponse[];
+    specific?: SupabaseRegionResponse[];
+  };
+  recommendations?: {
+    smartGroup?: SupabaseRegionResponse;
+    specific?: SupabaseRegionResponse[];
+  };
 }
 
 export type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
@@ -428,10 +457,99 @@ async function getExistingVelocaProject(
   return projects.find((project) => project.name === remoteProjectName) ?? null;
 }
 
+function toRegionOption(region: SupabaseRegionResponse, recommendedCodes: Set<string>): RemoteRegionOption | null {
+  const code = region.code?.trim();
+  const type = region.type === 'smartGroup' ? 'smartGroup' : region.type === 'specific' ? 'specific' : null;
+
+  if (!code || !type) {
+    return null;
+  }
+
+  const name = region.name?.trim() || code;
+  const provider = region.provider?.trim() || '';
+  const status = region.status?.trim() || '';
+
+  return {
+    code,
+    label: `${name} (${code})${provider ? ` - ${provider}` : ''}${status ? ` - ${status}` : ''}`,
+    name,
+    provider,
+    recommended: recommendedCodes.has(code),
+    status,
+    type
+  };
+}
+
+async function getAvailableSupabaseRegions(
+  personalAccessToken: string,
+  organizationSlug: string
+): Promise<RemoteRegionOption[]> {
+  const payload = await fetchSupabaseManagement<SupabaseAvailableRegionsResponse>(
+    personalAccessToken,
+    `/v1/projects/available-regions?organization_slug=${encodeURIComponent(organizationSlug)}`
+  );
+  const recommendedCodes = new Set<string>();
+  const recommendedSmartGroup = payload.recommendations?.smartGroup;
+
+  if (recommendedSmartGroup?.code) {
+    recommendedCodes.add(recommendedSmartGroup.code);
+  }
+
+  for (const region of payload.recommendations?.specific ?? []) {
+    if (region.code) {
+      recommendedCodes.add(region.code);
+    }
+  }
+
+  const regions = [
+    ...(payload.all?.smartGroup ?? []),
+    ...(payload.all?.specific ?? [])
+  ];
+  const options = new Map<string, RemoteRegionOption>();
+
+  for (const region of regions) {
+    const option = toRegionOption(region, recommendedCodes);
+
+    if (option) {
+      options.set(option.code, option);
+    }
+  }
+
+  return [...options.values()].sort((left, right) => {
+    if (left.recommended !== right.recommended) {
+      return left.recommended ? -1 : 1;
+    }
+
+    if (left.type !== right.type) {
+      return left.type === 'smartGroup' ? -1 : 1;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+async function getRequiredRegionSelection(
+  personalAccessToken: string,
+  organizationSlug: string,
+  regionCode: string
+): Promise<Pick<RemoteRegionOption, 'code' | 'type'>> {
+  const regions = await getAvailableSupabaseRegions(personalAccessToken, organizationSlug);
+  const selectedRegion = regions.find((region) => region.code === regionCode);
+
+  if (!selectedRegion) {
+    throw new Error('Selected Supabase region is not available for this organization.');
+  }
+
+  return {
+    code: selectedRegion.code,
+    type: selectedRegion.type
+  };
+}
+
 async function createVelocaProject(
   personalAccessToken: string,
   organizationSlug: string,
-  region: string,
+  regionSelection: Pick<RemoteRegionOption, 'code' | 'type'>,
   databasePassword: string
 ): Promise<SupabaseProjectResponse> {
   return fetchSupabaseManagement<SupabaseProjectResponse>(personalAccessToken, '/v1/projects', {
@@ -439,7 +557,10 @@ async function createVelocaProject(
       db_pass: databasePassword,
       name: remoteProjectName,
       organization_slug: organizationSlug,
-      region
+      region_selection: {
+        code: regionSelection.code,
+        type: regionSelection.type
+      }
     }),
     method: 'POST'
   });
@@ -569,6 +690,19 @@ export function saveRemoteDatabaseConfig(input: RemoteDatabaseConfigInput): Remo
   return getRemoteDatabaseConfig();
 }
 
+export async function listAvailableRemoteRegions(input: RemoteDatabaseConfigInput): Promise<RemoteRegionOption[]> {
+  const normalizedInput = normalizeRemoteConfigInput(input);
+  const existingRow = getRemoteConfigRow();
+  const personalAccessToken = normalizedInput.personalAccessToken || decryptCredential(existingRow?.encrypted_pat ?? null);
+
+  if (!personalAccessToken) {
+    throw new Error('Supabase personal access token is required before loading regions.');
+  }
+
+  await validateSupabaseOrganization(personalAccessToken, normalizedInput.organizationSlug);
+  return getAvailableSupabaseRegions(personalAccessToken, normalizedInput.organizationSlug);
+}
+
 export async function provisionRemoteVelocaProject(
   input: RemoteDatabaseConfigInput
 ): Promise<RemoteProjectProvisionResult> {
@@ -598,14 +732,21 @@ export async function provisionRemoteVelocaProject(
   try {
     await validateSupabaseOrganization(personalAccessToken, normalizedInput.organizationSlug);
     const existingProject = await getExistingVelocaProject(personalAccessToken, normalizedInput.organizationSlug);
-    const project = existingProject
-      ? existingProject
-      : await createVelocaProject(
-          personalAccessToken,
-          normalizedInput.organizationSlug,
-          normalizedInput.region,
-          databasePassword
-        );
+    let project = existingProject;
+
+    if (!project) {
+      const regionSelection = await getRequiredRegionSelection(
+        personalAccessToken,
+        normalizedInput.organizationSlug,
+        normalizedInput.region
+      );
+      project = await createVelocaProject(
+        personalAccessToken,
+        normalizedInput.organizationSlug,
+        regionSelection,
+        databasePassword
+      );
+    }
 
     updateRemoteConfigStatus('waiting');
 

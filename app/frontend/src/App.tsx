@@ -164,6 +164,16 @@ interface RemoteProjectProvisionResult {
   reusedExistingProject: boolean;
 }
 
+interface RemoteRegionOption {
+  code: string;
+  label: string;
+  name: string;
+  provider: string;
+  recommended: boolean;
+  status: string;
+  type: 'smartGroup' | 'specific';
+}
+
 interface WorkspaceTreeNode {
   id: string;
   name: string;
@@ -1209,6 +1219,9 @@ export function App(): JSX.Element {
     personalAccessToken: '',
     region: 'us-east-1'
   });
+  const [remoteRegions, setRemoteRegions] = useState<RemoteRegionOption[]>([]);
+  const [remoteRegionsLoading, setRemoteRegionsLoading] = useState(false);
+  const [remoteRegionsError, setRemoteRegionsError] = useState('');
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>(emptyGitHubStatus);
@@ -1651,6 +1664,28 @@ export function App(): JSX.Element {
   }, [sidebarTab]);
 
   useEffect(() => {
+    if (settingsPanel !== 'remote' || !settingsOpen) {
+      return;
+    }
+
+    if (!remoteInput.organizationSlug.trim() || (!remoteInput.personalAccessToken?.trim() && !remoteConfig.patSaved)) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void loadRemoteRegions();
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    remoteConfig.patSaved,
+    remoteInput.organizationSlug,
+    remoteInput.personalAccessToken,
+    settingsOpen,
+    settingsPanel
+  ]);
+
+  useEffect(() => {
     if (!agentPaletteOpen) {
       return;
     }
@@ -1886,6 +1921,48 @@ export function App(): JSX.Element {
       selectionStart
     });
     updateRemoteInputField(field, nextValue, 'paste');
+  };
+
+  const loadRemoteRegions = async () => {
+    if (!window.veloca?.remote || remoteRegionsLoading) {
+      return;
+    }
+
+    if (!remoteInput.organizationSlug.trim() || (!remoteInput.personalAccessToken?.trim() && !remoteConfig.patSaved)) {
+      setRemoteRegionsError('Enter a Supabase token and organization slug before loading regions.');
+      return;
+    }
+
+    setRemoteRegionsLoading(true);
+    setRemoteRegionsError('');
+
+    try {
+      const regions = await window.veloca.remote.listAvailableRegions(remoteInput);
+      setRemoteRegions(regions);
+      setRemoteInput((current) => {
+        if (regions.some((region) => region.code === current.region)) {
+          return current;
+        }
+
+        return {
+          ...current,
+          region: regions[0]?.code ?? current.region
+        };
+      });
+      logRemoteSettingsDebug('regions loaded', {
+        count: regions.length
+      });
+    } catch (error) {
+      const description = getErrorDescription(error, 'Veloca could not load Supabase regions.');
+      setRemoteRegionsError(description);
+      showToast({
+        type: 'info',
+        title: 'Region Loading Failed',
+        description
+      });
+    } finally {
+      setRemoteRegionsLoading(false);
+    }
   };
 
   const saveRemoteConfig = async () => {
@@ -5175,18 +5252,41 @@ export function App(): JSX.Element {
                       <div className="setting-row compact">
                         <div className="setting-info">
                           <span className="setting-label">Region</span>
-                          <span className="setting-desc">Supabase region code used when Veloca creates the remote project.</span>
+                          <span className="setting-desc">Loaded from Supabase for the selected organization.</span>
                         </div>
-                        <input
-                          className="settings-text-input"
-                          type="text"
-                          placeholder="us-east-1"
-                          value={remoteInput.region}
-                          onChange={(event) => updateRemoteInputField('region', event.currentTarget.value, 'change')}
-                          onPaste={(event) => pasteRemoteInputField('region', event)}
-                          spellCheck={false}
-                        />
+                        <div className="remote-region-control">
+                          <select
+                            className="shadcn-select remote-region-select"
+                            value={remoteInput.region}
+                            onChange={(event) => updateRemoteInputField('region', event.currentTarget.value, 'change')}
+                            disabled={
+                              remoteRegionsLoading ||
+                              getRemoteRegionSelectOptions(remoteRegions, remoteInput.region).length === 0
+                            }
+                          >
+                            {getRemoteRegionSelectOptions(remoteRegions, remoteInput.region).map((region) => (
+                              <option key={region.code} value={region.code}>
+                                {region.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="secondary-action compact"
+                            type="button"
+                            disabled={remoteRegionsLoading}
+                            onClick={() => void loadRemoteRegions()}
+                          >
+                            <RefreshCw className={remoteRegionsLoading ? 'spinning' : ''} size={14} />
+                            Load Regions
+                          </button>
+                        </div>
                       </div>
+
+                      {remoteRegionsError && (
+                        <div className="settings-warning">
+                          {remoteRegionsError}
+                        </div>
+                      )}
 
                       <div className="setting-row compact">
                         <div className="setting-info">
@@ -8015,6 +8115,28 @@ function getRemoteCredentialSummary(config: RemoteDatabaseConfigView): string {
   ].filter(Boolean);
 
   return savedCredentials.length ? savedCredentials.join(', ') : 'Not saved';
+}
+
+function getRemoteRegionSelectOptions(
+  regions: RemoteRegionOption[],
+  selectedRegionCode: string
+): RemoteRegionOption[] {
+  if (!selectedRegionCode || regions.some((region) => region.code === selectedRegionCode)) {
+    return regions;
+  }
+
+  return [
+    {
+      code: selectedRegionCode,
+      label: `${selectedRegionCode} (saved)`,
+      name: selectedRegionCode,
+      provider: '',
+      recommended: false,
+      status: '',
+      type: 'specific'
+    },
+    ...regions
+  ];
 }
 
 function canSubmitRemoteConfig(input: RemoteDatabaseConfigInput, config: RemoteDatabaseConfigView): boolean {

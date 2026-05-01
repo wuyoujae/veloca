@@ -5148,6 +5148,25 @@ button {
   color: var(--foreground);
 }
 
+.remote-region-control {
+  display: flex;
+  width: 280px;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-region-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.secondary-action.compact {
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .theme-toggle {
   display: inline-flex;
   gap: 4px;

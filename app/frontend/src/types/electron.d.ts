@@ -190,6 +190,16 @@ interface RemoteProjectProvisionResult {
   reusedExistingProject: boolean;
 }
 
+interface RemoteRegionOption {
+  code: string;
+  label: string;
+  name: string;
+  provider: string;
+  recommended: boolean;
+  status: string;
+  type: 'smartGroup' | 'specific';
+}
+
 interface AgentAttachmentSummary {
   mimeType: string;
   name: string;
@@ -292,6 +302,7 @@ declare global {
       };
       remote: {
         createVelocaProject: (config: RemoteDatabaseConfigInput) => Promise<RemoteProjectProvisionResult>;
+        listAvailableRegions: (config: RemoteDatabaseConfigInput) => Promise<RemoteRegionOption[]>;
         testConnection: () => Promise<RemoteDatabaseConfigView>;
       };
       workspace: {

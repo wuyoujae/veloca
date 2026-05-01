@@ -3,7 +3,8 @@ import type { AiModelConfig, ThemeMode } from '../services/settings-store';
 import type {
   RemoteDatabaseConfigInput,
   RemoteDatabaseConfigView,
-  RemoteProjectProvisionResult
+  RemoteProjectProvisionResult,
+  RemoteRegionOption
 } from '../services/remote-database-service';
 import type { GitHubAuthStatus, GitHubDeviceBinding } from '../services/github-auth-service';
 import type {
@@ -53,6 +54,8 @@ contextBridge.exposeInMainWorld('veloca', {
   remote: {
     createVelocaProject: (config: RemoteDatabaseConfigInput) =>
       ipcRenderer.invoke('remote:create-veloca-project', config) as Promise<RemoteProjectProvisionResult>,
+    listAvailableRegions: (config: RemoteDatabaseConfigInput) =>
+      ipcRenderer.invoke('remote:list-available-regions', config) as Promise<RemoteRegionOption[]>,
     testConnection: () => ipcRenderer.invoke('remote:test-connection') as Promise<RemoteDatabaseConfigView>
   },
   workspace: {
