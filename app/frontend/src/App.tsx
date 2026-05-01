@@ -103,9 +103,9 @@ import {
   type AgentRuntimeContext,
   type AgentWorkspaceType
 } from './agent-palette';
+import { createTranslator, resolveLanguage, type AppLanguage, type Translator } from './i18n';
 
 type ThemeMode = 'dark' | 'light';
-type AppLanguage = 'system' | 'en' | 'zh-CN';
 type InterfaceDensity = 'comfortable' | 'compact' | 'spacious';
 type MotionPreference = 'system' | 'full' | 'reduced';
 type SidebarTab = 'files' | 'outline' | 'git';
@@ -122,21 +122,9 @@ const defaultAppearanceSettings: AppearanceSettings = {
   language: 'system',
   motion: 'system'
 };
-const appLanguageOptions: Array<{ label: string; value: AppLanguage }> = [
-  { label: 'System Default', value: 'system' },
-  { label: 'English', value: 'en' },
-  { label: '简体中文', value: 'zh-CN' }
-];
-const interfaceDensityOptions: Array<{ label: string; value: InterfaceDensity }> = [
-  { label: 'Comfortable', value: 'comfortable' },
-  { label: 'Compact', value: 'compact' },
-  { label: 'Spacious', value: 'spacious' }
-];
-const motionPreferenceOptions: Array<{ label: string; value: MotionPreference }> = [
-  { label: 'System Default', value: 'system' },
-  { label: 'Full Motion', value: 'full' },
-  { label: 'Reduced Motion', value: 'reduced' }
-];
+const appLanguageOptions: AppLanguage[] = ['system', 'en', 'zh-CN'];
+const interfaceDensityOptions: InterfaceDensity[] = ['comfortable', 'compact', 'spacious'];
+const motionPreferenceOptions: MotionPreference[] = ['system', 'full', 'reduced'];
 const aiInsertLogPrefix = '[Veloca AI Insert]';
 const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
 const remoteCredentialMask = '********';
@@ -230,22 +218,10 @@ function normalizeAppearanceSettings(settings: Partial<AppearanceSettings>): App
   };
 }
 
-function getResolvedAppLanguage(language: AppLanguage): string {
-  if (language !== 'system') {
-    return language;
-  }
-
-  if (typeof navigator === 'undefined' || !navigator.language) {
-    return 'en';
-  }
-
-  return navigator.language.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
-}
-
 function applyAppearanceSettings(settings: AppearanceSettings): void {
   const normalizedSettings = normalizeAppearanceSettings(settings);
 
-  document.documentElement.lang = getResolvedAppLanguage(normalizedSettings.language);
+  document.documentElement.lang = resolveLanguage(normalizedSettings.language);
   document.documentElement.dataset.language = normalizedSettings.language;
   document.documentElement.dataset.density = normalizedSettings.density;
   document.documentElement.dataset.motion = normalizedSettings.motion;
@@ -1639,6 +1615,41 @@ export function App(): JSX.Element {
   const editorFontSizeSaveTimerRef = useRef<number | null>(null);
   const pendingEditorFontSizeRef = useRef<number | null>(null);
   const updateReadyToastKeyRef = useRef<string>('');
+  const resolvedLanguage = useMemo(() => resolveLanguage(appearanceSettings.language), [appearanceSettings.language]);
+  const t = useMemo(() => createTranslator(resolvedLanguage), [resolvedLanguage]);
+  const getAppLanguageLabel = (language: AppLanguage) => {
+    if (language === 'en') {
+      return t('settings.options.english');
+    }
+
+    if (language === 'zh-CN') {
+      return t('settings.options.zhCn');
+    }
+
+    return t('settings.options.systemDefault');
+  };
+  const getInterfaceDensityLabel = (density: InterfaceDensity) => {
+    if (density === 'compact') {
+      return t('settings.options.compact');
+    }
+
+    if (density === 'spacious') {
+      return t('settings.options.spacious');
+    }
+
+    return t('settings.options.comfortable');
+  };
+  const getMotionPreferenceLabel = (motion: MotionPreference) => {
+    if (motion === 'full') {
+      return t('settings.options.fullMotion');
+    }
+
+    if (motion === 'reduced') {
+      return t('settings.options.reducedMotion');
+    }
+
+    return t('settings.options.systemDefault');
+  };
 
   const activeTab = useMemo(
     () => openTabs.find((tab) => tab.file.path === activeTabPath) ?? null,
@@ -2276,8 +2287,10 @@ export function App(): JSX.Element {
     await window.veloca?.settings.setTheme(nextTheme);
     showToast({
       type: 'success',
-      title: 'Appearance Updated',
-      description: `${nextTheme === 'dark' ? 'Dark' : 'Light'} mode is now active.`
+      title: t('toast.appearance.updatedTitle'),
+      description: t('toast.appearance.themeDescription', {
+        theme: nextTheme === 'dark' ? t('common.dark') : t('common.light')
+      })
     });
   };
 
@@ -2296,8 +2309,8 @@ export function App(): JSX.Element {
     await window.veloca?.settings.setAppearanceSettings(nextSettings);
     showToast({
       type: 'success',
-      title: 'Appearance Updated',
-      description: 'Display preferences have been saved.'
+      title: t('toast.appearance.updatedTitle'),
+      description: t('toast.appearance.savedDescription')
     });
   };
 
@@ -2307,8 +2320,10 @@ export function App(): JSX.Element {
     await window.veloca?.settings.setAutoSave(enabled);
     showToast({
       type: 'success',
-      title: 'Editor Updated',
-      description: `Auto Save is now ${enabled ? 'enabled' : 'disabled'}.`
+      title: t('toast.editor.updatedTitle'),
+      description: t('toast.editor.autoSaveDescription', {
+        state: enabled ? t('value.enabled') : t('value.disabled')
+      })
     });
   };
 
@@ -2348,8 +2363,8 @@ export function App(): JSX.Element {
     await window.veloca?.settings.setShortcutSettings(settings);
     showToast({
       type: 'success',
-      title: 'Shortcut Updated',
-      description: `Open AI Panel is now ${settings.openAiPanel}.`
+      title: t('toast.shortcut.updatedTitle'),
+      description: t('toast.shortcut.description', { shortcut: settings.openAiPanel })
     });
   };
 
@@ -2392,8 +2407,8 @@ export function App(): JSX.Element {
     await window.veloca?.settings.setAiConfig(config);
     showToast({
       type: 'success',
-      title: 'AI Model Updated',
-      description: 'AI model configuration has been saved. Restart any active agent session to apply changes.'
+      title: t('toast.ai.updatedTitle'),
+      description: t('toast.ai.updatedDescription')
     });
   };
 
@@ -5071,7 +5086,7 @@ export function App(): JSX.Element {
     <div className="app-shell">
       <header
         className={usesCustomWindowControls ? 'titlebar custom-titlebar' : 'titlebar'}
-        aria-label="Window title bar"
+        aria-label={t('app.window.titlebar')}
       >
         {usesCustomWindowControls && (
           <>
@@ -5084,12 +5099,12 @@ export function App(): JSX.Element {
                 </>
               )}
             </div>
-            <div className="window-controls" aria-label="Window controls">
+            <div className="window-controls" aria-label={t('app.window.controls')}>
               <button
                 className="window-control-btn"
                 type="button"
-                aria-label="Minimize window"
-                title="Minimize"
+                aria-label={t('app.window.minimizeWindow')}
+                title={t('app.window.minimize')}
                 onClick={() => void window.veloca?.windowControls?.minimize()}
               >
                 <Minus size={15} />
@@ -5097,8 +5112,8 @@ export function App(): JSX.Element {
               <button
                 className="window-control-btn"
                 type="button"
-                aria-label={isWindowMaximized ? 'Restore window' : 'Maximize window'}
-                title={isWindowMaximized ? 'Restore' : 'Maximize'}
+                aria-label={isWindowMaximized ? t('app.window.restoreWindow') : t('app.window.maximizeWindow')}
+                title={isWindowMaximized ? t('app.window.restore') : t('app.window.maximize')}
                 onClick={() => {
                   const toggleResult = window.veloca?.windowControls?.toggleMaximize();
                   void toggleResult?.then(setIsWindowMaximized);
@@ -5109,8 +5124,8 @@ export function App(): JSX.Element {
               <button
                 className="window-control-btn close"
                 type="button"
-                aria-label="Close window"
-                title="Close"
+                aria-label={t('app.window.closeWindow')}
+                title={t('app.window.close')}
                 onClick={() => void window.veloca?.windowControls?.close()}
               >
                 <X size={15} />
@@ -5133,26 +5148,26 @@ export function App(): JSX.Element {
                 <button
                   className={visibleSidebarTab === 'files' ? 'tab-trigger active' : 'tab-trigger'}
                   type="button"
-                  title="Files"
+                  title={t('app.sidebar.files')}
                   onClick={() => setSidebarTab('files')}
                 >
                   <FileText size={14} />
-                  <span className="tab-trigger-label">Files</span>
+                  <span className="tab-trigger-label">{t('app.sidebar.files')}</span>
                 </button>
                 <button
                   className={visibleSidebarTab === 'outline' ? 'tab-trigger active' : 'tab-trigger'}
                   type="button"
-                  title="Outline"
+                  title={t('app.sidebar.outline')}
                   onClick={() => setSidebarTab('outline')}
                 >
                   <ListTree size={14} />
-                  <span className="tab-trigger-label">Outline</span>
+                  <span className="tab-trigger-label">{t('app.sidebar.outline')}</span>
                 </button>
                 {versionManagerSidebarTabVisible && (
                   <button
                     className={visibleSidebarTab === 'git' ? 'tab-trigger active' : 'tab-trigger'}
                     type="button"
-                    title="Git version management"
+                    title={t('app.sidebar.git')}
                     onClick={() => setSidebarTab('git')}
                   >
                     <GitBranch size={14} />
@@ -5164,7 +5179,7 @@ export function App(): JSX.Element {
               <button
                 className="sidebar-toggle-btn"
                 type="button"
-                aria-label="Collapse sidebar"
+                aria-label={t('app.sidebar.collapse')}
                 onClick={() => setIsSidebarCollapsed(true)}
               >
                 <PanelLeftClose size={15} />
@@ -5213,14 +5228,14 @@ export function App(): JSX.Element {
           <div className="sidebar-footer">
             <button className="nav-btn" type="button" onClick={() => setSettingsOpen(true)}>
               <Settings size={16} />
-              <span>Settings</span>
+              <span>{t('app.settings')}</span>
             </button>
           </div>
           <div
             className="sidebar-resize-handle"
             role="separator"
             tabIndex={0}
-            aria-label="Resize sidebar"
+            aria-label={t('app.sidebar.resize')}
             aria-orientation="vertical"
             aria-valuemax={sidebarMaximumWidth}
             aria-valuemin={sidebarMinimumWidth}
@@ -5232,7 +5247,7 @@ export function App(): JSX.Element {
         </aside>
 
         {isSidebarCollapsed && (
-          <div className="sidebar-restore-rail" aria-label="Collapsed sidebar">
+          <div className="sidebar-restore-rail" aria-label={t('app.sidebar.collapsed')}>
             <div className="tabs-list sidebar-restore-tabs">
               <button
                 className="tab-trigger sidebar-toggle-trigger active"
@@ -5706,53 +5721,53 @@ export function App(): JSX.Element {
         <div className="settings-overlay open" onMouseDown={() => setSettingsOpen(false)}>
           <section
             className="settings-window"
-            aria-label="Settings"
+            aria-label={t('app.settings')}
             onMouseDown={(event) => event.stopPropagation()}
             onPaste={(event) => event.stopPropagation()}
           >
             <aside className="settings-sidebar">
-              <h2 className="settings-title">Settings</h2>
+              <h2 className="settings-title">{t('app.settings')}</h2>
               <button
                 className={settingsPanel === 'editor' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('editor')}
               >
-                Editor
+                {t('nav.editor')}
               </button>
               <button
                 className={settingsPanel === 'appearance' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('appearance')}
               >
-                Appearance
+                {t('nav.appearance')}
               </button>
               <button
                 className={settingsPanel === 'typography' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('typography')}
               >
-                Typography
+                {t('nav.typography')}
               </button>
               <button
                 className={settingsPanel === 'shortcuts' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('shortcuts')}
               >
-                Shortcuts
+                {t('nav.shortcuts')}
               </button>
               <button
                 className={settingsPanel === 'aiModel' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('aiModel')}
               >
-                AI Model
+                {t('nav.aiModel')}
               </button>
               <button
                 className={settingsPanel === 'remote' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('remote')}
               >
-                Remote
+                {t('nav.remote')}
               </button>
               <span className="settings-spacer" />
               <button
@@ -5760,10 +5775,10 @@ export function App(): JSX.Element {
                 type="button"
                 onClick={() => setSettingsPanel('about')}
               >
-                <span>About Veloca</span>
+                <span>{t('nav.about')}</span>
                 {updateStatus && ['available', 'downloading', 'downloaded'].includes(updateStatus.status) && (
                   <span className="settings-nav-badge">
-                    {updateStatus.status === 'downloaded' ? 'Ready' : 'New'}
+                    {updateStatus.status === 'downloaded' ? t('common.ready') : t('common.new')}
                   </span>
                 )}
               </button>
@@ -5773,7 +5788,7 @@ export function App(): JSX.Element {
               <button
                 className="settings-close-btn"
                 type="button"
-                aria-label="Close settings"
+                aria-label={t('common.closeSettings')}
                 onClick={() => setSettingsOpen(false)}
               >
                 <X size={20} />
@@ -5782,32 +5797,32 @@ export function App(): JSX.Element {
               <div className="settings-scroll-area">
                 {settingsPanel === 'editor' && (
                   <>
-                    <h3 className="settings-section-title">Editor Settings</h3>
+                    <h3 className="settings-section-title">{t('settings.editor.title')}</h3>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Font Family</span>
-                        <span className="setting-desc">Controls the font family of the Markdown editor.</span>
+                        <span className="setting-label">{t('settings.editor.fontFamily')}</span>
+                        <span className="setting-desc">{t('settings.editor.fontFamilyDesc')}</span>
                       </div>
                       <select className="shadcn-select" defaultValue="inter">
                         <option value="inter">Inter</option>
-                        <option value="system">System</option>
+                        <option value="system">{t('common.system')}</option>
                         <option value="mono">JetBrains Mono</option>
                       </select>
                     </div>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Auto Save</span>
-                        <span className="setting-desc">Save markdown changes after a short pause while writing.</span>
+                        <span className="setting-label">{t('settings.editor.autoSave')}</span>
+                        <span className="setting-desc">{t('settings.editor.autoSaveDesc')}</span>
                       </div>
                       <Switch checked={autoSave} onChange={updateAutoSave} />
                     </div>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Line Numbers</span>
-                        <span className="setting-desc">Render line numbers alongside the markdown source code.</span>
+                        <span className="setting-label">{t('settings.editor.lineNumbers')}</span>
+                        <span className="setting-desc">{t('settings.editor.lineNumbersDesc')}</span>
                       </div>
                       <Switch checked={lineNumbers} onChange={setLineNumbers} />
                     </div>
@@ -5816,14 +5831,12 @@ export function App(): JSX.Element {
                 )}
                 {settingsPanel === 'appearance' && (
                   <>
-                    <h3 className="settings-section-title">Appearance</h3>
+                    <h3 className="settings-section-title">{t('nav.appearance')}</h3>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Language</span>
-                        <span className="setting-desc">
-                          Choose the preferred application language. Translation wiring will use this setting.
-                        </span>
+                        <span className="setting-label">{t('settings.appearance.language')}</span>
+                        <span className="setting-desc">{t('settings.appearance.languageDesc')}</span>
                       </div>
                       <select
                         className="shadcn-select appearance-select"
@@ -5831,11 +5844,11 @@ export function App(): JSX.Element {
                         onChange={(event) =>
                           void updateAppearanceSettings({ language: event.currentTarget.value as AppLanguage })
                         }
-                        aria-label="Application language"
+                        aria-label={t('settings.appearance.language')}
                       >
                         {appLanguageOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                          <option key={option} value={option}>
+                            {getAppLanguageLabel(option)}
                           </option>
                         ))}
                       </select>
@@ -5843,17 +5856,17 @@ export function App(): JSX.Element {
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Theme</span>
-                        <span className="setting-desc">Switch the entire application between dark and light mode.</span>
+                        <span className="setting-label">{t('settings.appearance.theme')}</span>
+                        <span className="setting-desc">{t('settings.appearance.themeDesc')}</span>
                       </div>
-                      <div className="theme-toggle" role="group" aria-label="Theme">
+                      <div className="theme-toggle" role="group" aria-label={t('settings.appearance.theme')}>
                         <button
                           className={theme === 'dark' ? 'theme-option active' : 'theme-option'}
                           type="button"
                           onClick={() => void updateTheme('dark')}
                         >
                           <Moon size={15} />
-                          Dark
+                          {t('common.dark')}
                         </button>
                         <button
                           className={theme === 'light' ? 'theme-option active' : 'theme-option'}
@@ -5861,15 +5874,15 @@ export function App(): JSX.Element {
                           onClick={() => void updateTheme('light')}
                         >
                           <Sun size={15} />
-                          Light
+                          {t('common.light')}
                         </button>
                       </div>
                     </div>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Interface Density</span>
-                        <span className="setting-desc">Tune the spacing and visual weight of the main application UI.</span>
+                        <span className="setting-label">{t('settings.appearance.density')}</span>
+                        <span className="setting-desc">{t('settings.appearance.densityDesc')}</span>
                       </div>
                       <select
                         className="shadcn-select appearance-select"
@@ -5877,11 +5890,11 @@ export function App(): JSX.Element {
                         onChange={(event) =>
                           void updateAppearanceSettings({ density: event.currentTarget.value as InterfaceDensity })
                         }
-                        aria-label="Interface density"
+                        aria-label={t('settings.appearance.density')}
                       >
                         {interfaceDensityOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                          <option key={option} value={option}>
+                            {getInterfaceDensityLabel(option)}
                           </option>
                         ))}
                       </select>
@@ -5889,8 +5902,8 @@ export function App(): JSX.Element {
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Motion</span>
-                        <span className="setting-desc">Control interface transitions and animations across the app.</span>
+                        <span className="setting-label">{t('settings.appearance.motion')}</span>
+                        <span className="setting-desc">{t('settings.appearance.motionDesc')}</span>
                       </div>
                       <select
                         className="shadcn-select appearance-select"
@@ -5898,38 +5911,35 @@ export function App(): JSX.Element {
                         onChange={(event) =>
                           void updateAppearanceSettings({ motion: event.currentTarget.value as MotionPreference })
                         }
-                        aria-label="Motion preference"
+                        aria-label={t('settings.appearance.motion')}
                       >
                         {motionPreferenceOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                          <option key={option} value={option}>
+                            {getMotionPreferenceLabel(option)}
                           </option>
                         ))}
                       </select>
                     </div>
 
                     <p className="settings-panel-hint">
-                      Language is stored as a product preference first; full UI translation can connect to this value
-                      when localization is introduced.
+                      {t('settings.appearance.languageHint')}
                     </p>
                   </>
                 )}
                 {settingsPanel === 'typography' && (
                   <>
-                    <h3 className="settings-section-title">Typography</h3>
+                    <h3 className="settings-section-title">{t('nav.typography')}</h3>
 
                     <div className="setting-row typography-setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Editor Font Size</span>
-                        <span className="setting-desc">
-                          Adjust the Markdown editor reading size. Rendered and source views update immediately.
-                        </span>
+                        <span className="setting-label">{t('settings.typography.editorFontSize')}</span>
+                        <span className="setting-desc">{t('settings.typography.editorFontSizeDesc')}</span>
                       </div>
                       <div className="typography-control">
                         <span
                           className="typography-preview-glyph"
                           style={{ fontSize: `${editorFontSize}px` }}
-                          aria-label={`Preview at ${editorFontSize} pixels`}
+                          aria-label={t('settings.typography.preview', { size: editorFontSize })}
                         >
                           字
                         </span>
@@ -5946,7 +5956,7 @@ export function App(): JSX.Element {
                             max={maximumEditorFontSize}
                             step={1}
                             value={editorFontSize}
-                            aria-label="Editor font size"
+                            aria-label={t('settings.typography.sizeSlider')}
                             onChange={(event) => updateEditorFontSize(Number(event.currentTarget.value))}
                           />
                           <div className="typography-size-actions">
@@ -5957,11 +5967,11 @@ export function App(): JSX.Element {
                               max={maximumEditorFontSize}
                               step={1}
                               value={editorFontSize}
-                              aria-label="Editor font size in pixels"
+                              aria-label={t('settings.typography.sizeInput')}
                               onChange={(event) => updateEditorFontSize(Number(event.currentTarget.value))}
                             />
                             <button className="secondary-action" type="button" onClick={resetEditorFontSize}>
-                              Reset
+                              {t('common.reset')}
                             </button>
                           </div>
                         </div>
@@ -5969,21 +5979,18 @@ export function App(): JSX.Element {
                     </div>
 
                     <p className="settings-panel-hint">
-                      The default editor font size is <code>{defaultEditorFontSize}px</code>. Headings, lists, code,
-                      tables and the source editor scale from this base value.
+                      {t('settings.typography.fontSizeHint', { size: defaultEditorFontSize })}
                     </p>
                   </>
                 )}
                 {settingsPanel === 'shortcuts' && (
                   <>
-                    <h3 className="settings-section-title">Shortcuts</h3>
+                    <h3 className="settings-section-title">{t('nav.shortcuts')}</h3>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Open AI Panel</span>
-                        <span className="setting-desc">
-                          Application-only shortcut for opening the AI panel while editing.
-                        </span>
+                        <span className="setting-label">{t('settings.shortcuts.openAiPanel')}</span>
+                        <span className="setting-desc">{t('settings.shortcuts.openAiPanelDesc')}</span>
                       </div>
                       <div className="shortcut-control">
                         <button
@@ -5994,14 +6001,14 @@ export function App(): JSX.Element {
                               : 'shortcut-record-button'
                           }
                           type="button"
-                          aria-label="Record Open AI Panel shortcut"
+                          aria-label={t('settings.shortcuts.recordOpenAiPanel')}
                           onClick={() => setRecordingShortcutAction('openAiPanel')}
                           onKeyDown={
                             recordingShortcutAction === 'openAiPanel' ? recordOpenAiPanelShortcut : undefined
                           }
                         >
                           {recordingShortcutAction === 'openAiPanel' ? (
-                            <span>Press keys...</span>
+                            <span>{t('settings.shortcuts.pressKeys')}</span>
                           ) : (
                             <kbd>{shortcutSettings.openAiPanel}</kbd>
                           )}
@@ -6009,8 +6016,8 @@ export function App(): JSX.Element {
                         <button
                           className="shortcut-reset-button"
                           type="button"
-                          title="Reset to platform default"
-                          aria-label="Reset Open AI Panel shortcut"
+                          title={t('settings.shortcuts.resetDefault')}
+                          aria-label={t('settings.shortcuts.resetOpenAiPanel')}
                           onClick={resetOpenAiPanelShortcut}
                         >
                           <RefreshCw size={14} />
@@ -6019,19 +6026,18 @@ export function App(): JSX.Element {
                     </div>
 
                     <p className="settings-panel-hint">
-                      Default shortcut: <code>{getDefaultOpenAiPanelShortcut(appPlatform)}</code>. The shortcut is
-                      handled inside Veloca and is not registered as a system-wide hotkey.
+                      {t('settings.shortcuts.defaultHint', { shortcut: getDefaultOpenAiPanelShortcut(appPlatform) })}
                     </p>
                   </>
                 )}
                 {settingsPanel === 'aiModel' && (
                   <>
-                    <h3 className="settings-section-title">AI Model</h3>
+                    <h3 className="settings-section-title">{t('nav.aiModel')}</h3>
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">API Base URL</span>
-                        <span className="setting-desc">OpenAI-compatible API endpoint. Leave empty to use the .env value or built-in default.</span>
+                        <span className="setting-label">{t('settings.ai.apiBaseUrl')}</span>
+                        <span className="setting-desc">{t('settings.ai.apiBaseDesc')}</span>
                       </div>
                       <input
                         className="settings-text-input"
@@ -6045,8 +6051,8 @@ export function App(): JSX.Element {
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">API Key</span>
-                        <span className="setting-desc">Your API key. Stored locally and never sent to remote servers.</span>
+                        <span className="setting-label">{t('settings.ai.apiKey')}</span>
+                        <span className="setting-desc">{t('settings.ai.apiKeyDesc')}</span>
                       </div>
                       <input
                         className="settings-text-input"
@@ -6060,8 +6066,8 @@ export function App(): JSX.Element {
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Model</span>
-                        <span className="setting-desc">Model identifier string (e.g., gpt-4o, claude-sonnet-4-20250514).</span>
+                        <span className="setting-label">{t('settings.ai.model')}</span>
+                        <span className="setting-desc">{t('settings.ai.modelDesc')}</span>
                       </div>
                       <input
                         className="settings-text-input"
@@ -6075,8 +6081,8 @@ export function App(): JSX.Element {
 
                     <div className="setting-row">
                       <div className="setting-info">
-                        <span className="setting-label">Context Window</span>
-                        <span className="setting-desc">Maximum token limit for the model context. Recommended: 128000.</span>
+                        <span className="setting-label">{t('settings.ai.contextWindow')}</span>
+                        <span className="setting-desc">{t('settings.ai.contextWindowDesc')}</span>
                       </div>
                       <input
                         className="settings-text-input short"
@@ -6116,21 +6122,18 @@ export function App(): JSX.Element {
                         ) : (
                           <Save size={15} />
                         )}
-                        Save AI Settings
+                        {t('settings.ai.save')}
                       </button>
                     </div>
 
                     <p className="settings-panel-hint">
-                      These settings override the environment variables (<code>VELOCA_AGENT_BASE_URL</code>,{' '}
-                      <code>VELOCA_AGENT_API_KEY</code>, <code>VELOCA_AGENT_MODEL</code>,{' '}
-                      <code>VELOCA_AGENT_CONTEXT_WINDOW</code>) from your <code>.env</code> file. Leave fields empty
-                      to fall back to <code>.env</code> or built-in defaults.
+                      {t('settings.ai.hint')}
                     </p>
                   </>
                 )}
                 {settingsPanel === 'remote' && (
                   <>
-                    <h3 className="settings-section-title">Remote</h3>
+                    <h3 className="settings-section-title">{t('nav.remote')}</h3>
 
                     <div className="account-provider-panel">
                       <div className="account-provider-header">
@@ -6139,22 +6142,22 @@ export function App(): JSX.Element {
                           <span>Supabase</span>
                         </div>
                         <span className={remoteConfig.status === 'initialized' ? 'account-status connected' : 'account-status'}>
-                          {getRemoteStatusLabel(remoteConfig.status)}
+                          {getRemoteStatusLabel(remoteConfig.status, t)}
                         </span>
                       </div>
 
                       <div className="remote-status-grid">
                         <div className="remote-status-item">
-                          <span>Project</span>
-                          <strong>{remoteConfig.projectRef || 'Not created'}</strong>
+                          <span>{t('settings.remote.project')}</span>
+                          <strong>{remoteConfig.projectRef || t('settings.remote.notCreated')}</strong>
                         </div>
                         <div className="remote-status-item">
-                          <span>Database Host</span>
-                          <strong>{remoteConfig.databaseHost || 'Not available'}</strong>
+                          <span>{t('settings.remote.databaseHost')}</span>
+                          <strong>{remoteConfig.databaseHost || t('settings.remote.notAvailable')}</strong>
                         </div>
                         <div className="remote-status-item">
-                          <span>Credentials</span>
-                          <strong>{getRemoteCredentialSummary(remoteConfig)}</strong>
+                          <span>{t('settings.remote.credentials')}</span>
+                          <strong>{getRemoteCredentialSummary(remoteConfig, t)}</strong>
                         </div>
                       </div>
 
@@ -6166,7 +6169,7 @@ export function App(): JSX.Element {
                           target="_blank"
                         >
                           <ExternalLink size={14} />
-                          Open Supabase Project
+                          {t('settings.remote.openProject')}
                         </a>
                       )}
 
@@ -6178,15 +6181,13 @@ export function App(): JSX.Element {
 
                       <div className="setting-row compact">
                         <div className="setting-info">
-                          <span className="setting-label">Personal Access Token</span>
-                          <span className="setting-desc">
-                            Stored locally with Electron secure storage and never shown again after saving.
-                          </span>
+                          <span className="setting-label">{t('settings.remote.personalAccessToken')}</span>
+                          <span className="setting-desc">{t('settings.remote.personalAccessTokenDesc')}</span>
                         </div>
                         <input
                           className="settings-text-input"
                           type="password"
-                          placeholder={remoteConfig.patSaved ? 'Saved token' : 'sbp_...'}
+                          placeholder={remoteConfig.patSaved ? t('settings.remote.savedToken') : 'sbp_...'}
                           value={remoteInput.personalAccessToken ?? ''}
                           onChange={(event) =>
                             updateRemoteInputField('personalAccessToken', event.currentTarget.value, 'change')
@@ -6200,8 +6201,8 @@ export function App(): JSX.Element {
 
                       <div className="setting-row compact">
                         <div className="setting-info">
-                          <span className="setting-label">Organization Slug</span>
-                          <span className="setting-desc">Supabase organization where Veloca will create or reuse the project.</span>
+                          <span className="setting-label">{t('settings.remote.organizationSlug')}</span>
+                          <span className="setting-desc">{t('settings.remote.organizationSlugDesc')}</span>
                         </div>
                         <input
                           className="settings-text-input"
@@ -6218,8 +6219,8 @@ export function App(): JSX.Element {
 
                       <div className="setting-row compact">
                         <div className="setting-info">
-                          <span className="setting-label">Region</span>
-                          <span className="setting-desc">Choose a common Supabase region or enter a custom region code.</span>
+                          <span className="setting-label">{t('settings.remote.region')}</span>
+                          <span className="setting-desc">{t('settings.remote.regionDesc')}</span>
                         </div>
                         <div className="remote-region-control">
                           <select
@@ -6236,7 +6237,7 @@ export function App(): JSX.Element {
                           <input
                             className="settings-text-input remote-region-custom-input"
                             type="text"
-                            placeholder="custom region code"
+                            placeholder={t('settings.remote.regionPlaceholder')}
                             value={remoteInput.region}
                             onChange={(event) => updateRemoteInputField('region', event.currentTarget.value, 'change')}
                             onPaste={(event) => pasteRemoteInputField('region', event)}
@@ -6247,15 +6248,17 @@ export function App(): JSX.Element {
 
                       <div className="setting-row compact">
                         <div className="setting-info">
-                          <span className="setting-label">Database Password</span>
-                          <span className="setting-desc">
-                            Required by Supabase project creation and encrypted before local persistence.
-                          </span>
+                          <span className="setting-label">{t('settings.remote.databasePassword')}</span>
+                          <span className="setting-desc">{t('settings.remote.databasePasswordDesc')}</span>
                         </div>
                         <input
                           className="settings-text-input"
                           type="password"
-                          placeholder={remoteConfig.databasePasswordSaved ? 'Saved password' : 'Strong database password'}
+                          placeholder={
+                            remoteConfig.databasePasswordSaved
+                              ? t('settings.remote.savedPassword')
+                              : t('settings.remote.strongDatabasePassword')
+                          }
                           value={remoteInput.databasePassword ?? ''}
                           onChange={(event) =>
                             updateRemoteInputField('databasePassword', event.currentTarget.value, 'change')
@@ -6275,7 +6278,7 @@ export function App(): JSX.Element {
                           onClick={() => void saveRemoteConfig()}
                         >
                           {remoteLoading ? <LoaderCircle className="spinning" size={15} /> : <Save size={15} />}
-                          Save
+                          {t('common.save')}
                         </button>
                         <button
                           className="secondary-action"
@@ -6284,7 +6287,7 @@ export function App(): JSX.Element {
                           onClick={() => void testRemoteConnection()}
                         >
                           <RefreshCw className={remoteLoading ? 'spinning' : ''} size={15} />
-                          Test
+                          {t('common.test')}
                         </button>
                         <button
                           className="primary-action"
@@ -6293,7 +6296,7 @@ export function App(): JSX.Element {
                           onClick={() => void createRemoteVelocaProject()}
                         >
                           {remoteLoading ? <LoaderCircle className="spinning" size={15} /> : <Database size={15} />}
-                          Create / Connect Veloca Project
+                          {t('settings.remote.createConnect')}
                         </button>
                       </div>
                     </div>
@@ -6302,29 +6305,33 @@ export function App(): JSX.Element {
                       <div className="account-provider-header">
                         <div className="account-provider-title">
                           <RefreshCw size={18} />
-                          <span>Sync</span>
+                          <span>{t('settings.remote.sync')}</span>
                         </div>
                         <span className={remoteSyncStatus.failedCount > 0 ? 'account-status' : 'account-status connected'}>
-                          {remoteSyncStatus.running ? 'Syncing' : remoteSyncStatus.failedCount > 0 ? 'Needs Retry' : 'Ready'}
+                          {remoteSyncStatus.running
+                            ? t('settings.remote.syncing')
+                            : remoteSyncStatus.failedCount > 0
+                              ? t('settings.remote.needsRetry')
+                              : t('common.ready')}
                         </span>
                       </div>
 
                       <div className="remote-status-grid">
                         <div className="remote-status-item">
-                          <span>Pending Push</span>
+                          <span>{t('settings.remote.pendingPush')}</span>
                           <strong>{remoteSyncStatus.pendingPushCount}</strong>
                         </div>
                         <div className="remote-status-item">
-                          <span>Conflicts</span>
+                          <span>{t('settings.remote.conflicts')}</span>
                           <strong>{remoteSyncStatus.conflictCount}</strong>
                         </div>
                         <div className="remote-status-item">
-                          <span>Failed</span>
+                          <span>{t('settings.remote.failed')}</span>
                           <strong>{remoteSyncStatus.failedCount}</strong>
                         </div>
                         <div className="remote-status-item">
-                          <span>Last Sync</span>
-                          <strong>{formatRemoteSyncTime(remoteSyncStatus.lastRunAt)}</strong>
+                          <span>{t('settings.remote.lastSync')}</span>
+                          <strong>{formatRemoteSyncTime(remoteSyncStatus.lastRunAt, t)}</strong>
                         </div>
                       </div>
 
@@ -6342,8 +6349,8 @@ export function App(): JSX.Element {
                             onChange={(event) => updateRemoteSyncConfig('autoSyncEnabled', event.currentTarget.checked)}
                           />
                           <span>
-                            <strong>Auto Sync</strong>
-                            <small>Automatically pull on startup and push after saves.</small>
+                            <strong>{t('settings.remote.syncAuto')}</strong>
+                            <small>{t('settings.remote.syncAutoDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option">
@@ -6353,8 +6360,8 @@ export function App(): JSX.Element {
                             onChange={(event) => updateRemoteSyncConfig('pullOnStartup', event.currentTarget.checked)}
                           />
                           <span>
-                            <strong>Pull on Startup</strong>
-                            <small>Fetch remote changes when Veloca opens.</small>
+                            <strong>{t('settings.remote.syncPullStartup')}</strong>
+                            <small>{t('settings.remote.syncPullStartupDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option">
@@ -6364,8 +6371,8 @@ export function App(): JSX.Element {
                             onChange={(event) => updateRemoteSyncConfig('pushOnSave', event.currentTarget.checked)}
                           />
                           <span>
-                            <strong>Push on Save</strong>
-                            <small>Queue and upload changed documents after saving.</small>
+                            <strong>{t('settings.remote.syncPushSave')}</strong>
+                            <small>{t('settings.remote.syncPushSaveDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option">
@@ -6377,15 +6384,15 @@ export function App(): JSX.Element {
                             }
                           />
                           <span>
-                            <strong>Sync Local Opened/Edited Markdown</strong>
-                            <small>Only local Markdown files touched inside Veloca are tracked.</small>
+                            <strong>{t('settings.remote.syncLocal')}</strong>
+                            <small>{t('settings.remote.syncLocalDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option disabled">
                           <input type="checkbox" checked={remoteSyncConfig.syncDatabaseWorkspaces} disabled />
                           <span>
-                            <strong>Sync Veloca Database Workspaces</strong>
-                            <small>Database workspace folders, files, assets, and provenance are always mirrored.</small>
+                            <strong>{t('settings.remote.syncDatabase')}</strong>
+                            <small>{t('settings.remote.syncDatabaseDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option">
@@ -6395,8 +6402,8 @@ export function App(): JSX.Element {
                             onChange={(event) => updateRemoteSyncConfig('syncAssets', event.currentTarget.checked)}
                           />
                           <span>
-                            <strong>Sync Assets</strong>
-                            <small>Upload database assets and local referenced resources to private Supabase Storage.</small>
+                            <strong>{t('settings.remote.syncAssets')}</strong>
+                            <small>{t('settings.remote.syncAssetsDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option">
@@ -6406,8 +6413,8 @@ export function App(): JSX.Element {
                             onChange={(event) => updateRemoteSyncConfig('syncProvenance', event.currentTarget.checked)}
                           />
                           <span>
-                            <strong>Sync Provenance Metadata</strong>
-                            <small>Mirror document provenance snapshots for remote recovery.</small>
+                            <strong>{t('settings.remote.syncProvenance')}</strong>
+                            <small>{t('settings.remote.syncProvenanceDesc')}</small>
                           </span>
                         </label>
                         <label className="remote-sync-option">
@@ -6417,14 +6424,14 @@ export function App(): JSX.Element {
                             onChange={(event) => updateRemoteSyncConfig('syncDeletes', event.currentTarget.checked)}
                           />
                           <span>
-                            <strong>Sync Deletes</strong>
-                            <small>Mark remote records as deleted instead of removing them.</small>
+                            <strong>{t('settings.remote.syncDeletes')}</strong>
+                            <small>{t('settings.remote.syncDeletesDesc')}</small>
                           </span>
                         </label>
                       </div>
 
                       <div className="remote-sync-policy">
-                        Conflict Policy: <strong>Keep Both</strong>
+                        {t('settings.remote.conflictPolicy')} <strong>{t('settings.remote.keepBoth')}</strong>
                       </div>
 
                       <div className="account-actions">
@@ -6435,7 +6442,7 @@ export function App(): JSX.Element {
                           onClick={() => void saveRemoteSyncSettings()}
                         >
                           {remoteSyncLoading ? <LoaderCircle className="spinning" size={15} /> : <Save size={15} />}
-                          Save Sync
+                          {t('settings.remote.saveSync')}
                         </button>
                         <button
                           className="secondary-action"
@@ -6444,7 +6451,7 @@ export function App(): JSX.Element {
                           onClick={() => void runRemoteSyncAction('manual')}
                         >
                           <RefreshCw className={remoteSyncLoading ? 'spinning' : ''} size={15} />
-                          Manual Sync Now
+                          {t('settings.remote.manualSync')}
                         </button>
                         <button
                           className="secondary-action"
@@ -6453,7 +6460,7 @@ export function App(): JSX.Element {
                           onClick={() => void runRemoteSyncAction('retry')}
                         >
                           <RefreshCw className={remoteSyncLoading ? 'spinning' : ''} size={15} />
-                          Retry Failed Items
+                          {t('settings.remote.retryFailed')}
                         </button>
                       </div>
                     </div>
@@ -9391,31 +9398,31 @@ function getSaveStatusLabel(status: SaveStatus): string {
   return 'Saved';
 }
 
-function getRemoteStatusLabel(status: RemoteDatabaseStatus): string {
+function getRemoteStatusLabel(status: RemoteDatabaseStatus, t: Translator): string {
   if (status === 'configured') {
-    return 'Configured';
+    return t('settings.remote.statusConfigured');
   }
 
   if (status === 'creating') {
-    return 'Creating';
+    return t('settings.remote.statusCreating');
   }
 
   if (status === 'waiting') {
-    return 'Waiting';
+    return t('settings.remote.statusWaiting');
   }
 
   if (status === 'initialized') {
-    return 'Initialized';
+    return t('settings.remote.statusInitialized');
   }
 
   if (status === 'failed') {
-    return 'Failed';
+    return t('settings.remote.failed');
   }
 
-  return 'Not Configured';
+  return t('settings.remote.notConfigured');
 }
 
-function getRemoteCredentialSummary(config: RemoteDatabaseConfigView): string {
+function getRemoteCredentialSummary(config: RemoteDatabaseConfigView, t: Translator): string {
   const savedCredentials = [
     config.patSaved ? 'PAT' : '',
     config.databasePasswordSaved ? 'DB Password' : '',
@@ -9423,12 +9430,12 @@ function getRemoteCredentialSummary(config: RemoteDatabaseConfigView): string {
     config.publishableKeySaved ? 'Publishable Key' : ''
   ].filter(Boolean);
 
-  return savedCredentials.length ? savedCredentials.join(', ') : 'Not saved';
+  return savedCredentials.length ? savedCredentials.join(', ') : t('settings.remote.notSaved');
 }
 
-function formatRemoteSyncTime(timestamp: number | null): string {
+function formatRemoteSyncTime(timestamp: number | null, t: Translator): string {
   if (!timestamp) {
-    return 'Never';
+    return t('settings.remote.never');
   }
 
   return new Date(timestamp).toLocaleString();
