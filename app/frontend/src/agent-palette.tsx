@@ -46,6 +46,7 @@ import {
   Zap,
   type LucideIcon
 } from 'lucide-react';
+import { createTranslator, type I18nKey, type ResolvedLanguage, type Translator } from './i18n';
 import { hydrateMermaidBlocks, renderMarkdownToSafeHtml } from './rich-markdown';
 
 export interface AgentPaletteAnchor {
@@ -175,6 +176,7 @@ interface AgentEditingState {
 
 interface AgentPaletteProps {
   context: AgentRuntimeContext;
+  language: ResolvedLanguage;
   onCanvasClose?: () => void;
   onCanvasOpen?: () => void;
   onInsertAnswer?: (answer: string, messageId: string, targetFilePath?: string) => void;
@@ -213,6 +215,26 @@ const attachmentStatusLabel: Record<AgentAttachmentStatus, string> = {
   parsing: 'Parsing',
   recording: 'Recording',
   ready: 'Ready'
+};
+
+const agentToolActionKeys: Record<string, I18nKey> = {
+  'Edit file': 'agent.tool.action.editFile',
+  'Fetch web page': 'agent.tool.action.fetchWebPage',
+  'Find files': 'agent.tool.action.findFiles',
+  'Inspect workspace tree': 'agent.tool.action.inspectWorkspaceTree',
+  'Read file': 'agent.tool.action.readFile',
+  'Run code': 'agent.tool.action.runCode',
+  'Run command': 'agent.tool.action.runCommand',
+  'Run PowerShell': 'agent.tool.action.runPowerShell',
+  'Search content': 'agent.tool.action.searchContent',
+  'Search web': 'agent.tool.action.searchWeb',
+  Thinking: 'agent.tool.action.thinking',
+  'Write file': 'agent.tool.action.writeFile'
+};
+
+const agentToolSummaryKeys: Record<string, I18nKey> = {
+  'Reasoning complete': 'agent.tool.summary.reasoningComplete',
+  'Reasoning in progress': 'agent.tool.summary.reasoningInProgress'
 };
 
 const createAgentId = (prefix: string): string =>
@@ -341,6 +363,32 @@ function getAgentSupplementIcon(icon: string): LucideIcon {
   return agentSupplementIcons[icon] ?? Sparkles;
 }
 
+function getAgentToolActionLabel(action: string, t: Translator): string {
+  const key = agentToolActionKeys[action];
+  return key ? t(key) : action;
+}
+
+function getAgentToolSummaryLabel(summary: string | undefined, t: Translator): string | null {
+  if (!summary) {
+    return null;
+  }
+
+  const key = agentToolSummaryKeys[summary];
+  return key ? t(key) : summary;
+}
+
+function getAgentToolStatusLabel(status: AgentToolCallStatus, t: Translator): string {
+  if (status === 'running') {
+    return t('agent.tool.status.running');
+  }
+
+  if (status === 'error') {
+    return t('agent.tool.status.error');
+  }
+
+  return t('agent.tool.status.success');
+}
+
 function appendAgentTextPart(parts: AgentResponsePart[] | undefined, content: string): AgentResponsePart[] {
   const currentParts = parts ?? [];
   const latestPart = currentParts[currentParts.length - 1];
@@ -410,10 +458,12 @@ function upsertAgentItemPart(
 
 function AgentToolCallItem({
   defaultOpen = false,
+  t,
   toolCall,
   variant = 'tool'
 }: {
   defaultOpen?: boolean;
+  t: Translator;
   toolCall: AgentToolCallMessage;
   variant?: 'thinking' | 'tool';
 }): JSX.Element {
@@ -422,6 +472,9 @@ function AgentToolCallItem({
   const canOpen = toolCall.openable && Boolean(toolCall.detail?.trim());
   const StatusIcon = toolCall.status === 'running' ? Loader2 : toolCall.status === 'error' ? AlertCircle : CheckCircle2;
   const contentId = `agent-tool-detail-${toolCall.id}`;
+  const actionLabel = getAgentToolActionLabel(toolCall.action, t);
+  const statusLabel = getAgentToolStatusLabel(toolCall.status, t);
+  const summaryLabel = getAgentToolSummaryLabel(toolCall.summary, t);
 
   return (
     <div className={`agent-tool-call ${variant}${canOpen ? ' interactive' : ''}${open ? ' open' : ''} ${toolCall.status}`}>
@@ -431,24 +484,25 @@ function AgentToolCallItem({
           type="button"
           aria-expanded={open}
           aria-controls={contentId}
+          aria-label={t('agent.tool.detailToggle', { action: actionLabel })}
           onClick={() => setOpen((current) => !current)}
         >
           <ToolIcon className="agent-tool-main-icon" size={14} />
           <span className="agent-tool-name">
-            {toolCall.action}
-            {toolCall.summary ? <span className="agent-tool-summary"> {toolCall.summary}</span> : null}
+            {actionLabel}
+            {summaryLabel ? <span className="agent-tool-summary"> {summaryLabel}</span> : null}
           </span>
-          <StatusIcon className="agent-tool-status-icon" size={14} />
+          <StatusIcon className="agent-tool-status-icon" size={14} role="img" aria-label={statusLabel} />
           <ChevronDown className="agent-tool-chevron" size={14} />
         </button>
       ) : (
         <div className="agent-tool-header">
           <ToolIcon className="agent-tool-main-icon" size={14} />
           <span className="agent-tool-name">
-            {toolCall.action}
-            {toolCall.summary ? <span className="agent-tool-summary"> {toolCall.summary}</span> : null}
+            {actionLabel}
+            {summaryLabel ? <span className="agent-tool-summary"> {summaryLabel}</span> : null}
           </span>
-          <StatusIcon className="agent-tool-status-icon" size={14} />
+          <StatusIcon className="agent-tool-status-icon" size={14} role="img" aria-label={statusLabel} />
         </div>
       )}
 
@@ -517,7 +571,7 @@ function AgentInteractionCard({ item }: { item: AgentInteractionItem }): JSX.Ele
   );
 }
 
-function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX.Element {
+function AgentResponseTimeline({ message, t }: { message: AgentConversation; t: Translator }): JSX.Element {
   const responseParts = message.responseParts ?? [];
   const hasResponseParts = responseParts.length > 0;
 
@@ -526,7 +580,7 @@ function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX
       {message.webSearch && (
         <p className="agent-ai-kicker">
           <Globe size={13} />
-          Web Search context is enabled for this turn.
+          {t('agent.webSearchEnabled')}
         </p>
       )}
 
@@ -537,11 +591,11 @@ function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX
             }
 
             if (part.type === 'thinking') {
-              return <AgentToolCallItem defaultOpen key={part.id} toolCall={part.item} variant="thinking" />;
+              return <AgentToolCallItem defaultOpen key={part.id} t={t} toolCall={part.item} variant="thinking" />;
             }
 
             if (part.type === 'tool') {
-              return <AgentToolCallItem key={part.id} toolCall={part.item} />;
+              return <AgentToolCallItem key={part.id} t={t} toolCall={part.item} />;
             }
 
             return <AgentInteractionCard key={part.id} item={part.item} />;
@@ -549,7 +603,7 @@ function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX
         : message.answer.trim() ? (
             <AgentMarkdown content={message.answer} />
           ) : message.status === 'pending' && !message.toolCalls?.length ? (
-            <div className="agent-typing-indicator" aria-label="Veloca is typing">
+            <div className="agent-typing-indicator" aria-label={t('agent.typing')}>
               <span />
               <span />
               <span />
@@ -565,6 +619,7 @@ function AgentResponseTimeline({ message }: { message: AgentConversation }): JSX
 
 export function AgentPalette({
   context,
+  language,
   onCanvasClose,
   onCanvasOpen,
   onInsertAnswer,
@@ -572,6 +627,7 @@ export function AgentPalette({
   position,
   visible
 }: AgentPaletteProps): JSX.Element {
+  const t = useMemo(() => createTranslator(language), [language]);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
   const [model, setModel] = useState<AgentModelId>('lite');
@@ -1774,7 +1830,7 @@ export function AgentPalette({
 
               <div className={`agent-ai-msg ${message.status}`}>
                 <div className="agent-ai-content">
-                  <AgentResponseTimeline message={message} />
+                  <AgentResponseTimeline message={message} t={t} />
                 </div>
 
                 {message.status === 'complete' && message.answer.trim() && (

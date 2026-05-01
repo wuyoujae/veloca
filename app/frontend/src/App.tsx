@@ -5707,6 +5707,7 @@ export function App(): JSX.Element {
 
           <AgentPalette
             context={agentRuntimeContext}
+            language={resolvedLanguage}
             onInsertAnswer={handleInsertAiAnswer}
             onCanvasClose={relaxAgentPaletteAfterCanvasClose}
             onCanvasOpen={moveAgentPaletteForCanvasOpen}
