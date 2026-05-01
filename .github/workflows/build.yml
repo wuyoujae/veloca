@@ -6,8 +6,15 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
+    permissions:
+      contents: read
+
     strategy:
       fail-fast: false
       matrix:
@@ -18,10 +25,10 @@ jobs:
           - os: windows-latest
             target: win
             arch: x64
-          - os: macos-latest
+          - os: macos-15
             target: mac
             arch: arm64
-          - os: macos-latest
+          - os: macos-15-intel
             target: mac
             arch: x64
 
@@ -48,9 +55,9 @@ jobs:
 
       - run: npm run build
 
-      - run: DEBUG=electron-builder npx electron-builder --${{ matrix.target }} --${{ matrix.arch }}
+      - run: npx electron-builder --${{ matrix.target }} --${{ matrix.arch }} --publish never
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEBUG: electron-builder
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -17,6 +17,7 @@ The current version is an early rich-editor build. It includes the Electron desk
 - [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Release Workflow](#release-workflow)
 - [Development Guide](#development-guide)
 - [Testing Guide](#testing-guide)
 - [Usage Examples](#usage-examples)
@@ -127,6 +128,14 @@ Preview the built Electron app:
 npm run preview
 ```
 
+Build local desktop packages on the matching operating system:
+
+```bash
+npm run package:mac
+npm run package:win
+npm run package:linux
+```
+
 ## Configuration
 
 Copy `.env.example` if you need local configuration:
@@ -148,6 +157,36 @@ Version management data is stored under Electron's user data directory at `versi
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
+## Release Workflow
+
+Veloca uses npm scripts plus GitHub Actions for desktop releases. Local scripts prepare the version commit and Git tag; GitHub Actions builds platform artifacts and creates a draft GitHub Release.
+
+Before releasing, run:
+
+```bash
+npm run release:check
+```
+
+Create a version commit and tag:
+
+```bash
+npm run release:patch
+# or
+npm run release:minor
+# or
+npm run release:major
+```
+
+Push the current branch and tags:
+
+```bash
+npm run release:push
+```
+
+Pushing a tag that matches `v*` triggers `.github/workflows/build.yml`. The workflow builds Linux x64, Windows x64, macOS arm64, and macOS x64 artifacts, then creates a draft GitHub Release with generated release notes. Review and smoke-test the uploaded artifacts before publishing the draft release.
+
+Release output is generated in `release/`, which is intentionally ignored by Git.
+
 ## Development Guide
 
 All application code lives under `app`.
@@ -166,7 +205,14 @@ The current foundation can be checked with:
 
 ```bash
 npm run typecheck
+npm run test
 npm run build
+```
+
+Release readiness can be checked with:
+
+```bash
+npm run release:check
 ```
 
 <details>
@@ -232,6 +278,12 @@ At this stage, Veloca starts with an empty workspace until folders are added or 
 <summary><b>Is Veloca production-ready?</b></summary>
 
 No. This is the initial foundation build. It is suitable for continuing development, not for end-user release.
+</details>
+
+<details>
+<summary><b>How do I publish a GitHub Release?</b></summary>
+
+Run `npm run release:patch`, `npm run release:minor`, or `npm run release:major`, then run `npm run release:push`. The pushed `v*` tag starts the GitHub Actions workflow and creates a draft release for review.
 </details>
 
 <details>
