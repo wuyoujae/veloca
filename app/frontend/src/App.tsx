@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent,
@@ -106,9 +107,14 @@ type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
 const aiInsertLogPrefix = '[Veloca AI Insert]';
+const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
 
 function logAiInsertDebug(message: string, details?: Record<string, unknown>): void {
   console.info(aiInsertLogPrefix, message, details ?? {});
+}
+
+function logRemoteSettingsDebug(message: string, details?: Record<string, unknown>): void {
+  console.info(remoteSettingsLogPrefix, message, details ?? {});
 }
 
 interface ToastMessage {
@@ -126,6 +132,7 @@ interface AiModelConfig {
 }
 
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
+type RemoteInputField = keyof RemoteDatabaseConfigInput;
 
 interface RemoteDatabaseConfigInput {
   databasePassword?: string;
@@ -1655,6 +1662,34 @@ export function App(): JSX.Element {
   }, [agentPaletteOpen, positionAgentPalette]);
 
   useEffect(() => {
+    const logWindowError = (event: ErrorEvent) => {
+      console.error('[Veloca Renderer Error]', {
+        column: event.colno,
+        filename: event.filename,
+        line: event.lineno,
+        message: event.message,
+        stack: event.error instanceof Error ? event.error.stack : undefined
+      });
+    };
+    const logUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+
+      console.error('[Veloca Renderer Unhandled Rejection]', {
+        message: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined
+      });
+    };
+
+    window.addEventListener('error', logWindowError);
+    window.addEventListener('unhandledrejection', logUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', logWindowError);
+      window.removeEventListener('unhandledrejection', logUnhandledRejection);
+    };
+  }, []);
+
+  useEffect(() => {
     loadWorkspace();
   }, []);
 
@@ -1816,6 +1851,41 @@ export function App(): JSX.Element {
       personalAccessToken: '',
       region: config.region || current.region || 'us-east-1'
     }));
+  };
+
+  const updateRemoteInputField = (field: RemoteInputField, value: string, source: 'change' | 'paste') => {
+    logRemoteSettingsDebug('field update', {
+      field,
+      length: value.length,
+      source
+    });
+    setRemoteInput((current) => ({
+      ...current,
+      [field]: value
+    }));
+  };
+
+  const pasteRemoteInputField = (
+    field: RemoteInputField,
+    event: ReactClipboardEvent<HTMLInputElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const input = event.currentTarget;
+    const pastedText = event.clipboardData.getData('text/plain');
+    const selectionStart = input.selectionStart ?? input.value.length;
+    const selectionEnd = input.selectionEnd ?? selectionStart;
+    const nextValue = `${input.value.slice(0, selectionStart)}${pastedText}${input.value.slice(selectionEnd)}`;
+
+    logRemoteSettingsDebug('manual paste', {
+      field,
+      nextLength: nextValue.length,
+      pastedLength: pastedText.length,
+      selectionEnd,
+      selectionStart
+    });
+    updateRemoteInputField(field, nextValue, 'paste');
   };
 
   const saveRemoteConfig = async () => {
@@ -5077,11 +5147,9 @@ export function App(): JSX.Element {
                           placeholder={remoteConfig.patSaved ? 'Saved token' : 'sbp_...'}
                           value={remoteInput.personalAccessToken ?? ''}
                           onChange={(event) =>
-                            setRemoteInput((current) => ({
-                              ...current,
-                              personalAccessToken: event.currentTarget.value
-                            }))
+                            updateRemoteInputField('personalAccessToken', event.currentTarget.value, 'change')
                           }
+                          onPaste={(event) => pasteRemoteInputField('personalAccessToken', event)}
                           spellCheck={false}
                         />
                       </div>
@@ -5097,11 +5165,9 @@ export function App(): JSX.Element {
                           placeholder="your-org"
                           value={remoteInput.organizationSlug}
                           onChange={(event) =>
-                            setRemoteInput((current) => ({
-                              ...current,
-                              organizationSlug: event.currentTarget.value
-                            }))
+                            updateRemoteInputField('organizationSlug', event.currentTarget.value, 'change')
                           }
+                          onPaste={(event) => pasteRemoteInputField('organizationSlug', event)}
                           spellCheck={false}
                         />
                       </div>
@@ -5116,12 +5182,8 @@ export function App(): JSX.Element {
                           type="text"
                           placeholder="us-east-1"
                           value={remoteInput.region}
-                          onChange={(event) =>
-                            setRemoteInput((current) => ({
-                              ...current,
-                              region: event.currentTarget.value
-                            }))
-                          }
+                          onChange={(event) => updateRemoteInputField('region', event.currentTarget.value, 'change')}
+                          onPaste={(event) => pasteRemoteInputField('region', event)}
                           spellCheck={false}
                         />
                       </div>
@@ -5139,11 +5201,9 @@ export function App(): JSX.Element {
                           placeholder={remoteConfig.databasePasswordSaved ? 'Saved password' : 'Strong database password'}
                           value={remoteInput.databasePassword ?? ''}
                           onChange={(event) =>
-                            setRemoteInput((current) => ({
-                              ...current,
-                              databasePassword: event.currentTarget.value
-                            }))
+                            updateRemoteInputField('databasePassword', event.currentTarget.value, 'change')
                           }
+                          onPaste={(event) => pasteRemoteInputField('databasePassword', event)}
                           spellCheck={false}
                         />
                       </div>

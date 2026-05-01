@@ -233,6 +233,10 @@ function createMainWindow(): void {
     mainWindow.webContents.send('agent:open-palette');
   });
 
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    console.info(`[Veloca Renderer:${level}] ${message} (${sourceId}:${line})`);
+  });
+
   mainWindow.on('closed', () => {
     closeMarkdownWatchers(mainWindow.id);
   });
