@@ -7033,7 +7033,7 @@ function TreeNode({
         onClick={() => onFolderToggle(node.id)}
       >
         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {isDatabaseRoot ? <FolderStarIcon size={14} /> : <Folder size={14} />}
+        {isDatabaseRoot ? <Database size={14} /> : <Folder size={14} />}
         {isEditing ? (
           <InlineNameInput
             value={editingNode.value}
