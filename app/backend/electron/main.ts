@@ -10,7 +10,8 @@ import {
   shell,
   type OpenDialogOptions
 } from 'electron';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { watch, type FSWatcher } from 'node:fs';
 import { closeDatabase, getDatabase } from '../database/connection';
 import {
   getAiBaseUrl,
@@ -74,6 +75,115 @@ import {
   syncMarkdownFile
 } from '../services/version-manager-service';
 
+interface WatchedMarkdownFile {
+  timer: ReturnType<typeof setTimeout> | null;
+  watcher: FSWatcher;
+}
+
+const markdownWatchersByWindow = new Map<number, Map<string, WatchedMarkdownFile>>();
+
+function closeMarkdownWatchers(windowId: number): void {
+  const watchers = markdownWatchersByWindow.get(windowId);
+
+  if (!watchers) {
+    return;
+  }
+
+  for (const watchedFile of watchers.values()) {
+    if (watchedFile.timer) {
+      clearTimeout(watchedFile.timer);
+    }
+
+    watchedFile.watcher.close();
+  }
+
+  markdownWatchersByWindow.delete(windowId);
+}
+
+function sendWatchedMarkdownFileChange(window: BrowserWindow, filePath: string): void {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  try {
+    const file = readMarkdownFile(filePath);
+    window.webContents.send('workspace:markdown-file-changed', {
+      file,
+      path: filePath,
+      status: 'changed'
+    });
+  } catch {
+    window.webContents.send('workspace:markdown-file-changed', {
+      path: filePath,
+      status: 'unavailable'
+    });
+  }
+}
+
+function scheduleWatchedMarkdownFileChange(window: BrowserWindow, filePath: string): void {
+  const watchers = markdownWatchersByWindow.get(window.id);
+  const watchedFile = watchers?.get(filePath);
+
+  if (!watchedFile) {
+    return;
+  }
+
+  if (watchedFile.timer) {
+    clearTimeout(watchedFile.timer);
+  }
+
+  watchedFile.timer = setTimeout(() => {
+    watchedFile.timer = null;
+    sendWatchedMarkdownFileChange(window, filePath);
+  }, 120);
+}
+
+function setWatchedMarkdownFiles(window: BrowserWindow, filePaths: string[]): void {
+  const uniquePaths = new Set(
+    filePaths.filter((filePath) => typeof filePath === 'string' && !filePath.startsWith('veloca-db://'))
+  );
+  let watchers = markdownWatchersByWindow.get(window.id);
+
+  if (!watchers) {
+    watchers = new Map();
+    markdownWatchersByWindow.set(window.id, watchers);
+  }
+
+  for (const [filePath, watchedFile] of watchers) {
+    if (uniquePaths.has(filePath)) {
+      continue;
+    }
+
+    if (watchedFile.timer) {
+      clearTimeout(watchedFile.timer);
+    }
+
+    watchedFile.watcher.close();
+    watchers.delete(filePath);
+  }
+
+  for (const filePath of uniquePaths) {
+    if (watchers.has(filePath)) {
+      continue;
+    }
+
+    try {
+      readMarkdownFile(filePath);
+      const watcher = watch(dirname(filePath), (_eventType, changedName) => {
+        if (!changedName || changedName.toString() === basename(filePath)) {
+          scheduleWatchedMarkdownFileChange(window, filePath);
+        }
+      });
+      watchers.set(filePath, {
+        timer: null,
+        watcher
+      });
+    } catch {
+      // Invalid or unavailable workspace paths are ignored until the renderer sends a fresh watch list.
+    }
+  }
+}
+
 function createMainWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1200,
@@ -114,6 +224,10 @@ function createMainWindow(): void {
 
     event.preventDefault();
     mainWindow.webContents.send('agent:open-palette');
+  });
+
+  mainWindow.on('closed', () => {
+    closeMarkdownWatchers(mainWindow.id);
   });
 }
 
@@ -250,6 +364,15 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle('workspace:read-markdown', (_event, filePath: string) => {
     return readMarkdownFile(filePath);
+  });
+  ipcMain.handle('workspace:set-markdown-watch-paths', (event, filePaths: string[]) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (!window || !Array.isArray(filePaths)) {
+      return;
+    }
+
+    setWatchedMarkdownFiles(window, filePaths);
   });
   ipcMain.handle('workspace:save-markdown', async (_event, filePath: string, content: string) => {
     const file = saveMarkdownFile(filePath, content);

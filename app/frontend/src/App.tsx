@@ -155,6 +155,12 @@ interface MarkdownFileContent {
   workspaceFolderId: string;
 }
 
+interface WatchedMarkdownFileChange {
+  file?: MarkdownFileContent;
+  path: string;
+  status: 'changed' | 'unavailable';
+}
+
 interface MarkdownSection {
   id: string;
   level: number;
@@ -1152,7 +1158,9 @@ export function App(): JSX.Element {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const activeTabRef = useRef<OpenEditorTab | null>(null);
+  const activeTabPathRef = useRef<string | null>(null);
   const documentContentRef = useRef(documentContent);
+  const openTabsRef = useRef<OpenEditorTab[]>([]);
   const outlineFilePathRef = useRef<string | null>(null);
   const openTabPathsRef = useRef<Set<string>>(new Set());
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1166,6 +1174,7 @@ export function App(): JSX.Element {
   const splitEditorGridRef = useRef<HTMLDivElement>(null);
   const agentSelectionRangeRef = useRef<Range | null>(null);
   const workspaceChangedHandlerRef = useRef<(snapshot: WorkspaceSnapshot) => void>(() => {});
+  const watchedMarkdownFileChangeHandlerRef = useRef<(change: WatchedMarkdownFileChange) => void>(() => {});
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
 
@@ -1419,6 +1428,11 @@ export function App(): JSX.Element {
   }, [activeTab]);
 
   useEffect(() => {
+    activeTabPathRef.current = activeTabPath;
+  }, [activeTabPath]);
+
+  useEffect(() => {
+    openTabsRef.current = openTabs;
     const livePaths = new Set(openTabs.map((tab) => tab.file.path));
     openTabPathsRef.current = livePaths;
     pruneFileSaveActions(livePaths);
@@ -1452,6 +1466,14 @@ export function App(): JSX.Element {
 
       return areTabGroupsEqual(current, nextGroups) ? current : nextGroups;
     });
+  }, [openTabs]);
+
+  useEffect(() => {
+    const watchedPaths = openTabs
+      .filter((tab) => !tab.isUntitled && !isUntitledFilePath(tab.file.path))
+      .map((tab) => tab.file.path);
+
+    void window.veloca?.workspace.watchMarkdownFiles(watchedPaths);
   }, [openTabs]);
 
   useEffect(() => {
@@ -2929,8 +2951,98 @@ export function App(): JSX.Element {
     }
   };
 
+  const applyWatchedMarkdownFileChange = async (change: WatchedMarkdownFileChange) => {
+    if (change.status !== 'changed' || !change.file) {
+      return;
+    }
+
+    const changedFile = change.file;
+    const targetTab = openTabsRef.current.find((tab) => tab.file.path === change.path);
+
+    if (!targetTab || targetTab.isUntitled || isUntitledFilePath(targetTab.file.path)) {
+      return;
+    }
+
+    if (changedFile.content === targetTab.draftContent) {
+      return;
+    }
+
+    if (targetTab.status === 'unsaved' || targetTab.draftContent !== targetTab.savedContent) {
+      showToast({
+        type: 'info',
+        title: 'External Changes Detected',
+        description: `${targetTab.file.name} changed on disk, but Veloca kept your unsaved edits.`
+      });
+      return;
+    }
+
+    const scrollTop =
+      activeTabPathRef.current === changedFile.path ? getEditorScrollPosition(changedFile.path) : null;
+    const provenance = await loadDocumentProvenance(changedFile);
+    const latestTargetTab = openTabsRef.current.find((tab) => tab.file.path === changedFile.path);
+
+    if (
+      !latestTargetTab ||
+      latestTargetTab.isUntitled ||
+      isUntitledFilePath(latestTargetTab.file.path) ||
+      latestTargetTab.status === 'unsaved' ||
+      latestTargetTab.draftContent !== latestTargetTab.savedContent ||
+      latestTargetTab.draftContent === changedFile.content
+    ) {
+      return;
+    }
+
+    setOpenTabs((current) => {
+      const currentTab = current.find((tab) => tab.file.path === changedFile.path);
+
+      if (
+        !currentTab ||
+        currentTab.isUntitled ||
+        isUntitledFilePath(currentTab.file.path) ||
+        currentTab.status === 'unsaved' ||
+        currentTab.draftContent !== currentTab.savedContent ||
+        currentTab.draftContent === changedFile.content
+      ) {
+        return current;
+      }
+
+      const nextTabs = current.map((tab) =>
+        tab.file.path === changedFile.path
+          ? {
+              ...tab,
+              file: changedFile,
+              draftContent: changedFile.content,
+              ...provenance,
+              savedContent: changedFile.content,
+              status: 'saved' as SaveStatus
+            }
+          : tab
+      );
+
+      activeTabRef.current = nextTabs.find((tab) => tab.file.path === activeTabPathRef.current) ?? activeTabRef.current;
+      return nextTabs;
+    });
+
+    if (activeTabPathRef.current === changedFile.path) {
+      documentContentRef.current = changedFile.content;
+      setDocumentContent(changedFile.content);
+      setSaveStatus('saved');
+      restoreEditorScrollPosition(changedFile.path, scrollTop);
+    }
+
+    showToast({
+      type: 'success',
+      title: 'File Updated',
+      description: `${changedFile.name} was reloaded from disk.`
+    });
+  };
+
   workspaceChangedHandlerRef.current = (snapshot) => {
     void refreshWorkspaceAfterOperation(snapshot);
+  };
+
+  watchedMarkdownFileChangeHandlerRef.current = (change) => {
+    void applyWatchedMarkdownFileChange(change);
   };
 
   useEffect(() => {
@@ -2939,6 +3051,17 @@ export function App(): JSX.Element {
     });
 
     return () => unsubscribe?.();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.veloca?.workspace.onMarkdownFileChanged((change) => {
+      watchedMarkdownFileChangeHandlerRef.current(change);
+    });
+
+    return () => {
+      unsubscribe?.();
+      void window.veloca?.workspace.watchMarkdownFiles([]);
+    };
   }, []);
 
   const syncOpenTabsWithSnapshot = (

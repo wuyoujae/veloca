@@ -25,6 +25,12 @@ import type {
   WorkspaceSnapshot
 } from '../services/workspace-service';
 
+interface WatchedMarkdownFileChange {
+  file?: MarkdownFileContent;
+  path: string;
+  status: 'changed' | 'unavailable';
+}
+
 contextBridge.exposeInMainWorld('veloca', {
   settings: {
     getTheme: () => ipcRenderer.invoke('settings:get-theme') as Promise<ThemeMode>,
@@ -43,6 +49,8 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('workspace:create-database-workspace', name) as Promise<FileOperationResult>,
     readMarkdown: (filePath: string) =>
       ipcRenderer.invoke('workspace:read-markdown', filePath) as Promise<MarkdownFileContent>,
+    watchMarkdownFiles: (filePaths: string[]) =>
+      ipcRenderer.invoke('workspace:set-markdown-watch-paths', filePaths) as Promise<void>,
     saveMarkdown: (filePath: string, content: string) =>
       ipcRenderer.invoke('workspace:save-markdown', filePath, content) as Promise<MarkdownFileContent>,
     saveMarkdownAs: (parentPath: string, name: string, content: string) =>
@@ -80,6 +88,13 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.on('workspace:changed', listener);
 
       return () => ipcRenderer.removeListener('workspace:changed', listener);
+    },
+    onMarkdownFileChanged: (callback: (change: WatchedMarkdownFileChange) => void) => {
+      const listener = (_event: IpcRendererEvent, change: WatchedMarkdownFileChange) => callback(change);
+
+      ipcRenderer.on('workspace:markdown-file-changed', listener);
+
+      return () => ipcRenderer.removeListener('workspace:markdown-file-changed', listener);
     }
   },
   app: {

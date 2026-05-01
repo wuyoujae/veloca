@@ -32,6 +32,12 @@ interface MarkdownFileContent {
   workspaceFolderId: string;
 }
 
+interface WatchedMarkdownFileChange {
+  file?: MarkdownFileContent;
+  path: string;
+  status: 'changed' | 'unavailable';
+}
+
 interface WorkspaceAssetPayload {
   data: ArrayBuffer | Uint8Array;
   fileName: string;
@@ -255,6 +261,7 @@ declare global {
         addFolder: () => Promise<WorkspaceSnapshot>;
         createDatabaseWorkspace: (name: string) => Promise<FileOperationResult>;
         readMarkdown: (filePath: string) => Promise<MarkdownFileContent>;
+        watchMarkdownFiles: (filePaths: string[]) => Promise<void>;
         saveMarkdown: (filePath: string, content: string) => Promise<MarkdownFileContent>;
         saveMarkdownAs: (
           parentPath: string,
@@ -285,6 +292,7 @@ declare global {
         openPath: (filePath: string) => Promise<string>;
         copyPath: (filePath: string) => Promise<void>;
         onChanged: (callback: (snapshot: WorkspaceSnapshot) => void) => () => void;
+        onMarkdownFileChanged: (callback: (change: WatchedMarkdownFileChange) => void) => () => void;
       };
       app: {
         platform: NodeJS.Platform;
