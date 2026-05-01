@@ -5956,7 +5956,8 @@ async function writeToolResults(
   toolCalls: unknown[],
   toolsRealize: Record<string, unknown> | undefined
 ): Promise<void> {
-  const toolResults = await veloca.ProcessTools(toolCalls, toolsRealize || {});
+  const realizedTools = (toolsRealize || {}) as Parameters<typeof veloca.ProcessTools>[1];
+  const toolResults = await veloca.ProcessTools(toolCalls, realizedTools);
 
   for (const toolResult of toolResults) {
     const resultContent = JSON.stringify(toolResult.result ?? toolResult.error);
@@ -6239,9 +6240,9 @@ async function* streamReasoningAwareAgent(
           tools: parsedResponse.tools
         });
         yield {
-          content: parsedResponse.content,
+          ...parsedResponse,
           type: 'complete',
-          ...parsedResponse
+          content: parsedResponse.content
         };
         return;
       }
