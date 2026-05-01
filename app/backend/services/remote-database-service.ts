@@ -86,6 +86,20 @@ interface SupabaseProjectListResponse {
   projects?: SupabaseProjectResponse[];
 }
 
+class SupabaseManagementApiError extends Error {
+  method: string;
+  path: string;
+  status: number;
+
+  constructor(method: string, path: string, status: number, message: string) {
+    super(message);
+    this.method = method;
+    this.path = path;
+    this.status = status;
+    this.name = 'SupabaseManagementApiError';
+  }
+}
+
 export type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
 
 const supabaseManagementApiBaseUrl = 'https://api.supabase.com';
@@ -423,6 +437,7 @@ async function fetchSupabaseManagement<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
+  const method = init.method ?? 'GET';
   const headers = new Headers(init.headers);
   headers.set('Accept', 'application/json');
   headers.set('Authorization', `Bearer ${personalAccessToken}`);
@@ -437,7 +452,15 @@ async function fetchSupabaseManagement<T>(
     headers
   });
   const responseText = await response.text();
-  const payload = responseText ? (JSON.parse(responseText) as T) : ({} as T);
+  let payload = {} as T;
+
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as T;
+    } catch {
+      payload = { message: responseText } as T;
+    }
+  }
 
   if (!response.ok) {
     const errorPayload = payload as { error?: unknown; message?: unknown };
@@ -447,27 +470,59 @@ async function fetchSupabaseManagement<T>(
         : typeof errorPayload.error === 'string'
           ? errorPayload.error
           : `Supabase Management API request failed with ${response.status}.`;
-    throw new Error(errorMessage);
+    throw new SupabaseManagementApiError(
+      method,
+      path,
+      response.status,
+      `Supabase Management API ${method} ${path} failed (${response.status}): ${errorMessage}`
+    );
   }
 
   return payload;
 }
 
 async function validateSupabaseOrganization(personalAccessToken: string, organizationSlug: string): Promise<void> {
-  await fetchSupabaseManagement(personalAccessToken, `/v1/organizations/${encodeURIComponent(organizationSlug)}`);
+  try {
+    await fetchSupabaseManagement(personalAccessToken, `/v1/organizations/${encodeURIComponent(organizationSlug)}`);
+  } catch (error) {
+    if (error instanceof SupabaseManagementApiError && error.status === 404) {
+      throw new Error(
+        `Supabase organization slug "${organizationSlug}" was not found. Use the organization slug from the Supabase dashboard URL, not the display name.`
+      );
+    }
+
+    throw error;
+  }
 }
 
 async function getExistingVelocaProject(
   personalAccessToken: string,
   organizationSlug: string
 ): Promise<SupabaseProjectResponse | null> {
-  const payload = await fetchSupabaseManagement<SupabaseProjectResponse[] | SupabaseProjectListResponse>(
-    personalAccessToken,
-    `/v1/organizations/${encodeURIComponent(organizationSlug)}/projects`
-  );
+  let payload: SupabaseProjectResponse[] | SupabaseProjectListResponse;
+
+  try {
+    payload = await fetchSupabaseManagement<SupabaseProjectResponse[] | SupabaseProjectListResponse>(
+      personalAccessToken,
+      `/v1/organizations/${encodeURIComponent(organizationSlug)}/projects`
+    );
+  } catch (error) {
+    if (!(error instanceof SupabaseManagementApiError && error.status === 404)) {
+      throw error;
+    }
+
+    payload = await fetchSupabaseManagement<SupabaseProjectResponse[] | SupabaseProjectListResponse>(
+      personalAccessToken,
+      '/v1/projects'
+    );
+  }
+
   const projects = Array.isArray(payload) ? payload : payload.projects ?? [];
 
-  return projects.find((project) => project.name === remoteProjectName) ?? null;
+  return projects.find((project) =>
+    project.name === remoteProjectName &&
+    (!project.organization_slug || project.organization_slug === organizationSlug)
+  ) ?? null;
 }
 
 function getRegionSelection(regionCode: string): Pick<RemoteRegionOption, 'code' | 'type'> {
@@ -485,18 +540,36 @@ async function createVelocaProject(
   regionSelection: Pick<RemoteRegionOption, 'code' | 'type'>,
   databasePassword: string
 ): Promise<SupabaseProjectResponse> {
-  return fetchSupabaseManagement<SupabaseProjectResponse>(personalAccessToken, '/v1/projects', {
-    body: JSON.stringify({
-      db_pass: databasePassword,
-      name: remoteProjectName,
-      organization_slug: organizationSlug,
-      region_selection: {
-        code: regionSelection.code,
-        type: regionSelection.type
-      }
-    }),
-    method: 'POST'
-  });
+  const basePayload = {
+    db_pass: databasePassword,
+    name: remoteProjectName,
+    organization_slug: organizationSlug
+  };
+
+  try {
+    return await fetchSupabaseManagement<SupabaseProjectResponse>(personalAccessToken, '/v1/projects', {
+      body: JSON.stringify({
+        ...basePayload,
+        region_selection: {
+          code: regionSelection.code,
+          type: regionSelection.type
+        }
+      }),
+      method: 'POST'
+    });
+  } catch (error) {
+    if (!(error instanceof SupabaseManagementApiError && [400, 404, 422].includes(error.status))) {
+      throw error;
+    }
+
+    return fetchSupabaseManagement<SupabaseProjectResponse>(personalAccessToken, '/v1/projects', {
+      body: JSON.stringify({
+        ...basePayload,
+        region: regionSelection.code
+      }),
+      method: 'POST'
+    });
+  }
 }
 
 async function getSupabaseProject(
@@ -520,7 +593,16 @@ async function waitForProjectReady(
   let latestProject = project;
 
   for (let attempt = 0; attempt < projectReadyPollAttempts; attempt += 1) {
-    latestProject = await getSupabaseProject(personalAccessToken, project.ref);
+    try {
+      latestProject = await getSupabaseProject(personalAccessToken, project.ref);
+    } catch (error) {
+      if (!(error instanceof SupabaseManagementApiError && error.status === 404)) {
+        throw error;
+      }
+
+      await wait(projectReadyPollDelayMs);
+      continue;
+    }
 
     if (latestProject.status?.toUpperCase().startsWith('ACTIVE') && latestProject.database?.host) {
       return latestProject;
@@ -536,10 +618,28 @@ async function getProjectApiKeys(
   personalAccessToken: string,
   projectRef: string
 ): Promise<{ publishableKey: string; secretKey: string | null }> {
-  const keys = await fetchSupabaseManagement<SupabaseApiKeyResponse[]>(
-    personalAccessToken,
-    `/v1/projects/${encodeURIComponent(projectRef)}/api-keys?reveal=true`
-  );
+  let keys: SupabaseApiKeyResponse[] | null = null;
+
+  for (let attempt = 0; attempt < projectReadyPollAttempts; attempt += 1) {
+    try {
+      keys = await fetchSupabaseManagement<SupabaseApiKeyResponse[]>(
+        personalAccessToken,
+        `/v1/projects/${encodeURIComponent(projectRef)}/api-keys?reveal=true`
+      );
+      break;
+    } catch (error) {
+      if (!(error instanceof SupabaseManagementApiError && error.status === 404)) {
+        throw error;
+      }
+
+      await wait(projectReadyPollDelayMs);
+    }
+  }
+
+  if (!keys) {
+    throw new Error('Supabase API keys were not available in time.');
+  }
+
   const publishableKey =
     keys.find((key) => key.api_key?.startsWith('sb_publishable_'))?.api_key ??
     keys.find((key) => /publishable|anon/i.test(`${key.name ?? ''} ${key.description ?? ''}`))?.api_key ??
@@ -607,6 +707,26 @@ function wait(durationMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
+function getRemoteSetupErrorMessage(error: unknown): string {
+  if (!(error instanceof SupabaseManagementApiError)) {
+    return error instanceof Error ? error.message : 'Supabase remote setup failed.';
+  }
+
+  if (error.method === 'POST' && error.path === '/v1/projects' && error.status === 404) {
+    return 'Supabase could not create the Veloca project. Check that the organization slug is correct and that the selected region is available for new projects.';
+  }
+
+  if (error.path.includes('/api-keys') && error.status === 404) {
+    return 'Supabase created the project, but the API keys endpoint was not available yet. Wait a minute and retry Create / Connect.';
+  }
+
+  return error.message;
+}
+
+function logRemoteSetupStep(step: string, details: Record<string, string | boolean | null> = {}): void {
+  console.info('[remote-supabase]', step, details);
+}
+
 export function getRemoteDatabaseConfig(): RemoteDatabaseConfigView {
   return toConfigView(getRemoteConfigRow());
 }
@@ -654,25 +774,52 @@ export async function provisionRemoteVelocaProject(
   );
 
   try {
+    logRemoteSetupStep('validate organization', {
+      organizationSlug: normalizedInput.organizationSlug,
+      region: normalizedInput.region
+    });
     await validateSupabaseOrganization(personalAccessToken, normalizedInput.organizationSlug);
+
+    logRemoteSetupStep('lookup existing project', {
+      organizationSlug: normalizedInput.organizationSlug
+    });
     const existingProject = await getExistingVelocaProject(personalAccessToken, normalizedInput.organizationSlug);
     let project = existingProject;
 
     if (!project) {
       const regionSelection = getRegionSelection(normalizedInput.region);
+      logRemoteSetupStep('create project', {
+        organizationSlug: normalizedInput.organizationSlug,
+        region: regionSelection.code,
+        regionSelectionType: regionSelection.type
+      });
       project = await createVelocaProject(
         personalAccessToken,
         normalizedInput.organizationSlug,
         regionSelection,
         databasePassword
       );
+    } else {
+      logRemoteSetupStep('reuse existing project', {
+        projectRef: project.ref ?? null
+      });
     }
 
     updateRemoteConfigStatus('waiting');
 
+    logRemoteSetupStep('wait for project ready', {
+      projectRef: project.ref ?? null
+    });
     const readyProject = await waitForProjectReady(personalAccessToken, project);
+
+    logRemoteSetupStep('initialize remote schema', {
+      projectRef: readyProject.ref ?? null
+    });
     await initializeRemoteSchema(readyProject, databasePassword);
 
+    logRemoteSetupStep('load api keys', {
+      projectRef: readyProject.ref ?? null
+    });
     const apiKeys = await getProjectApiKeys(personalAccessToken, readyProject.ref ?? '');
     const projectUrl = `https://${readyProject.ref}.supabase.co`;
     await testRemoteSupabaseClient(projectUrl, apiKeys.secretKey);
@@ -689,9 +836,12 @@ export async function provisionRemoteVelocaProject(
       reusedExistingProject: Boolean(existingProject)
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Supabase remote setup failed.';
+    const message = getRemoteSetupErrorMessage(error);
+    logRemoteSetupStep('setup failed', {
+      error: message
+    });
     updateRemoteConfigStatus('failed', message);
-    throw error;
+    throw new Error(message);
   }
 }
 
