@@ -123,6 +123,19 @@ contextBridge.exposeInMainWorld('veloca', {
   app: {
     platform: process.platform
   },
+  windowControls: {
+    close: () => ipcRenderer.invoke('window:close') as Promise<void>,
+    isMaximized: () => ipcRenderer.invoke('window:is-maximized') as Promise<boolean>,
+    minimize: () => ipcRenderer.invoke('window:minimize') as Promise<void>,
+    toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize') as Promise<boolean>,
+    onMaximizedChange: (callback: (maximized: boolean) => void) => {
+      const listener = (_event: IpcRendererEvent, maximized: boolean) => callback(maximized);
+
+      ipcRenderer.on('window:maximized-changed', listener);
+
+      return () => ipcRenderer.removeListener('window:maximized-changed', listener);
+    }
+  },
   github: {
     getStatus: () => ipcRenderer.invoke('github:get-status') as Promise<GitHubAuthStatus>,
     startBinding: () => ipcRenderer.invoke('github:start-binding') as Promise<GitHubDeviceBinding>,

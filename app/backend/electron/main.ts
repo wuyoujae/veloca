@@ -101,6 +101,7 @@ interface WatchedMarkdownFile {
 }
 
 const markdownWatchersByWindow = new Map<number, Map<string, WatchedMarkdownFile>>();
+const customWindowControlPlatforms = new Set<NodeJS.Platform>(['win32', 'linux']);
 
 function closeMarkdownWatchers(windowId: number): void {
   const watchers = markdownWatchersByWindow.get(windowId);
@@ -205,6 +206,7 @@ function setWatchedMarkdownFiles(window: BrowserWindow, filePaths: string[]): vo
 }
 
 function createMainWindow(): void {
+  const useCustomWindowControls = customWindowControlPlatforms.has(process.platform);
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 780,
@@ -213,8 +215,16 @@ function createMainWindow(): void {
     title: 'Veloca',
     icon: nativeImage.createFromPath(join(__dirname, '../../resources/icon.png')),
     backgroundColor: '#09090b',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 13 },
+    show: false,
+    autoHideMenuBar: useCustomWindowControls,
+    ...(useCustomWindowControls
+      ? {
+          frame: false
+        }
+      : {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 13 }
+        }),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
@@ -223,11 +233,38 @@ function createMainWindow(): void {
     }
   });
 
+  const showWindowWhenReady = () => {
+    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  };
+
+  const sendMaximizedState = () => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('window:maximized-changed', mainWindow.isMaximized());
+    }
+  };
+
+  if (useCustomWindowControls) {
+    mainWindow.setMenuBarVisibility(false);
+  }
+
   if (process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
     mainWindow.loadFile(join(__dirname, '../../frontend/index.html'));
   }
+
+  mainWindow.once('ready-to-show', showWindowWhenReady);
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(showWindowWhenReady, 80);
+  });
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error(`Veloca failed to load renderer ${validatedURL}: ${errorCode} ${errorDescription}`);
+    showWindowWhenReady();
+  });
+  mainWindow.on('maximize', sendMaximizedState);
+  mainWindow.on('unmaximize', sendMaximizedState);
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     const normalizedKey = input.key.toLowerCase();
@@ -282,6 +319,30 @@ function registerIpcHandlers(): void {
   };
 
   ipcMain.handle('settings:get-theme', () => getTheme());
+  ipcMain.handle('window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.handle('window:toggle-maximize', (event) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+
+    if (!window) {
+      return false;
+    }
+
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+
+    return window.isMaximized();
+  });
+  ipcMain.handle('window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+  ipcMain.handle('window:is-maximized', (event) => {
+    return BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false;
+  });
   ipcMain.handle('settings:set-theme', (_event, theme: ThemeMode) => {
     if (theme !== 'dark' && theme !== 'light') {
       return getTheme();

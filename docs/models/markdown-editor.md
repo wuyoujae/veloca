@@ -2,6 +2,13 @@
 
 本文档描述编辑器中“顶部标签栏 + 多文件编辑”交互的行为。
 
+## 桌面窗口外壳
+
+- macOS 保持系统交通灯窗口按钮和 `hiddenInset` 标题栏，不改变原生交互习惯。
+- Windows 和 Linux 使用 Electron frameless window，隐藏系统自带标题栏和菜单栏，由 renderer 顶部 `.custom-titlebar` 提供拖拽区域、当前文档名、最小化、最大化/还原和关闭按钮。
+- 自定义窗口按钮通过 preload 暴露的 `window.veloca.windowControls` 调用主进程 IPC，renderer 不直接访问 Electron API。
+- 主窗口默认 `show: false`，在 `ready-to-show` 或 renderer 完成加载后再显示，避免启动时先露出未渲染的深色空窗。加载失败时主进程会打印失败 URL 和错误码，并显示窗口方便诊断。
+
 ## Agent 对话框原型
 
 - 编辑器支持唤起浮动 Agent Palette：

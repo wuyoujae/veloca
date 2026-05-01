@@ -47,7 +47,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 
 ## Core Features
 
-- Electron desktop app shell with a custom title bar.
+- Electron desktop app shell with a macOS-native title bar and custom frameless controls on Windows/Linux.
 - React-based editor layout matching the prototype direction.
 - Interactive sidebar with Files and Outline modes.
 - Collapsible workspace file tree with real folder loading.
@@ -312,6 +312,12 @@ Theme settings need durable local persistence. The schema is intentionally small
 <summary><b>Why do no files appear after launch?</b></summary>
 
 Veloca now loads real markdown files from added workspace folders. Click the add-folder icon beside `Workspace` and choose a folder that contains `.md` files.
+</details>
+
+<details>
+<summary><b>Why might the window take a moment to appear in development?</b></summary>
+
+`npm run dev` starts the Vite renderer and Electron shell together. Veloca keeps the native window hidden until the renderer is ready, so slow dev-server startup shows as a short launch delay instead of a black unrendered window.
 </details>
 
 <details>

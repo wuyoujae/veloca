@@ -374,6 +374,13 @@ declare global {
       app: {
         platform: NodeJS.Platform;
       };
+      windowControls: {
+        close: () => Promise<void>;
+        isMaximized: () => Promise<boolean>;
+        minimize: () => Promise<void>;
+        toggleMaximize: () => Promise<boolean>;
+        onMaximizedChange: (callback: (maximized: boolean) => void) => () => void;
+      };
       github: {
         getStatus: () => Promise<GitHubAuthStatus>;
         startBinding: () => Promise<GitHubDeviceBinding>;

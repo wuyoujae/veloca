@@ -40,8 +40,11 @@ import {
   Info,
   ListTree,
   LoaderCircle,
+  Maximize2,
   MoreHorizontal,
   Moon,
+  Minus,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -1258,6 +1261,7 @@ export function App(): JSX.Element {
   const [documentViewModesByPath, setDocumentViewModesByPath] = useState<Record<string, DocumentViewMode>>({});
   const [cursorRestoreRequest, setCursorRestoreRequest] = useState<CursorRestoreRequest | null>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const [agentPaletteOpen, setAgentPaletteOpen] = useState(false);
   const [agentPaletteAnchor, setAgentPaletteAnchor] = useState<AgentPaletteAnchor>(() => getDefaultAgentPaletteAnchor());
   const [agentRuntimeContext, setAgentRuntimeContext] = useState<AgentRuntimeContext>({ workspaceType: 'none' });
@@ -1337,6 +1341,8 @@ export function App(): JSX.Element {
     [activeTabPath, openTabs]
   );
   const activeFile = activeTab?.file ?? null;
+  const appPlatform = window.veloca?.app.platform ?? 'darwin';
+  const usesCustomWindowControls = appPlatform === 'win32' || appPlatform === 'linux';
   const activeSaveActionState = activeTabPath ? saveActionStatesByPath[activeTabPath] ?? 'idle' : 'idle';
   const activeDocumentViewMode = activeTabPath
     ? documentViewModesByPath[activeTabPath] ?? defaultDocumentViewMode
@@ -1581,6 +1587,15 @@ export function App(): JSX.Element {
       });
     }
   }, []);
+
+  useEffect(() => {
+    if (!usesCustomWindowControls || !window.veloca?.windowControls) {
+      return;
+    }
+
+    void window.veloca.windowControls.isMaximized().then(setIsWindowMaximized);
+    return window.veloca.windowControls.onMaximizedChange(setIsWindowMaximized);
+  }, [usesCustomWindowControls]);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -4492,7 +4507,52 @@ export function App(): JSX.Element {
 
   return (
     <div className="app-shell">
-      <header className="titlebar" aria-label="Window title bar" />
+      <header
+        className={usesCustomWindowControls ? 'titlebar custom-titlebar' : 'titlebar'}
+        aria-label="Window title bar"
+      >
+        {usesCustomWindowControls && (
+          <>
+            <div className="titlebar-content">
+              <span className="titlebar-brand">Veloca</span>
+              <span className="titlebar-divider" aria-hidden="true" />
+              <span className="titlebar-document">{activeFile?.name ?? 'No Markdown Loaded'}</span>
+            </div>
+            <div className="window-controls" aria-label="Window controls">
+              <button
+                className="window-control-btn"
+                type="button"
+                aria-label="Minimize window"
+                title="Minimize"
+                onClick={() => void window.veloca?.windowControls?.minimize()}
+              >
+                <Minus size={15} />
+              </button>
+              <button
+                className="window-control-btn"
+                type="button"
+                aria-label={isWindowMaximized ? 'Restore window' : 'Maximize window'}
+                title={isWindowMaximized ? 'Restore' : 'Maximize'}
+                onClick={() => {
+                  const toggleResult = window.veloca?.windowControls?.toggleMaximize();
+                  void toggleResult?.then(setIsWindowMaximized);
+                }}
+              >
+                {isWindowMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+              <button
+                className="window-control-btn close"
+                type="button"
+                aria-label="Close window"
+                title="Close"
+                onClick={() => void window.veloca?.windowControls?.close()}
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </>
+        )}
+      </header>
 
       <div className="app-layout">
         <aside
