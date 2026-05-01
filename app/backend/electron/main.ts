@@ -103,6 +103,7 @@ interface WatchedMarkdownFile {
 
 const markdownWatchersByWindow = new Map<number, Map<string, WatchedMarkdownFile>>();
 const customWindowControlPlatforms = new Set<NodeJS.Platform>(['win32', 'linux']);
+let mainWindow: BrowserWindow | null = null;
 
 function closeMarkdownWatchers(windowId: number): void {
   const watchers = markdownWatchersByWindow.get(windowId);
@@ -208,7 +209,7 @@ function setWatchedMarkdownFiles(window: BrowserWindow, filePaths: string[]): vo
 
 function createMainWindow(): void {
   const useCustomWindowControls = customWindowControlPlatforms.has(process.platform);
-  const mainWindow = new BrowserWindow({
+  const createdWindow = new BrowserWindow({
     width: 1200,
     height: 780,
     minWidth: 960,
@@ -233,41 +234,42 @@ function createMainWindow(): void {
       sandbox: false
     }
   });
+  mainWindow = createdWindow;
 
   const showWindowWhenReady = () => {
-    if (!mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.show();
+    if (!createdWindow.isDestroyed() && !createdWindow.isVisible()) {
+      createdWindow.show();
     }
   };
 
   const sendMaximizedState = () => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('window:maximized-changed', mainWindow.isMaximized());
+    if (!createdWindow.isDestroyed()) {
+      createdWindow.webContents.send('window:maximized-changed', createdWindow.isMaximized());
     }
   };
 
   if (useCustomWindowControls) {
-    mainWindow.setMenuBarVisibility(false);
+    createdWindow.setMenuBarVisibility(false);
   }
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+    createdWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    mainWindow.loadFile(join(__dirname, '../../frontend/index.html'));
+    createdWindow.loadFile(join(__dirname, '../../frontend/index.html'));
   }
 
-  mainWindow.once('ready-to-show', showWindowWhenReady);
-  mainWindow.webContents.once('did-finish-load', () => {
+  createdWindow.once('ready-to-show', showWindowWhenReady);
+  createdWindow.webContents.once('did-finish-load', () => {
     setTimeout(showWindowWhenReady, 80);
   });
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+  createdWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     console.error(`Veloca failed to load renderer ${validatedURL}: ${errorCode} ${errorDescription}`);
     showWindowWhenReady();
   });
-  mainWindow.on('maximize', sendMaximizedState);
-  mainWindow.on('unmaximize', sendMaximizedState);
+  createdWindow.on('maximize', sendMaximizedState);
+  createdWindow.on('unmaximize', sendMaximizedState);
 
-  mainWindow.webContents.on('before-input-event', (event, input) => {
+  createdWindow.webContents.on('before-input-event', (event, input) => {
     const normalizedKey = input.key.toLowerCase();
     const normalizedCode = input.code.toLowerCase();
     const isFnKey =
@@ -281,15 +283,19 @@ function createMainWindow(): void {
     }
 
     event.preventDefault();
-    mainWindow.webContents.send('agent:open-palette');
+    createdWindow.webContents.send('agent:open-palette');
   });
 
-  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+  createdWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     console.info(`[Veloca Renderer:${level}] ${message} (${sourceId}:${line})`);
   });
 
-  mainWindow.on('closed', () => {
-    closeMarkdownWatchers(mainWindow.id);
+  createdWindow.on('closed', () => {
+    closeMarkdownWatchers(createdWindow.id);
+
+    if (mainWindow === createdWindow) {
+      mainWindow = null;
+    }
   });
 }
 
@@ -728,20 +734,38 @@ function registerAssetProtocol(): void {
   });
 }
 
-app.whenReady().then(() => {
-  getDatabase();
-  registerIpcHandlers();
-  registerAssetProtocol();
-  createMainWindow();
-  runRemoteSyncInBackground('startup');
+const singleInstanceLock = app.requestSingleInstanceLock();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
-      runRemoteSyncInBackground('startup');
+if (!singleInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return;
     }
+
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+
+    mainWindow.focus();
   });
-});
+
+  app.whenReady().then(() => {
+    getDatabase();
+    registerIpcHandlers();
+    registerAssetProtocol();
+    createMainWindow();
+    runRemoteSyncInBackground('startup');
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createMainWindow();
+        runRemoteSyncInBackground('startup');
+      }
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

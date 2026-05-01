@@ -6,8 +6,13 @@
 
 - macOS 保持系统交通灯窗口按钮和 `hiddenInset` 标题栏，不改变原生交互习惯。
 - Windows 和 Linux 使用 Electron frameless window，隐藏系统自带标题栏和菜单栏，由 renderer 顶部 `.custom-titlebar` 提供拖拽区域、当前文档名、最小化、最大化/还原和关闭按钮。
+- 当没有打开 Markdown 文件时，Windows/Linux 自定义标题栏只展示 Veloca 品牌名，不显示空文档占位文案。
 - 自定义窗口按钮通过 preload 暴露的 `window.veloca.windowControls` 调用主进程 IPC，renderer 不直接访问 Electron API。
+- 主进程使用 Electron single instance lock 限制同一时间只打开一个 Veloca；再次启动时会聚焦已有窗口。
 - 主窗口默认 `show: false`，在 `ready-to-show` 或 renderer 完成加载后再显示，避免启动时先露出未渲染的深色空窗。加载失败时主进程会打印失败 URL 和错误码，并显示窗口方便诊断。
+- 编辑器顶部标签栏背景跟随全局页面背景；没有打开文件时不再显示 `No markdown file opened` 占位文本。
+- 文件树没有 workspace 时只显示空状态文字，不展示额外文件夹图标。
+- Settings 侧栏暂时隐藏 Account 入口；GitHub 绑定相关后端能力保留，等账号产品流重新确定后再恢复入口。
 
 ## Agent 对话框原型
 

@@ -47,7 +47,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 
 ## Core Features
 
-- Electron desktop app shell with a macOS-native title bar and custom frameless controls on Windows/Linux.
+- Electron desktop app shell with a macOS-native title bar, custom frameless controls on Windows/Linux, and single-instance startup behavior.
 - React-based editor layout matching the prototype direction.
 - Interactive sidebar with Files and Outline modes.
 - Collapsible workspace file tree with real folder loading.
@@ -63,7 +63,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - Dual-workspace attachment persistence for both filesystem and SQLite-backed workspaces.
 - Auto Save enabled by default, with `Cmd/Ctrl+S` manual save support.
 - Save status in the editor status bar.
-- GitHub account binding through the OAuth device authorization flow.
+- GitHub account binding infrastructure through the OAuth device authorization flow. The Settings Account panel is currently hidden while the account experience is being refined.
 - Veloca version management for saved local filesystem `.md` files through a private GitHub repository named `veloca-version-manager`.
 - Sidebar Git tab showing only Veloca-managed markdown changes from the isolated shadow repository.
 - Remote Supabase configuration through Settings, including encrypted local credential storage, cloud table initialization, and Remote Sync preferences.

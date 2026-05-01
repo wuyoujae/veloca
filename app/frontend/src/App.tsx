@@ -2313,7 +2313,7 @@ export function App(): JSX.Element {
   };
 
   const openAccountSettings = () => {
-    setSettingsPanel('account');
+    setSettingsPanel('about');
     setSettingsOpen(true);
     void refreshVersionManagerStatus();
   };
@@ -4656,8 +4656,12 @@ export function App(): JSX.Element {
           <>
             <div className="titlebar-content">
               <span className="titlebar-brand">Veloca</span>
-              <span className="titlebar-divider" aria-hidden="true" />
-              <span className="titlebar-document">{activeFile?.name ?? 'No Markdown Loaded'}</span>
+              {activeFile && (
+                <>
+                  <span className="titlebar-divider" aria-hidden="true" />
+                  <span className="titlebar-document">{activeFile.name}</span>
+                </>
+              )}
             </div>
             <div className="window-controls" aria-label="Window controls">
               <button
@@ -4843,9 +4847,7 @@ export function App(): JSX.Element {
               }}
               ref={editorTabsRef}
             >
-              {visibleTabGroups.length === 0 ? (
-                <span className="editor-tab-empty">No markdown file opened</span>
-              ) : (
+              {visibleTabGroups.length > 0 &&
                 visibleTabGroups.map((groupPaths, groupIndex) => {
                   const groupTabs = groupPaths
                     .map((path) => openTabByPath.get(path))
@@ -5033,8 +5035,7 @@ export function App(): JSX.Element {
                       </div>
                     </div>
                   );
-                })
-              )}
+                })}
 
               {draggingGroupIndex !== null && tabDropCue?.groupIndex === visibleTabGroups.length ? (
                 <span className="editor-tab-drop-indicator editor-tab-drop-indicator-end" />
@@ -5300,13 +5301,6 @@ export function App(): JSX.Element {
                 onClick={() => setSettingsPanel('remote')}
               >
                 Remote
-              </button>
-              <button
-                className={settingsPanel === 'account' ? 'settings-nav-item active' : 'settings-nav-item'}
-                type="button"
-                onClick={() => setSettingsPanel('account')}
-              >
-                Account
               </button>
               <span className="settings-spacer" />
               <button
@@ -6223,7 +6217,6 @@ function FileTree({
 
       {!loading && tree.length === 0 && (
         <div className="empty-sidebar-state">
-          <Folder size={18} />
           <p>Add a system folder or create a database workspace.</p>
         </div>
       )}
