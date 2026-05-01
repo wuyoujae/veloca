@@ -63,6 +63,18 @@ interface RemoteSyncItemRow {
   workspace_id: string | null;
 }
 
+interface PostgresConnectionTarget {
+  host: string;
+  label: string;
+  port: number;
+  user: string;
+}
+
+interface PostgresConnectionFailure {
+  error: string;
+  target: PostgresConnectionTarget;
+}
+
 interface WorkspaceFolderRow {
   folder_path: string;
   id: string;
@@ -211,6 +223,20 @@ function getUserFacingSyncError(error: unknown): string {
   return message;
 }
 
+function isPostgresAuthenticationError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('password authentication failed') ||
+    message.includes('invalid_password') ||
+    message.includes('28p01')
+  );
+}
+
+function formatPostgresTarget(target: PostgresConnectionTarget): string {
+  return `${target.label} ${target.host}:${target.port} as ${target.user}`;
+}
+
 function decryptCredential(encryptedValue: string | null): string | null {
   if (!encryptedValue) {
     return null;
@@ -276,6 +302,74 @@ function getRemoteSupabaseClient(): SupabaseClient | null {
       persistSession: false
     }
   });
+}
+
+function getRemoteSyncSchemaConnectionTargets(row: RemoteDatabaseConfigRow): PostgresConnectionTarget[] {
+  const targets: PostgresConnectionTarget[] = [];
+  const projectRef = row.project_ref ?? '';
+  const directHost = `db.${projectRef}.supabase.co`;
+  const poolerHosts = [
+    `aws-0-${row.region}.pooler.supabase.com`,
+    `aws-1-${row.region}.pooler.supabase.com`
+  ];
+  const addTarget = (target: PostgresConnectionTarget) => {
+    const key = `${target.host}:${target.port}:${target.user}`;
+
+    if (!targets.some((existingTarget) => `${existingTarget.host}:${existingTarget.port}:${existingTarget.user}` === key)) {
+      targets.push(target);
+    }
+  };
+
+  if (row.database_host) {
+    if (row.database_host.includes('pooler.supabase.com')) {
+      addTarget({
+        host: row.database_host,
+        label: 'stored-pooler-session',
+        port: 5432,
+        user: `postgres.${projectRef}`
+      });
+      addTarget({
+        host: row.database_host,
+        label: 'stored-pooler-transaction',
+        port: 6543,
+        user: `postgres.${projectRef}`
+      });
+    } else {
+      addTarget({
+        host: row.database_host,
+        label: 'stored-direct',
+        port: 5432,
+        user: 'postgres'
+      });
+    }
+  }
+
+  addTarget({
+    host: directHost,
+    label: 'direct',
+    port: 5432,
+    user: 'postgres'
+  });
+
+  for (const host of poolerHosts) {
+    addTarget({
+      host,
+      label: 'session-pooler',
+      port: 5432,
+      user: `postgres.${projectRef}`
+    });
+  }
+
+  for (const host of poolerHosts) {
+    addTarget({
+      host,
+      label: 'transaction-pooler',
+      port: 6543,
+      user: `postgres.${projectRef}`
+    });
+  }
+
+  return targets;
 }
 
 function upsertRemoteSyncItem(input: {
@@ -412,25 +506,26 @@ async function ensureRemoteSyncSchema(): Promise<void> {
   const row = getRemoteConfigRow();
   const databasePassword = decryptCredential(row?.encrypted_db_password ?? null);
 
-  if (!row?.database_host || !row.project_ref || !databasePassword) {
+  if (!row?.project_ref || !databasePassword) {
     return;
   }
 
-  const ports = row.database_host.includes('pooler.supabase.com') ? [5432, 6543] : [5432];
+  const targets = getRemoteSyncSchemaConnectionTargets(row);
   let lastError: unknown = null;
+  const authenticationFailures: PostgresConnectionFailure[] = [];
 
-  for (const port of ports) {
+  for (const target of targets) {
     const client = new Client({
       connectionTimeoutMillis: 10000,
       database: 'postgres',
-      host: row.database_host,
+      host: target.host,
       password: databasePassword,
-      port,
+      port: target.port,
       query_timeout: 30000,
       ssl: {
         rejectUnauthorized: false
       },
-      user: row.database_host.includes('pooler.supabase.com') ? `postgres.${row.project_ref}` : 'postgres'
+      user: target.user
     });
 
     try {
@@ -439,9 +534,27 @@ async function ensureRemoteSyncSchema(): Promise<void> {
       return;
     } catch (error) {
       lastError = error;
+      if (isPostgresAuthenticationError(error)) {
+        authenticationFailures.push({
+          error: getErrorMessage(error),
+          target
+        });
+        console.warn('[remote-sync] database authentication failed; trying next connection target', {
+          connectionTarget: target.label,
+          error: getErrorMessage(error),
+          host: target.host,
+          user: target.user
+        });
+        continue;
+      }
     } finally {
       await client.end().catch(() => {});
     }
+  }
+
+  if (authenticationFailures.length === targets.length) {
+    const targetsText = authenticationFailures.map((failure) => formatPostgresTarget(failure.target)).join('; ');
+    throw new Error(`Supabase remote sync schema migration failed: database password authentication failed for tried connection targets (${targetsText}).`);
   }
 
   throw new Error(`Supabase remote sync schema migration failed: ${getErrorMessage(lastError)}`);

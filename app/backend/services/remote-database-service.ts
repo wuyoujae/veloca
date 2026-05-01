@@ -93,6 +93,11 @@ interface PostgresConnectionTarget {
   user: string;
 }
 
+interface PostgresConnectionFailure {
+  error: string;
+  target: PostgresConnectionTarget;
+}
+
 class SupabaseManagementApiError extends Error {
   method: string;
   path: string;
@@ -110,6 +115,7 @@ class SupabaseManagementApiError extends Error {
 export type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
 
 const supabaseManagementApiBaseUrl = 'https://api.supabase.com';
+const remoteCredentialMask = '********';
 const remoteProviderSupabase = 1;
 const remoteProjectName = 'veloca';
 const defaultRegion = 'us-east-1';
@@ -338,10 +344,11 @@ function toConfigView(row: RemoteDatabaseConfigRow | null): RemoteDatabaseConfig
 }
 
 function normalizeRemoteConfigInput(input: RemoteDatabaseConfigInput): Required<RemoteDatabaseConfigInput> {
-  const personalAccessToken = input.personalAccessToken?.trim() ?? '';
+  const rawPersonalAccessToken = input.personalAccessToken?.trim() ?? '';
+  const personalAccessToken = rawPersonalAccessToken === remoteCredentialMask ? '' : rawPersonalAccessToken;
   const organizationSlug = input.organizationSlug.trim();
   const region = input.region.trim() || defaultRegion;
-  const databasePassword = input.databasePassword ?? '';
+  const databasePassword = input.databasePassword === remoteCredentialMask ? '' : input.databasePassword ?? '';
 
   if (!organizationSlug || !/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(organizationSlug)) {
     throw new Error('Supabase organization slug is required.');
@@ -743,6 +750,33 @@ function isTransientPostgresConnectionError(error: unknown): boolean {
   );
 }
 
+function isPostgresAuthenticationError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+
+  return (
+    message.includes('password authentication failed') ||
+    message.includes('invalid_password') ||
+    message.includes('28p01')
+  );
+}
+
+function formatPostgresTarget(target: PostgresConnectionTarget): string {
+  return `${target.label} ${target.host}:${target.port} as ${target.user}`;
+}
+
+function getSchemaInitializationFailureMessage(
+  lastError: unknown,
+  authenticationFailures: PostgresConnectionFailure[]
+): string {
+  if (!authenticationFailures.length) {
+    return `Supabase database schema initialization failed: ${getErrorMessage(lastError)}`;
+  }
+
+  const targets = authenticationFailures.map((failure) => formatPostgresTarget(failure.target)).join('; ');
+
+  return `Supabase database schema initialization failed: database password authentication failed for all tried connection targets (${targets}). Confirm the password in Supabase Project Settings > Database, then re-enter it in Veloca.`;
+}
+
 function getRemoteSchemaConnectionTargets(
   project: SupabaseProjectResponse,
   region: string
@@ -797,6 +831,8 @@ async function initializeRemoteSchema(
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < projectReadyPollAttempts; attempt += 1) {
+    const authenticationFailures: PostgresConnectionFailure[] = [];
+
     for (const target of targets) {
       const client = new Client({
         connectionTimeoutMillis: 10000,
@@ -822,8 +858,25 @@ async function initializeRemoteSchema(
       } catch (error) {
         lastError = error;
 
+        if (isPostgresAuthenticationError(error)) {
+          authenticationFailures.push({
+            error: getErrorMessage(error),
+            target
+          });
+          logRemoteSetupStep('database authentication failed; trying next connection target', {
+            attempt: String(attempt + 1),
+            connectionTarget: target.label,
+            error: getErrorMessage(error),
+            host: target.host,
+            user: target.user
+          });
+          continue;
+        }
+
         if (!isTransientPostgresConnectionError(error)) {
-          throw new Error(`Supabase database schema initialization failed: ${getErrorMessage(error)}`);
+          throw new Error(
+            `Supabase database schema initialization failed at ${formatPostgresTarget(target)}: ${getErrorMessage(error)}`
+          );
         }
 
         logRemoteSetupStep('database not ready; retrying schema initialization', {
@@ -839,6 +892,10 @@ async function initializeRemoteSchema(
           // Ignore cleanup errors after failed connection attempts.
         }
       }
+    }
+
+    if (authenticationFailures.length === targets.length) {
+      throw new Error(getSchemaInitializationFailureMessage(lastError, authenticationFailures));
     }
 
     await wait(projectReadyPollDelayMs);
