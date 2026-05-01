@@ -174,6 +174,35 @@ interface RemoteRegionOption {
   type: 'smartGroup' | 'specific';
 }
 
+const defaultRemoteRegionData: Array<[code: string, name: string]> = [
+  ['us-east-1', 'East US (North Virginia)'],
+  ['us-east-2', 'East US (Ohio)'],
+  ['us-west-1', 'West US (North California)'],
+  ['us-west-2', 'West US (Oregon)'],
+  ['ca-central-1', 'Canada (Central)'],
+  ['eu-west-1', 'West EU (Ireland)'],
+  ['eu-west-2', 'West Europe (London)'],
+  ['eu-west-3', 'West EU (Paris)'],
+  ['eu-central-1', 'Central EU (Frankfurt)'],
+  ['eu-central-2', 'Central Europe (Zurich)'],
+  ['eu-north-1', 'North EU (Stockholm)'],
+  ['ap-south-1', 'South Asia (Mumbai)'],
+  ['ap-southeast-1', 'Southeast Asia (Singapore)'],
+  ['ap-southeast-2', 'Oceania (Sydney)'],
+  ['ap-northeast-1', 'Northeast Asia (Tokyo)'],
+  ['ap-northeast-2', 'Northeast Asia (Seoul)'],
+  ['sa-east-1', 'South America (Sao Paulo)']
+];
+const defaultRemoteRegionOptions: RemoteRegionOption[] = defaultRemoteRegionData.map(([code, name]) => ({
+  code,
+  label: `${name} - ${code}`,
+  name,
+  provider: 'AWS',
+  recommended: code === 'us-east-1',
+  status: '',
+  type: 'specific'
+}));
+
 interface WorkspaceTreeNode {
   id: string;
   name: string;
@@ -1219,9 +1248,6 @@ export function App(): JSX.Element {
     personalAccessToken: '',
     region: 'us-east-1'
   });
-  const [remoteRegions, setRemoteRegions] = useState<RemoteRegionOption[]>([]);
-  const [remoteRegionsLoading, setRemoteRegionsLoading] = useState(false);
-  const [remoteRegionsError, setRemoteRegionsError] = useState('');
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>(emptyGitHubStatus);
@@ -1664,28 +1690,6 @@ export function App(): JSX.Element {
   }, [sidebarTab]);
 
   useEffect(() => {
-    if (settingsPanel !== 'remote' || !settingsOpen) {
-      return;
-    }
-
-    if (!remoteInput.organizationSlug.trim() || (!remoteInput.personalAccessToken?.trim() && !remoteConfig.patSaved)) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      void loadRemoteRegions();
-    }, 500);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    remoteConfig.patSaved,
-    remoteInput.organizationSlug,
-    remoteInput.personalAccessToken,
-    settingsOpen,
-    settingsPanel
-  ]);
-
-  useEffect(() => {
     if (!agentPaletteOpen) {
       return;
     }
@@ -1921,48 +1925,6 @@ export function App(): JSX.Element {
       selectionStart
     });
     updateRemoteInputField(field, nextValue, 'paste');
-  };
-
-  const loadRemoteRegions = async () => {
-    if (!window.veloca?.remote || remoteRegionsLoading) {
-      return;
-    }
-
-    if (!remoteInput.organizationSlug.trim() || (!remoteInput.personalAccessToken?.trim() && !remoteConfig.patSaved)) {
-      setRemoteRegionsError('Enter a Supabase token and organization slug before loading regions.');
-      return;
-    }
-
-    setRemoteRegionsLoading(true);
-    setRemoteRegionsError('');
-
-    try {
-      const regions = await window.veloca.remote.listAvailableRegions(remoteInput);
-      setRemoteRegions(regions);
-      setRemoteInput((current) => {
-        if (regions.some((region) => region.code === current.region)) {
-          return current;
-        }
-
-        return {
-          ...current,
-          region: regions[0]?.code ?? current.region
-        };
-      });
-      logRemoteSettingsDebug('regions loaded', {
-        count: regions.length
-      });
-    } catch (error) {
-      const description = getErrorDescription(error, 'Veloca could not load Supabase regions.');
-      setRemoteRegionsError(description);
-      showToast({
-        type: 'info',
-        title: 'Region Loading Failed',
-        description
-      });
-    } finally {
-      setRemoteRegionsLoading(false);
-    }
   };
 
   const saveRemoteConfig = async () => {
@@ -5252,41 +5214,31 @@ export function App(): JSX.Element {
                       <div className="setting-row compact">
                         <div className="setting-info">
                           <span className="setting-label">Region</span>
-                          <span className="setting-desc">Loaded from Supabase for the selected organization.</span>
+                          <span className="setting-desc">Choose a common Supabase region or enter a custom region code.</span>
                         </div>
                         <div className="remote-region-control">
                           <select
                             className="shadcn-select remote-region-select"
                             value={remoteInput.region}
                             onChange={(event) => updateRemoteInputField('region', event.currentTarget.value, 'change')}
-                            disabled={
-                              remoteRegionsLoading ||
-                              getRemoteRegionSelectOptions(remoteRegions, remoteInput.region).length === 0
-                            }
                           >
-                            {getRemoteRegionSelectOptions(remoteRegions, remoteInput.region).map((region) => (
+                            {getRemoteRegionSelectOptions(defaultRemoteRegionOptions, remoteInput.region).map((region) => (
                               <option key={region.code} value={region.code}>
                                 {region.label}
                               </option>
                             ))}
                           </select>
-                          <button
-                            className="secondary-action compact"
-                            type="button"
-                            disabled={remoteRegionsLoading}
-                            onClick={() => void loadRemoteRegions()}
-                          >
-                            <RefreshCw className={remoteRegionsLoading ? 'spinning' : ''} size={14} />
-                            Load Regions
-                          </button>
+                          <input
+                            className="settings-text-input remote-region-custom-input"
+                            type="text"
+                            placeholder="custom region code"
+                            value={remoteInput.region}
+                            onChange={(event) => updateRemoteInputField('region', event.currentTarget.value, 'change')}
+                            onPaste={(event) => pasteRemoteInputField('region', event)}
+                            spellCheck={false}
+                          />
                         </div>
                       </div>
-
-                      {remoteRegionsError && (
-                        <div className="settings-warning">
-                          {remoteRegionsError}
-                        </div>
-                      )}
 
                       <div className="setting-row compact">
                         <div className="setting-info">

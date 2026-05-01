@@ -159,7 +159,7 @@ Version management data is stored under Electron's user data directory at `versi
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
-Remote Supabase configuration is also a user preference configured inside Settings rather than through required environment variables. The Remote panel asks for a Supabase personal access token, organization slug, and database password, then loads available project regions from Supabase for a dropdown selection. Veloca stores sensitive values with Electron secure storage before writing encrypted values into SQLite. It then uses Supabase Management API to create or reuse a project named `veloca`, initializes the minimum cloud database tables, and keeps only desensitized status visible in the renderer.
+Remote Supabase configuration is also a user preference configured inside Settings rather than through required environment variables. The Remote panel asks for a Supabase personal access token, organization slug, database password, and region. Veloca provides a built-in dropdown of common Supabase regions plus a manual region code input for fallback. Sensitive values are stored with Electron secure storage before writing encrypted values into SQLite. Veloca then uses Supabase Management API to create or reuse a project named `veloca`, initializes the minimum cloud database tables, and keeps only desensitized status visible in the renderer.
 
 ## Release Workflow
 
@@ -246,7 +246,7 @@ npm run release:check
 18. Open a second markdown file and confirm it still starts in rendered mode even if the first file is in Source Mode.
 19. Open Settings and confirm the sidebar contains `Remote`, while the old placeholder entries `Appearance`, `File & Sync`, and `Shortcuts` are no longer present.
 20. In Settings > Remote, enter an invalid Supabase PAT and confirm setup fails without creating a project.
-21. Enter a valid Supabase PAT, organization slug, and database password; load regions, choose one from the dropdown, and confirm Veloca creates or connects a Supabase project named `veloca`.
+21. Enter a valid Supabase PAT, organization slug, database password, and region; choose a common region from the dropdown or type a custom region code, then confirm Veloca creates or connects a Supabase project named `veloca`.
 22. Confirm the Supabase SQL editor shows the `veloca_remote_*` tables after initialization.
 23. Restart Veloca and confirm Settings > Remote shows project status without revealing the PAT, database password, or secret key.
 24. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.

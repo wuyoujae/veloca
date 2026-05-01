@@ -86,31 +86,40 @@ interface SupabaseProjectListResponse {
   projects?: SupabaseProjectResponse[];
 }
 
-interface SupabaseRegionResponse {
-  code?: string;
-  name?: string;
-  provider?: string;
-  status?: string;
-  type?: string;
-}
-
-interface SupabaseAvailableRegionsResponse {
-  all?: {
-    smartGroup?: SupabaseRegionResponse[];
-    specific?: SupabaseRegionResponse[];
-  };
-  recommendations?: {
-    smartGroup?: SupabaseRegionResponse;
-    specific?: SupabaseRegionResponse[];
-  };
-}
-
 export type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
 
 const supabaseManagementApiBaseUrl = 'https://api.supabase.com';
 const remoteProviderSupabase = 1;
 const remoteProjectName = 'veloca';
 const defaultRegion = 'us-east-1';
+const defaultRemoteRegionData: Array<[code: string, name: string]> = [
+  ['us-east-1', 'East US (North Virginia)'],
+  ['us-east-2', 'East US (Ohio)'],
+  ['us-west-1', 'West US (North California)'],
+  ['us-west-2', 'West US (Oregon)'],
+  ['ca-central-1', 'Canada (Central)'],
+  ['eu-west-1', 'West EU (Ireland)'],
+  ['eu-west-2', 'West Europe (London)'],
+  ['eu-west-3', 'West EU (Paris)'],
+  ['eu-central-1', 'Central EU (Frankfurt)'],
+  ['eu-central-2', 'Central Europe (Zurich)'],
+  ['eu-north-1', 'North EU (Stockholm)'],
+  ['ap-south-1', 'South Asia (Mumbai)'],
+  ['ap-southeast-1', 'Southeast Asia (Singapore)'],
+  ['ap-southeast-2', 'Oceania (Sydney)'],
+  ['ap-northeast-1', 'Northeast Asia (Tokyo)'],
+  ['ap-northeast-2', 'Northeast Asia (Seoul)'],
+  ['sa-east-1', 'South America (Sao Paulo)']
+];
+const defaultRemoteRegionOptions: RemoteRegionOption[] = defaultRemoteRegionData.map(([code, name]) => ({
+  code,
+  label: `${name} - ${code}`,
+  name,
+  provider: 'AWS',
+  recommended: code === defaultRegion,
+  status: '',
+  type: 'specific'
+}));
 const statusCodeByStatus: Record<RemoteDatabaseStatus, number> = {
   notConfigured: 0,
   configured: 1,
@@ -285,6 +294,10 @@ function normalizeRemoteConfigInput(input: RemoteDatabaseConfigInput): Required<
     throw new Error('Supabase organization slug is required.');
   }
 
+  if (!/^[a-z0-9-]+$/.test(region)) {
+    throw new Error('Supabase region must be a valid region code.');
+  }
+
   return {
     databasePassword,
     organizationSlug,
@@ -457,92 +470,12 @@ async function getExistingVelocaProject(
   return projects.find((project) => project.name === remoteProjectName) ?? null;
 }
 
-function toRegionOption(region: SupabaseRegionResponse, recommendedCodes: Set<string>): RemoteRegionOption | null {
-  const code = region.code?.trim();
-  const type = region.type === 'smartGroup' ? 'smartGroup' : region.type === 'specific' ? 'specific' : null;
-
-  if (!code || !type) {
-    return null;
-  }
-
-  const name = region.name?.trim() || code;
-  const provider = region.provider?.trim() || '';
-  const status = region.status?.trim() || '';
+function getRegionSelection(regionCode: string): Pick<RemoteRegionOption, 'code' | 'type'> {
+  const staticRegion = defaultRemoteRegionOptions.find((region) => region.code === regionCode);
 
   return {
-    code,
-    label: `${name} (${code})${provider ? ` - ${provider}` : ''}${status ? ` - ${status}` : ''}`,
-    name,
-    provider,
-    recommended: recommendedCodes.has(code),
-    status,
-    type
-  };
-}
-
-async function getAvailableSupabaseRegions(
-  personalAccessToken: string,
-  organizationSlug: string
-): Promise<RemoteRegionOption[]> {
-  const payload = await fetchSupabaseManagement<SupabaseAvailableRegionsResponse>(
-    personalAccessToken,
-    `/v1/projects/available-regions?organization_slug=${encodeURIComponent(organizationSlug)}`
-  );
-  const recommendedCodes = new Set<string>();
-  const recommendedSmartGroup = payload.recommendations?.smartGroup;
-
-  if (recommendedSmartGroup?.code) {
-    recommendedCodes.add(recommendedSmartGroup.code);
-  }
-
-  for (const region of payload.recommendations?.specific ?? []) {
-    if (region.code) {
-      recommendedCodes.add(region.code);
-    }
-  }
-
-  const regions = [
-    ...(payload.all?.smartGroup ?? []),
-    ...(payload.all?.specific ?? [])
-  ];
-  const options = new Map<string, RemoteRegionOption>();
-
-  for (const region of regions) {
-    const option = toRegionOption(region, recommendedCodes);
-
-    if (option) {
-      options.set(option.code, option);
-    }
-  }
-
-  return [...options.values()].sort((left, right) => {
-    if (left.recommended !== right.recommended) {
-      return left.recommended ? -1 : 1;
-    }
-
-    if (left.type !== right.type) {
-      return left.type === 'smartGroup' ? -1 : 1;
-    }
-
-    return left.name.localeCompare(right.name);
-  });
-}
-
-async function getRequiredRegionSelection(
-  personalAccessToken: string,
-  organizationSlug: string,
-  regionCode: string
-): Promise<Pick<RemoteRegionOption, 'code' | 'type'>> {
-  const regions = await getAvailableSupabaseRegions(personalAccessToken, organizationSlug);
-  const selectedRegion = regions.find((region) => region.code === regionCode);
-
-  if (!selectedRegion) {
-    throw new Error('Selected Supabase region is not available for this organization.');
-  }
-
-  return {
-    code: selectedRegion.code,
-    type: selectedRegion.type
+    code: regionCode,
+    type: staticRegion?.type ?? 'specific'
   };
 }
 
@@ -690,17 +623,8 @@ export function saveRemoteDatabaseConfig(input: RemoteDatabaseConfigInput): Remo
   return getRemoteDatabaseConfig();
 }
 
-export async function listAvailableRemoteRegions(input: RemoteDatabaseConfigInput): Promise<RemoteRegionOption[]> {
-  const normalizedInput = normalizeRemoteConfigInput(input);
-  const existingRow = getRemoteConfigRow();
-  const personalAccessToken = normalizedInput.personalAccessToken || decryptCredential(existingRow?.encrypted_pat ?? null);
-
-  if (!personalAccessToken) {
-    throw new Error('Supabase personal access token is required before loading regions.');
-  }
-
-  await validateSupabaseOrganization(personalAccessToken, normalizedInput.organizationSlug);
-  return getAvailableSupabaseRegions(personalAccessToken, normalizedInput.organizationSlug);
+export async function listAvailableRemoteRegions(): Promise<RemoteRegionOption[]> {
+  return defaultRemoteRegionOptions;
 }
 
 export async function provisionRemoteVelocaProject(
@@ -735,11 +659,7 @@ export async function provisionRemoteVelocaProject(
     let project = existingProject;
 
     if (!project) {
-      const regionSelection = await getRequiredRegionSelection(
-        personalAccessToken,
-        normalizedInput.organizationSlug,
-        normalizedInput.region
-      );
+      const regionSelection = getRegionSelection(normalizedInput.region);
       project = await createVelocaProject(
         personalAccessToken,
         normalizedInput.organizationSlug,
