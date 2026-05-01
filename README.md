@@ -7,6 +7,7 @@
 Veloca is an early-stage desktop markdown editor inspired by Typora. The goal is to provide a focused writing experience where markdown content feels close to the final rendered document while still being practical for local desktop workflows.
 
 The current version is an early rich-editor build. It includes the Electron desktop shell, React renderer, Node backend entry point, SQLite-backed settings persistence, persisted workspace folders, recursive markdown loading, a TipTap-powered editor styled through Veloca's own UI system, local asset handling for richer Markdown documents, GitHub account binding, and Veloca-owned markdown version management through an isolated shadow repository.
+It also includes an early Remote settings path for creating and initializing a user-owned Supabase project named `veloca`.
 
 ## Table of Contents
 
@@ -65,6 +66,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - GitHub account binding through the OAuth device authorization flow.
 - Veloca version management for saved local filesystem `.md` files through a private GitHub repository named `veloca-version-manager`.
 - Sidebar Git tab showing only Veloca-managed markdown changes from the isolated shadow repository.
+- Remote Supabase configuration through Settings, including encrypted local credential storage and automatic initialization of Veloca cloud database tables.
 - Settings modal with polished dark/light theme switching.
 - SQLite-backed app setting storage for theme and Auto Save persistence.
 - Toast message component for user feedback.
@@ -75,7 +77,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 | --- | --- |
 | Frontend | React, TypeScript, Vite, Lucide React, TipTap, `@tiptap/markdown`, Mermaid, KaTeX, Shiki, DOMPurify, Marked, CSS |
 | Desktop shell | Electron, electron-vite |
-| Backend | Node.js, TypeScript, isomorphic-git |
+| Backend | Node.js, TypeScript, isomorphic-git, `pg`, `@supabase/supabase-js` |
 | Database | SQLite through `better-sqlite3` |
 | Build tools | TypeScript, Vite, electron-vite |
 | Testing | not configured yet; this foundation milestone is verified through typecheck and production build |
@@ -157,6 +159,8 @@ Version management data is stored under Electron's user data directory at `versi
 
 Auto Save is a user preference stored in the `app_settings` table and defaults to enabled. It is not an environment variable because it changes per user inside the app.
 
+Remote Supabase configuration is also a user preference configured inside Settings rather than through required environment variables. The Remote panel asks for a Supabase personal access token, organization slug, region, and database password. Veloca stores sensitive values with Electron secure storage before writing encrypted values into SQLite. It then uses Supabase Management API to create or reuse a project named `veloca`, initializes the minimum cloud database tables, and keeps only desensitized status visible in the renderer.
+
 ## Release Workflow
 
 Veloca uses npm scripts plus GitHub Actions for desktop releases. Local scripts prepare the version commit and Git tag; GitHub Actions builds platform artifacts and creates a draft GitHub Release.
@@ -199,6 +203,8 @@ All application code lives under `app`.
 
 Database design should stay minimal and match the backend logic being implemented. Do not add speculative tables or fields before the related business behavior exists.
 
+Remote Supabase development is documented in `docs/models/remote-database.md`. The current remote module initializes cloud tables only; local-to-remote sync and conflict resolution are future work.
+
 ## Testing Guide
 
 The current foundation can be checked with:
@@ -238,25 +244,30 @@ npm run release:check
 16. Click the code icon to switch the active file into Source Mode, confirm the raw Markdown is editable, make a small change, and confirm the status bar shows `Unsaved`.
 17. Click the document icon to return to rendered mode and confirm the same content is shown in the rich editor.
 18. Open a second markdown file and confirm it still starts in rendered mode even if the first file is in Source Mode.
-19. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
-20. Wait for Auto Save and confirm the status bar returns to `Saved`.
-21. Select a different file, then return to the edited file and confirm the saved content is still present.
-22. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
-23. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
-24. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
-25. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
-26. Enter `$E=mc^2$` and `$$\int_0^1 x^2 dx$$` and confirm both formulas render.
-27. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
-28. Add `VELOCA_GITHUB_CLIENT_ID` to `.env`, open `Settings` → `Account`, click `Bind GitHub`, enter the displayed code on GitHub, and confirm the connected GitHub account appears in Veloca.
-29. Switch to the sidebar `Git` tab and confirm it prompts for repository setup after GitHub is bound with the required `repo` permission.
-30. Click `Create Repository` and confirm GitHub has a private repository named `veloca-version-manager`.
-31. Edit and save a local filesystem `.md` file, then confirm the `Git` tab lists a Veloca markdown change.
-32. Confirm the original workspace folder does not gain a new `.git` folder and an existing user `.git` status is not changed by Veloca.
-33. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/`.
-34. Click `Settings` in the sidebar.
-35. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-36. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
-37. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+19. Open Settings and confirm the sidebar contains `Remote`, while the old placeholder entries `Appearance`, `File & Sync`, and `Shortcuts` are no longer present.
+20. In Settings > Remote, enter an invalid Supabase PAT and confirm setup fails without creating a project.
+21. Enter a valid Supabase PAT, organization slug, region, and database password; confirm Veloca creates or connects a Supabase project named `veloca`.
+22. Confirm the Supabase SQL editor shows the `veloca_remote_*` tables after initialization.
+23. Restart Veloca and confirm Settings > Remote shows project status without revealing the PAT, database password, or secret key.
+24. Use `More Actions` → `Split Editor Right`, switch only one pane into Source Mode, and confirm the other pane keeps its own view mode.
+25. Wait for Auto Save and confirm the status bar returns to `Saved`.
+26. Select a different file, then return to the edited file and confirm the saved content is still present.
+27. Paste or drag an image into a filesystem markdown document and confirm a sibling `.assets` folder is created and the image renders inside the document.
+28. Paste or drag an image into a database-backed markdown document and confirm it still renders after switching files.
+29. Paste a YouTube URL or raw iframe snippet and confirm it renders as an embedded media block.
+30. Type `/` and confirm the command menu shows Mermaid, Table, and Code Block. Type `/m` to filter Mermaid, press `Enter`, and confirm it creates a Mermaid diagram card. Type `/t` to filter Table and confirm it creates an empty 2 × 2 table. Then try `Text before command /mermaid` and confirm the text remains while a Mermaid card is inserted below.
+31. Enter `$E=mc^2$` and `$$\int_0^1 x^2 dx$$` and confirm both formulas render.
+32. Switch to `Outline` and select headings to confirm the active outline state changes and scroll behavior.
+33. Add `VELOCA_GITHUB_CLIENT_ID` to `.env`, open `Settings` → `Account`, click `Bind GitHub`, enter the displayed code on GitHub, and confirm the connected GitHub account appears in Veloca.
+34. Switch to the sidebar `Git` tab and confirm it prompts for repository setup after GitHub is bound with the required `repo` permission.
+35. Click `Create Repository` and confirm GitHub has a private repository named `veloca-version-manager`.
+36. Edit and save a local filesystem `.md` file, then confirm the `Git` tab lists a Veloca markdown change.
+37. Confirm the original workspace folder does not gain a new `.git` folder and an existing user `.git` status is not changed by Veloca.
+38. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/`.
+39. Click `Settings` in the sidebar.
+40. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
+41. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
+42. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
 </details>
 

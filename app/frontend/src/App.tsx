@@ -100,7 +100,7 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline' | 'git';
-type SettingsPanel = 'editor' | 'aiModel' | 'account';
+type SettingsPanel = 'editor' | 'aiModel' | 'remote' | 'account';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
@@ -123,6 +123,38 @@ interface AiModelConfig {
   apiKey: string;
   model: string;
   contextWindow: number;
+}
+
+type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
+
+interface RemoteDatabaseConfigInput {
+  databasePassword?: string;
+  organizationSlug: string;
+  personalAccessToken?: string;
+  region: string;
+}
+
+interface RemoteDatabaseConfigView {
+  databaseHost: string;
+  databasePasswordSaved: boolean;
+  initializedAt: number | null;
+  lastError: string;
+  organizationSlug: string;
+  patSaved: boolean;
+  projectName: string;
+  projectRef: string;
+  projectUrl: string;
+  publishableKeySaved: boolean;
+  region: string;
+  secretKeySaved: boolean;
+  status: RemoteDatabaseStatus;
+  statusCode: number;
+  updatedAt: number | null;
+}
+
+interface RemoteProjectProvisionResult {
+  config: RemoteDatabaseConfigView;
+  reusedExistingProject: boolean;
 }
 
 interface WorkspaceTreeNode {
@@ -338,6 +370,24 @@ const emptyWorkspace: WorkspaceSnapshot = {
   folders: [],
   tree: [],
   totalMarkdownFiles: 0
+};
+
+const emptyRemoteConfig: RemoteDatabaseConfigView = {
+  databaseHost: '',
+  databasePasswordSaved: false,
+  initializedAt: null,
+  lastError: '',
+  organizationSlug: '',
+  patSaved: false,
+  projectName: 'veloca',
+  projectRef: '',
+  projectUrl: '',
+  publishableKeySaved: false,
+  region: 'us-east-1',
+  secretKeySaved: false,
+  status: 'notConfigured',
+  statusCode: 0,
+  updatedAt: null
 };
 
 const normalizeTabGroup = (paths: string[]): EditorTabGroup => Array.from(new Set(paths)).slice(0, 2);
@@ -1145,6 +1195,14 @@ export function App(): JSX.Element {
     contextWindow: 128000
   });
   const [aiConfigLoading, setAiConfigLoading] = useState(false);
+  const [remoteConfig, setRemoteConfig] = useState<RemoteDatabaseConfigView>(emptyRemoteConfig);
+  const [remoteInput, setRemoteInput] = useState<RemoteDatabaseConfigInput>({
+    databasePassword: '',
+    organizationSlug: '',
+    personalAccessToken: '',
+    region: 'us-east-1'
+  });
+  const [remoteLoading, setRemoteLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [githubStatus, setGithubStatus] = useState<GitHubAuthStatus>(emptyGitHubStatus);
   const [githubBinding, setGithubBinding] = useState<GitHubDeviceBinding | null>(null);
@@ -1404,6 +1462,15 @@ export function App(): JSX.Element {
       if (config.baseUrl || config.apiKey || config.model || config.contextWindow > 0) {
         setAiConfig(config);
       }
+    });
+    window.veloca?.settings.getRemoteConfig().then((config) => {
+      setRemoteConfig(config);
+      setRemoteInput({
+        databasePassword: '',
+        organizationSlug: config.organizationSlug,
+        personalAccessToken: '',
+        region: config.region || 'us-east-1'
+      });
     });
     window.veloca?.github.getStatus().then(applyGitHubStatus);
     void refreshVersionManagerStatus();
@@ -1734,6 +1801,105 @@ export function App(): JSX.Element {
       title: 'AI Model Updated',
       description: 'AI model configuration has been saved. Restart any active agent session to apply changes.'
     });
+  };
+
+  const applyRemoteConfig = (config: RemoteDatabaseConfigView) => {
+    setRemoteConfig(config);
+    setRemoteInput((current) => ({
+      ...current,
+      databasePassword: '',
+      organizationSlug: config.organizationSlug || current.organizationSlug,
+      personalAccessToken: '',
+      region: config.region || current.region || 'us-east-1'
+    }));
+  };
+
+  const saveRemoteConfig = async () => {
+    if (!window.veloca?.settings || remoteLoading) {
+      return;
+    }
+
+    setRemoteLoading(true);
+
+    try {
+      const config = await window.veloca.settings.saveRemoteConfig(remoteInput);
+      applyRemoteConfig(config);
+      showToast({
+        type: 'success',
+        title: 'Remote Settings Saved',
+        description: 'Supabase remote configuration was encrypted and saved locally.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Remote Settings Failed',
+        description: getErrorDescription(error, 'Veloca could not save the Supabase configuration.')
+      });
+    } finally {
+      setRemoteLoading(false);
+    }
+  };
+
+  const createRemoteVelocaProject = async () => {
+    if (!window.veloca?.remote || remoteLoading) {
+      return;
+    }
+
+    setRemoteLoading(true);
+    setRemoteConfig((current) => ({
+      ...current,
+      lastError: '',
+      status: 'creating',
+      statusCode: 2
+    }));
+
+    try {
+      const result = await window.veloca.remote.createVelocaProject(remoteInput);
+      applyRemoteConfig(result.config);
+      showToast({
+        type: 'success',
+        title: result.reusedExistingProject ? 'Remote Project Connected' : 'Remote Project Created',
+        description: result.reusedExistingProject
+          ? 'Veloca reused the existing Supabase project and initialized the cloud tables.'
+          : 'Veloca created the Supabase project and initialized the cloud tables.'
+      });
+    } catch (error) {
+      const nextConfig = await window.veloca.settings.getRemoteConfig();
+      applyRemoteConfig(nextConfig);
+      showToast({
+        type: 'info',
+        title: 'Remote Setup Failed',
+        description: getErrorDescription(error, 'Veloca could not create or initialize the Supabase project.')
+      });
+    } finally {
+      setRemoteLoading(false);
+    }
+  };
+
+  const testRemoteConnection = async () => {
+    if (!window.veloca?.remote || remoteLoading) {
+      return;
+    }
+
+    setRemoteLoading(true);
+
+    try {
+      const config = await window.veloca.remote.testConnection();
+      applyRemoteConfig(config);
+      showToast({
+        type: 'success',
+        title: 'Remote Connected',
+        description: 'Veloca reached the Supabase project successfully.'
+      });
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Remote Test Failed',
+        description: getErrorDescription(error, 'Veloca could not connect to the Supabase project.')
+      });
+    } finally {
+      setRemoteLoading(false);
+    }
   };
 
   const bindGitHubAccount = async () => {
@@ -4640,8 +4806,12 @@ export function App(): JSX.Element {
               >
                 AI Model
               </button>
-              <button className="settings-nav-item" type="button">
-                Appearance
+              <button
+                className={settingsPanel === 'remote' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('remote')}
+              >
+                Remote
               </button>
               <button
                 className={settingsPanel === 'account' ? 'settings-nav-item active' : 'settings-nav-item'}
@@ -4649,12 +4819,6 @@ export function App(): JSX.Element {
                 onClick={() => setSettingsPanel('account')}
               >
                 Account
-              </button>
-              <button className="settings-nav-item" type="button">
-                File & Sync
-              </button>
-              <button className="settings-nav-item" type="button">
-                Shortcuts
               </button>
               <span className="settings-spacer" />
               <button className="settings-nav-item muted" type="button">
@@ -4841,6 +5005,170 @@ export function App(): JSX.Element {
                       <code>VELOCA_AGENT_CONTEXT_WINDOW</code>) from your <code>.env</code> file. Leave fields empty
                       to fall back to <code>.env</code> or built-in defaults.
                     </p>
+                  </>
+                )}
+                {settingsPanel === 'remote' && (
+                  <>
+                    <h3 className="settings-section-title">Remote</h3>
+
+                    <div className="account-provider-panel">
+                      <div className="account-provider-header">
+                        <div className="account-provider-title">
+                          <Database size={18} />
+                          <span>Supabase</span>
+                        </div>
+                        <span className={remoteConfig.status === 'initialized' ? 'account-status connected' : 'account-status'}>
+                          {getRemoteStatusLabel(remoteConfig.status)}
+                        </span>
+                      </div>
+
+                      <div className="remote-status-grid">
+                        <div className="remote-status-item">
+                          <span>Project</span>
+                          <strong>{remoteConfig.projectRef || 'Not created'}</strong>
+                        </div>
+                        <div className="remote-status-item">
+                          <span>Database Host</span>
+                          <strong>{remoteConfig.databaseHost || 'Not available'}</strong>
+                        </div>
+                        <div className="remote-status-item">
+                          <span>Credentials</span>
+                          <strong>{getRemoteCredentialSummary(remoteConfig)}</strong>
+                        </div>
+                      </div>
+
+                      {remoteConfig.projectUrl && (
+                        <a
+                          className="remote-project-link"
+                          href={remoteConfig.projectUrl}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink size={14} />
+                          Open Supabase Project
+                        </a>
+                      )}
+
+                      {remoteConfig.lastError && (
+                        <div className="settings-warning">
+                          {remoteConfig.lastError}
+                        </div>
+                      )}
+
+                      <div className="setting-row compact">
+                        <div className="setting-info">
+                          <span className="setting-label">Personal Access Token</span>
+                          <span className="setting-desc">
+                            Stored locally with Electron secure storage and never shown again after saving.
+                          </span>
+                        </div>
+                        <input
+                          className="settings-text-input"
+                          type="password"
+                          placeholder={remoteConfig.patSaved ? 'Saved token' : 'sbp_...'}
+                          value={remoteInput.personalAccessToken ?? ''}
+                          onChange={(event) =>
+                            setRemoteInput((current) => ({
+                              ...current,
+                              personalAccessToken: event.currentTarget.value
+                            }))
+                          }
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="setting-row compact">
+                        <div className="setting-info">
+                          <span className="setting-label">Organization Slug</span>
+                          <span className="setting-desc">Supabase organization where Veloca will create or reuse the project.</span>
+                        </div>
+                        <input
+                          className="settings-text-input"
+                          type="text"
+                          placeholder="your-org"
+                          value={remoteInput.organizationSlug}
+                          onChange={(event) =>
+                            setRemoteInput((current) => ({
+                              ...current,
+                              organizationSlug: event.currentTarget.value
+                            }))
+                          }
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="setting-row compact">
+                        <div className="setting-info">
+                          <span className="setting-label">Region</span>
+                          <span className="setting-desc">Supabase region code used when Veloca creates the remote project.</span>
+                        </div>
+                        <input
+                          className="settings-text-input"
+                          type="text"
+                          placeholder="us-east-1"
+                          value={remoteInput.region}
+                          onChange={(event) =>
+                            setRemoteInput((current) => ({
+                              ...current,
+                              region: event.currentTarget.value
+                            }))
+                          }
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="setting-row compact">
+                        <div className="setting-info">
+                          <span className="setting-label">Database Password</span>
+                          <span className="setting-desc">
+                            Required by Supabase project creation and encrypted before local persistence.
+                          </span>
+                        </div>
+                        <input
+                          className="settings-text-input"
+                          type="password"
+                          placeholder={remoteConfig.databasePasswordSaved ? 'Saved password' : 'Strong database password'}
+                          value={remoteInput.databasePassword ?? ''}
+                          onChange={(event) =>
+                            setRemoteInput((current) => ({
+                              ...current,
+                              databasePassword: event.currentTarget.value
+                            }))
+                          }
+                          spellCheck={false}
+                        />
+                      </div>
+
+                      <div className="account-actions">
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={remoteLoading}
+                          onClick={() => void saveRemoteConfig()}
+                        >
+                          {remoteLoading ? <LoaderCircle className="spinning" size={15} /> : <Save size={15} />}
+                          Save
+                        </button>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          disabled={remoteLoading || remoteConfig.status !== 'initialized'}
+                          onClick={() => void testRemoteConnection()}
+                        >
+                          <RefreshCw className={remoteLoading ? 'spinning' : ''} size={15} />
+                          Test
+                        </button>
+                        <button
+                          className="primary-action"
+                          type="button"
+                          disabled={remoteLoading || !canSubmitRemoteConfig(remoteInput, remoteConfig)}
+                          onClick={() => void createRemoteVelocaProject()}
+                        >
+                          {remoteLoading ? <LoaderCircle className="spinning" size={15} /> : <Database size={15} />}
+                          Create / Connect Veloca Project
+                        </button>
+                      </div>
+                    </div>
                   </>
                 )}
                 {settingsPanel === 'account' && (
@@ -7583,6 +7911,54 @@ function getSaveStatusLabel(status: SaveStatus): string {
   }
 
   return 'Saved';
+}
+
+function getRemoteStatusLabel(status: RemoteDatabaseStatus): string {
+  if (status === 'configured') {
+    return 'Configured';
+  }
+
+  if (status === 'creating') {
+    return 'Creating';
+  }
+
+  if (status === 'waiting') {
+    return 'Waiting';
+  }
+
+  if (status === 'initialized') {
+    return 'Initialized';
+  }
+
+  if (status === 'failed') {
+    return 'Failed';
+  }
+
+  return 'Not Configured';
+}
+
+function getRemoteCredentialSummary(config: RemoteDatabaseConfigView): string {
+  const savedCredentials = [
+    config.patSaved ? 'PAT' : '',
+    config.databasePasswordSaved ? 'DB Password' : '',
+    config.secretKeySaved ? 'Secret Key' : '',
+    config.publishableKeySaved ? 'Publishable Key' : ''
+  ].filter(Boolean);
+
+  return savedCredentials.length ? savedCredentials.join(', ') : 'Not saved';
+}
+
+function canSubmitRemoteConfig(input: RemoteDatabaseConfigInput, config: RemoteDatabaseConfigView): boolean {
+  return Boolean(
+    input.organizationSlug.trim() &&
+      input.region.trim() &&
+      ((input.personalAccessToken ?? '').trim() || config.patSaved) &&
+      ((input.databasePassword ?? '').trim() || config.databasePasswordSaved)
+  );
+}
+
+function getErrorDescription(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 function getSaveButtonLabel(status: SaveStatus, autoSave: boolean): string {

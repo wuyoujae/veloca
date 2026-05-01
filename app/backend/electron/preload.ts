@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { AiModelConfig, ThemeMode } from '../services/settings-store';
+import type {
+  RemoteDatabaseConfigInput,
+  RemoteDatabaseConfigView,
+  RemoteProjectProvisionResult
+} from '../services/remote-database-service';
 import type { GitHubAuthStatus, GitHubDeviceBinding } from '../services/github-auth-service';
 import type {
   VersionCommitResult,
@@ -40,7 +45,15 @@ contextBridge.exposeInMainWorld('veloca', {
       ipcRenderer.invoke('settings:set-auto-save', enabled) as Promise<boolean>,
     getAiConfig: () => ipcRenderer.invoke('settings:get-ai-config') as Promise<AiModelConfig>,
     setAiConfig: (config: AiModelConfig) =>
-      ipcRenderer.invoke('settings:set-ai-config', config) as Promise<AiModelConfig>
+      ipcRenderer.invoke('settings:set-ai-config', config) as Promise<AiModelConfig>,
+    getRemoteConfig: () => ipcRenderer.invoke('settings:get-remote-config') as Promise<RemoteDatabaseConfigView>,
+    saveRemoteConfig: (config: RemoteDatabaseConfigInput) =>
+      ipcRenderer.invoke('settings:save-remote-config', config) as Promise<RemoteDatabaseConfigView>
+  },
+  remote: {
+    createVelocaProject: (config: RemoteDatabaseConfigInput) =>
+      ipcRenderer.invoke('remote:create-veloca-project', config) as Promise<RemoteProjectProvisionResult>,
+    testConnection: () => ipcRenderer.invoke('remote:test-connection') as Promise<RemoteDatabaseConfigView>
   },
   workspace: {
     get: () => ipcRenderer.invoke('workspace:get') as Promise<WorkspaceSnapshot>,

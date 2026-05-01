@@ -4877,6 +4877,10 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+.setting-row.compact {
+  padding: 12px 0;
+}
+
 .setting-info {
   display: flex;
   max-width: 70%;
@@ -5095,6 +5099,53 @@ button {
 .account-actions {
   gap: 10px;
   justify-content: flex-end;
+}
+
+.remote-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.remote-status-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+
+.remote-status-item span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.remote-status-item strong {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-project-link {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  transition: color 0.18s ease;
+}
+
+.remote-project-link:hover {
+  color: var(--foreground);
 }
 
 .theme-toggle {
@@ -5326,5 +5377,9 @@ button {
 
   .settings-window {
     width: calc(100vw - 32px);
+  }
+
+  .remote-status-grid {
+    grid-template-columns: 1fr;
   }
 }

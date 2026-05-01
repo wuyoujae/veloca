@@ -158,6 +158,38 @@ interface AiModelConfig {
   contextWindow: number;
 }
 
+type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
+
+interface RemoteDatabaseConfigInput {
+  databasePassword?: string;
+  organizationSlug: string;
+  personalAccessToken?: string;
+  region: string;
+}
+
+interface RemoteDatabaseConfigView {
+  databaseHost: string;
+  databasePasswordSaved: boolean;
+  initializedAt: number | null;
+  lastError: string;
+  organizationSlug: string;
+  patSaved: boolean;
+  projectName: string;
+  projectRef: string;
+  projectUrl: string;
+  publishableKeySaved: boolean;
+  region: string;
+  secretKeySaved: boolean;
+  status: RemoteDatabaseStatus;
+  statusCode: number;
+  updatedAt: number | null;
+}
+
+interface RemoteProjectProvisionResult {
+  config: RemoteDatabaseConfigView;
+  reusedExistingProject: boolean;
+}
+
 interface AgentAttachmentSummary {
   mimeType: string;
   name: string;
@@ -255,6 +287,12 @@ declare global {
         setAutoSave: (enabled: boolean) => Promise<boolean>;
         getAiConfig: () => Promise<AiModelConfig>;
         setAiConfig: (config: AiModelConfig) => Promise<AiModelConfig>;
+        getRemoteConfig: () => Promise<RemoteDatabaseConfigView>;
+        saveRemoteConfig: (config: RemoteDatabaseConfigInput) => Promise<RemoteDatabaseConfigView>;
+      };
+      remote: {
+        createVelocaProject: (config: RemoteDatabaseConfigInput) => Promise<RemoteProjectProvisionResult>;
+        testConnection: () => Promise<RemoteDatabaseConfigView>;
       };
       workspace: {
         get: () => Promise<WorkspaceSnapshot>;

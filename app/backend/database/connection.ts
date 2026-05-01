@@ -119,6 +119,27 @@ export function getDatabase(): Database.Database {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS remote_database_configs (
+      id TEXT PRIMARY KEY,
+      provider INTEGER NOT NULL,
+      project_name TEXT NOT NULL,
+      organization_slug TEXT NOT NULL,
+      region TEXT NOT NULL,
+      project_ref TEXT,
+      project_url TEXT,
+      database_host TEXT,
+      publishable_key TEXT,
+      encrypted_pat TEXT,
+      encrypted_db_password TEXT,
+      encrypted_secret_key TEXT,
+      status INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      initialized_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(provider, organization_slug, project_name)
+    );
   `);
 
   return database;

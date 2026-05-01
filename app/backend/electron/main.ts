@@ -27,6 +27,13 @@ import {
   type ThemeMode
 } from '../services/settings-store';
 import {
+  getRemoteDatabaseConfig,
+  provisionRemoteVelocaProject,
+  saveRemoteDatabaseConfig,
+  testRemoteDatabaseConnection,
+  type RemoteDatabaseConfigInput
+} from '../services/remote-database-service';
+import {
   completeGitHubBinding,
   getGitHubAuthStatus,
   startGitHubBinding,
@@ -276,6 +283,38 @@ function registerIpcHandlers(): void {
     }
 
     return setAiConfig(config);
+  });
+  ipcMain.handle('settings:get-remote-config', () => {
+    return getRemoteDatabaseConfig();
+  });
+  ipcMain.handle('settings:save-remote-config', (_event, config: RemoteDatabaseConfigInput) => {
+    if (
+      !config ||
+      typeof config.organizationSlug !== 'string' ||
+      typeof config.region !== 'string' ||
+      (config.personalAccessToken !== undefined && typeof config.personalAccessToken !== 'string') ||
+      (config.databasePassword !== undefined && typeof config.databasePassword !== 'string')
+    ) {
+      throw new Error('Invalid remote database configuration.');
+    }
+
+    return saveRemoteDatabaseConfig(config);
+  });
+  ipcMain.handle('remote:create-veloca-project', (_event, config: RemoteDatabaseConfigInput) => {
+    if (
+      !config ||
+      typeof config.organizationSlug !== 'string' ||
+      typeof config.region !== 'string' ||
+      (config.personalAccessToken !== undefined && typeof config.personalAccessToken !== 'string') ||
+      (config.databasePassword !== undefined && typeof config.databasePassword !== 'string')
+    ) {
+      throw new Error('Invalid remote database configuration.');
+    }
+
+    return provisionRemoteVelocaProject(config);
+  });
+  ipcMain.handle('remote:test-connection', () => {
+    return testRemoteDatabaseConnection();
   });
   ipcMain.handle('github:get-status', () => getGitHubAuthStatus());
   ipcMain.handle('github:start-binding', async () => {
