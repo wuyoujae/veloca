@@ -2159,6 +2159,15 @@ export function App(): JSX.Element {
       const status =
         mode === 'retry' ? await window.veloca.remote.retryFailedSync() : await window.veloca.remote.syncNow();
       setRemoteSyncStatus(status);
+      if (status.lastError) {
+        showToast({
+          type: 'info',
+          title: 'Remote Sync Failed',
+          description: status.lastError
+        });
+        return;
+      }
+
       showToast({
         type: 'success',
         title: mode === 'retry' ? 'Remote Retry Finished' : 'Remote Sync Finished',

@@ -197,6 +197,20 @@ function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function getUserFacingSyncError(error: unknown): string {
+  const message = getErrorMessage(error);
+
+  if (
+    /fetch failed|net::ERR_|ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|network|connection terminated/i.test(
+      message
+    )
+  ) {
+    return 'Remote sync could not reach Supabase. Veloca will keep working locally; please check the network and retry sync later.';
+  }
+
+  return message;
+}
+
 function decryptCredential(encryptedValue: string | null): string | null {
   if (!encryptedValue) {
     return null;
@@ -875,14 +889,23 @@ export async function runRemoteSync(reason: 'manual' | 'retry' | 'startup' | 'sa
           await pushFilesystemDocument(supabase, item, config);
         }
       } catch (error) {
-        markSyncItemResult(item.source_key, syncStateFailed, item.content_hash ?? undefined, getErrorMessage(error));
+        console.warn('[remote-sync] item sync failed', {
+          error: getErrorMessage(error),
+          reason,
+          sourceKey: item.source_key
+        });
+        markSyncItemResult(item.source_key, syncStateFailed, item.content_hash ?? undefined, getUserFacingSyncError(error));
       }
     }
 
     lastRunAt = Date.now();
     return getRemoteSyncStatus();
   } catch (error) {
-    lastRunError = getErrorMessage(error);
+    console.warn('[remote-sync] sync failed', {
+      error: getErrorMessage(error),
+      reason
+    });
+    lastRunError = getUserFacingSyncError(error);
     return getRemoteSyncStatus();
   } finally {
     remoteSyncRunning = false;
@@ -905,6 +928,10 @@ export function runRemoteSyncInBackground(reason: 'startup' | 'save'): void {
   }
 
   void runRemoteSync(reason).catch((error) => {
-    lastRunError = getErrorMessage(error);
+    console.warn('[remote-sync] background sync failed', {
+      error: getErrorMessage(error),
+      reason
+    });
+    lastRunError = getUserFacingSyncError(error);
   });
 }
