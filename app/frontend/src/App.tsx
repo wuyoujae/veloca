@@ -22,6 +22,7 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   ArrowUpToLine,
+  Bot,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -5393,6 +5394,16 @@ export function App(): JSX.Element {
                 ) : (
                   <FileText className="editor-action-icon" size={14} />
                 )}
+              </button>
+
+              <button
+                className="editor-action-btn"
+                title="Open Agent Panel"
+                type="button"
+                onClick={() => openAgentPalette()}
+                aria-label="Open Agent Panel"
+              >
+                <Bot className="editor-action-icon" size={14} />
               </button>
 
               <button
