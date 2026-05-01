@@ -108,6 +108,7 @@ type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
 const aiInsertLogPrefix = '[Veloca AI Insert]';
 const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
+const remoteCredentialMask = '********';
 
 function logAiInsertDebug(message: string, details?: Record<string, unknown>): void {
   console.info(aiInsertLogPrefix, message, details ?? {});
@@ -1510,13 +1511,7 @@ export function App(): JSX.Element {
       }
     });
     window.veloca?.settings.getRemoteConfig().then((config) => {
-      setRemoteConfig(config);
-      setRemoteInput({
-        databasePassword: '',
-        organizationSlug: config.organizationSlug,
-        personalAccessToken: '',
-        region: config.region || 'us-east-1'
-      });
+      applyRemoteConfig(config);
     });
     window.veloca?.github.getStatus().then(applyGitHubStatus);
     void refreshVersionManagerStatus();
@@ -1885,11 +1880,50 @@ export function App(): JSX.Element {
     setRemoteConfig(config);
     setRemoteInput((current) => ({
       ...current,
-      databasePassword: '',
+      databasePassword: config.databasePasswordSaved ? remoteCredentialMask : '',
       organizationSlug: config.organizationSlug || current.organizationSlug,
-      personalAccessToken: '',
+      personalAccessToken: config.patSaved ? remoteCredentialMask : '',
       region: config.region || current.region || 'us-east-1'
     }));
+  };
+
+  const getRemoteConfigSubmission = (): RemoteDatabaseConfigInput => ({
+    ...remoteInput,
+    databasePassword: remoteInput.databasePassword === remoteCredentialMask ? undefined : remoteInput.databasePassword,
+    personalAccessToken:
+      remoteInput.personalAccessToken === remoteCredentialMask ? undefined : remoteInput.personalAccessToken
+  });
+
+  const clearMaskedRemoteInputField = (field: 'databasePassword' | 'personalAccessToken') => {
+    setRemoteInput((current) => {
+      if (current[field] !== remoteCredentialMask) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [field]: ''
+      };
+    });
+  };
+
+  const restoreMaskedRemoteInputField = (field: 'databasePassword' | 'personalAccessToken') => {
+    const saved = field === 'databasePassword' ? remoteConfig.databasePasswordSaved : remoteConfig.patSaved;
+
+    if (!saved) {
+      return;
+    }
+
+    setRemoteInput((current) => {
+      if ((current[field] ?? '').trim()) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [field]: remoteCredentialMask
+      };
+    });
   };
 
   const updateRemoteInputField = (field: RemoteInputField, value: string, source: 'change' | 'paste') => {
@@ -1935,7 +1969,7 @@ export function App(): JSX.Element {
     setRemoteLoading(true);
 
     try {
-      const config = await window.veloca.settings.saveRemoteConfig(remoteInput);
+      const config = await window.veloca.settings.saveRemoteConfig(getRemoteConfigSubmission());
       applyRemoteConfig(config);
       showToast({
         type: 'success',
@@ -1967,7 +2001,7 @@ export function App(): JSX.Element {
     }));
 
     try {
-      const result = await window.veloca.remote.createVelocaProject(remoteInput);
+      const result = await window.veloca.remote.createVelocaProject(getRemoteConfigSubmission());
       applyRemoteConfig(result.config);
       showToast({
         type: 'success',
@@ -5188,6 +5222,8 @@ export function App(): JSX.Element {
                           onChange={(event) =>
                             updateRemoteInputField('personalAccessToken', event.currentTarget.value, 'change')
                           }
+                          onBlur={() => restoreMaskedRemoteInputField('personalAccessToken')}
+                          onFocus={() => clearMaskedRemoteInputField('personalAccessToken')}
                           onPaste={(event) => pasteRemoteInputField('personalAccessToken', event)}
                           spellCheck={false}
                         />
@@ -5255,6 +5291,8 @@ export function App(): JSX.Element {
                           onChange={(event) =>
                             updateRemoteInputField('databasePassword', event.currentTarget.value, 'change')
                           }
+                          onBlur={() => restoreMaskedRemoteInputField('databasePassword')}
+                          onFocus={() => clearMaskedRemoteInputField('databasePassword')}
                           onPaste={(event) => pasteRemoteInputField('databasePassword', event)}
                           spellCheck={false}
                         />

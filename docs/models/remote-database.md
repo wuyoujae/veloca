@@ -32,7 +32,7 @@ Remote v1 不依赖 `available-regions` endpoint。Settings 面板内置 Supabas
 - `project_ref`、`project_url`、`database_host`、`publishable_key` 可明文保存。
 - Supabase PAT、database password、secret key 必须通过 Electron `safeStorage` 加密后保存。
 
-如果当前系统无法提供 secure credential storage，Veloca 会拒绝保存敏感凭据，并提示用户启用系统钥匙串或凭据服务。Renderer 只接收脱敏状态，例如 `patSaved`、`databasePasswordSaved`、`secretKeySaved`，不会接收明文密钥。
+如果当前系统无法提供 secure credential storage，Veloca 会拒绝保存敏感凭据，并提示用户启用系统钥匙串或凭据服务。Renderer 只接收脱敏状态，例如 `patSaved`、`databasePasswordSaved`、`secretKeySaved`，不会接收明文密钥。Remote 面板会用掩码显示已保存的 PAT 和 database password；提交保存或创建项目时，掩码值不会覆盖本地加密凭据。
 
 ## Remote Schema
 
