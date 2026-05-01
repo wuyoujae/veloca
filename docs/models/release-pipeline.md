@@ -46,6 +46,12 @@ The release job runs only for `v*` tag refs. It downloads all matrix artifacts, 
 
 Build output is written to the local `release/` directory by electron-builder. This directory is ignored by Git through `.gitignore` and should not be committed.
 
+## Runtime Dependency Packaging
+
+Veloca's packaged main process loads `isomorphic-git`, which loads `sha.js` and related hashing dependencies at runtime. The `call-bind-apply-helpers` package must be present at the root `node_modules` level inside `app.asar` because dependencies such as `dunder-proto` resolve it from their own root-level package paths.
+
+`package.json` declares `call-bind-apply-helpers` as a production dependency and includes it with an explicit electron-builder FileSet. Do not remove this packaging rule unless the dependency tree is changed and the generated `app.asar` is verified to still contain a root-level `/node_modules/call-bind-apply-helpers` directory.
+
 ## Required Repository Settings
 
 The workflow uses the default `GITHUB_TOKEN`. Repository Actions settings must allow workflows to read repository contents and write releases. No custom secret is required for the current unsigned builds.
@@ -60,4 +66,5 @@ macOS artifacts are currently unsigned. Windows artifacts are packaged as zip fi
 - Run `npm run release:push`.
 - Open the repository's Actions tab and confirm the `Build & Release` workflow runs for the pushed tag.
 - Confirm the draft GitHub Release contains Linux AppImage, Windows zip, and macOS dmg/zip artifacts.
+- Confirm `app.asar` contains `/node_modules/call-bind-apply-helpers` at the root `node_modules` level.
 - Download at least one artifact from the draft release and smoke-test app startup before publishing the release.
