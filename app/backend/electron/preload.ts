@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { AiModelConfig, ShortcutSettings, ThemeMode } from '../services/settings-store';
+import type { AiModelConfig, ShortcutSettings, ThemeMode, TypographySettings } from '../services/settings-store';
 import type {
   RemoteDatabaseConfigInput,
   RemoteDatabaseConfigView,
@@ -56,6 +56,10 @@ contextBridge.exposeInMainWorld('veloca', {
     getShortcutSettings: () => ipcRenderer.invoke('settings:get-shortcut-settings') as Promise<ShortcutSettings>,
     setShortcutSettings: (settings: ShortcutSettings) =>
       ipcRenderer.invoke('settings:set-shortcut-settings', settings) as Promise<ShortcutSettings>,
+    getTypographySettings: () =>
+      ipcRenderer.invoke('settings:get-typography-settings') as Promise<TypographySettings>,
+    setTypographySettings: (settings: TypographySettings) =>
+      ipcRenderer.invoke('settings:set-typography-settings', settings) as Promise<TypographySettings>,
     getRemoteConfig: () => ipcRenderer.invoke('settings:get-remote-config') as Promise<RemoteDatabaseConfigView>,
     getRemoteSyncConfig: () => ipcRenderer.invoke('settings:get-remote-sync-config') as Promise<RemoteSyncConfig>,
     saveRemoteConfig: (config: RemoteDatabaseConfigInput) =>

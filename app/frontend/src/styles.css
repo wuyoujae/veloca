@@ -32,6 +32,7 @@
   --tab-merge-border: rgba(96, 165, 250, 0.45);
   --tab-insert-indicator: #3b82f6;
   --radius: 0.5rem;
+  --editor-font-size: 16px;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
   --font-serif: 'Noto Serif', Georgia, Cambria, 'Times New Roman', Times, serif;
@@ -1678,7 +1679,7 @@ button {
   max-width: none;
   --editor-content-padding: clamp(8px, 2.4vw, 24px);
   padding: clamp(20px, 3vw, 38px) clamp(10px, 2.8vw, 34px) calc(var(--statusbar-clearance) + 30px);
-  font-size: 15px;
+  font-size: var(--editor-font-size);
 }
 
 .split-pane-body .veloca-editor,
@@ -2993,7 +2994,7 @@ button {
   padding: 80px var(--editor-safe-rail) calc(var(--statusbar-clearance) + 48px);
   animation: contentEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   color: var(--editor-copy);
-  font-size: 16px;
+  font-size: var(--editor-font-size);
   line-height: 1.75;
 }
 
@@ -3012,37 +3013,37 @@ button {
 
 .markdown-body h1 {
   margin: 0 0 1.5rem;
-  font-size: 2.25rem;
+  font-size: 2.25em;
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
 }
 
 .markdown-body h2 {
   margin: 2.5em 0 1rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
-  font-size: 1.5rem;
-  letter-spacing: -0.015em;
+  font-size: 1.5em;
+  letter-spacing: 0;
 }
 
 .markdown-body h3 {
-  font-size: 1.25rem;
-  letter-spacing: -0.01em;
+  font-size: 1.25em;
+  letter-spacing: 0;
 }
 
 .markdown-body h4 {
-  font-size: 1rem;
+  font-size: 1em;
 }
 
 .markdown-body h5 {
-  font-size: 0.875rem;
-  letter-spacing: 0.05em;
+  font-size: 0.875em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--muted-foreground);
 }
 
 .markdown-body h6 {
-  font-size: 0.875rem;
+  font-size: 0.875em;
   color: var(--muted-foreground);
 }
 
@@ -3157,7 +3158,7 @@ button {
   padding: 0;
   border-radius: 0;
   color: var(--editor-copy);
-  font-size: 0.85rem;
+  font-size: 0.85em;
   line-height: 1.55;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -3524,7 +3525,7 @@ button {
   color: var(--editor-copy);
   caret-color: var(--foreground);
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: var(--editor-font-size);
   line-height: 1.72;
   tab-size: 2;
   white-space: pre-wrap;
@@ -3553,7 +3554,7 @@ button {
   padding: 0 var(--editor-content-padding) var(--statusbar-clearance);
   color: var(--editor-copy);
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: var(--editor-font-size);
   line-height: 1.75;
   outline: 0;
   white-space: pre-wrap;
@@ -3596,37 +3597,37 @@ button {
 
 .veloca-editor .ProseMirror h1 {
   margin: 0 0 1.08rem;
-  font-size: 2.25rem;
+  font-size: 2.25em;
   font-weight: 700;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
 }
 
 .veloca-editor .ProseMirror h2 {
   margin: 2.35em 0 0.9rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border);
-  font-size: 1.5rem;
-  letter-spacing: -0.015em;
+  font-size: 1.5em;
+  letter-spacing: 0;
 }
 
 .veloca-editor .ProseMirror h3 {
-  font-size: 1.25rem;
-  letter-spacing: -0.01em;
+  font-size: 1.25em;
+  letter-spacing: 0;
 }
 
 .veloca-editor .ProseMirror h4 {
-  font-size: 1rem;
+  font-size: 1em;
 }
 
 .veloca-editor .ProseMirror h5 {
-  font-size: 0.875rem;
-  letter-spacing: 0.05em;
+  font-size: 0.875em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--muted-foreground);
 }
 
 .veloca-editor .ProseMirror h6 {
-  font-size: 0.875rem;
+  font-size: 0.875em;
   color: var(--muted-foreground);
 }
 
@@ -3808,7 +3809,7 @@ button {
   border-radius: 0;
   background: transparent;
   color: var(--editor-copy);
-  font-size: 0.85rem;
+  font-size: 0.85em;
   line-height: 1.55;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -5038,6 +5039,72 @@ button {
   font-size: 11px;
 }
 
+.typography-setting-row {
+  align-items: flex-start;
+}
+
+.typography-control {
+  display: grid;
+  grid-template-columns: 72px minmax(220px, 280px);
+  align-items: center;
+  gap: 18px;
+}
+
+.typography-preview-glyph {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--muted) 46%, transparent);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    font-size 0.16s ease;
+}
+
+.typography-size-control {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.typography-size-header,
+.typography-size-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.typography-size-header {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.typography-size-header strong {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.typography-size-slider {
+  width: 100%;
+  accent-color: var(--foreground);
+}
+
+.settings-text-input.typography-size-input {
+  width: 82px;
+}
+
 .shortcut-control {
   display: inline-flex;
   align-items: center;
@@ -5927,6 +5994,23 @@ button {
 
   .settings-window {
     width: calc(100vw - 32px);
+  }
+
+  .typography-setting-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .typography-setting-row .setting-info {
+    max-width: none;
+  }
+
+  .typography-control {
+    grid-template-columns: 1fr;
+  }
+
+  .typography-preview-glyph {
+    width: 100%;
   }
 
   .remote-status-grid {

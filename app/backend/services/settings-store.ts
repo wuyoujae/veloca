@@ -14,6 +14,10 @@ export interface ShortcutSettings {
   openAiPanel: string;
 }
 
+export interface TypographySettings {
+  editorFontSize: number;
+}
+
 const autoSaveKey = 'autoSave';
 const themeKey = 'theme';
 const aiBaseUrlKey = 'aiBaseUrl';
@@ -21,6 +25,10 @@ const aiApiKeyKey = 'aiApiKey';
 const aiModelKey = 'aiModel';
 const aiContextWindowKey = 'aiContextWindow';
 const openAiPanelShortcutKey = 'shortcutOpenAiPanel';
+const editorFontSizeKey = 'editorFontSize';
+const defaultEditorFontSize = 16;
+const minimumEditorFontSize = 13;
+const maximumEditorFontSize = 22;
 
 export function getSetting(key: string): string | null {
   const row = getDatabase()
@@ -88,6 +96,31 @@ export function getShortcutSettings(platform: NodeJS.Platform): ShortcutSettings
 export function setShortcutSettings(settings: ShortcutSettings): ShortcutSettings {
   setSetting(openAiPanelShortcutKey, settings.openAiPanel);
   return settings;
+}
+
+export function normalizeEditorFontSize(fontSize: number): number {
+  if (!Number.isFinite(fontSize)) {
+    return defaultEditorFontSize;
+  }
+
+  return Math.min(Math.max(Math.round(fontSize), minimumEditorFontSize), maximumEditorFontSize);
+}
+
+export function getTypographySettings(): TypographySettings {
+  const storedFontSize = Number(getSetting(editorFontSizeKey));
+
+  return {
+    editorFontSize: normalizeEditorFontSize(storedFontSize || defaultEditorFontSize)
+  };
+}
+
+export function setTypographySettings(settings: TypographySettings): TypographySettings {
+  const normalizedSettings = {
+    editorFontSize: normalizeEditorFontSize(settings.editorFontSize)
+  };
+
+  setSetting(editorFontSizeKey, String(normalizedSettings.editorFontSize));
+  return normalizedSettings;
 }
 
 export function deleteAiConfig(): void {

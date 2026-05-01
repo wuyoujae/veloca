@@ -21,13 +21,17 @@ import {
   getAutoSave,
   getShortcutSettings,
   getTheme,
+  getTypographySettings,
+  normalizeEditorFontSize,
   setAiConfig,
   setAutoSave,
   setShortcutSettings,
   setTheme,
+  setTypographySettings,
   type AiModelConfig,
   type ShortcutSettings,
-  type ThemeMode
+  type ThemeMode,
+  type TypographySettings
 } from '../services/settings-store';
 import {
   getRemoteDatabaseConfig,
@@ -336,6 +340,9 @@ function registerIpcHandlers(): void {
   const isShortcutSettings = (settings: ShortcutSettings): boolean => {
     return Boolean(settings && typeof settings.openAiPanel === 'string' && settings.openAiPanel.trim().length > 0);
   };
+  const isTypographySettings = (settings: TypographySettings): boolean => {
+    return Boolean(settings && typeof settings.editorFontSize === 'number' && Number.isFinite(settings.editorFontSize));
+  };
 
   ipcMain.handle('settings:get-theme', () => getTheme());
   ipcMain.handle('app:get-info', () => getAppInfo());
@@ -418,6 +425,18 @@ function registerIpcHandlers(): void {
 
     return setShortcutSettings({
       openAiPanel: settings.openAiPanel.trim()
+    });
+  });
+  ipcMain.handle('settings:get-typography-settings', () => {
+    return getTypographySettings();
+  });
+  ipcMain.handle('settings:set-typography-settings', (_event, settings: TypographySettings) => {
+    if (!isTypographySettings(settings)) {
+      throw new Error('Invalid typography settings.');
+    }
+
+    return setTypographySettings({
+      editorFontSize: normalizeEditorFontSize(settings.editorFontSize)
     });
   });
   ipcMain.handle('settings:get-remote-config', () => {

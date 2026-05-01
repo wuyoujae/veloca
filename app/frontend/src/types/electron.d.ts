@@ -162,6 +162,10 @@ interface ShortcutSettings {
   openAiPanel: string;
 }
 
+interface TypographySettings {
+  editorFontSize: number;
+}
+
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
 
 interface RemoteDatabaseConfigInput {
@@ -358,6 +362,8 @@ declare global {
         setAiConfig: (config: AiModelConfig) => Promise<AiModelConfig>;
         getShortcutSettings: () => Promise<ShortcutSettings>;
         setShortcutSettings: (settings: ShortcutSettings) => Promise<ShortcutSettings>;
+        getTypographySettings: () => Promise<TypographySettings>;
+        setTypographySettings: (settings: TypographySettings) => Promise<TypographySettings>;
         getRemoteConfig: () => Promise<RemoteDatabaseConfigView>;
         getRemoteSyncConfig: () => Promise<RemoteSyncConfig>;
         saveRemoteConfig: (config: RemoteDatabaseConfigInput) => Promise<RemoteDatabaseConfigView>;

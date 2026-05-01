@@ -105,11 +105,14 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline' | 'git';
-type SettingsPanel = 'editor' | 'shortcuts' | 'aiModel' | 'remote' | 'account' | 'about';
+type SettingsPanel = 'editor' | 'typography' | 'shortcuts' | 'aiModel' | 'remote' | 'account' | 'about';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
 type ToastType = 'success' | 'info';
+const defaultEditorFontSize = 16;
+const minimumEditorFontSize = 13;
+const maximumEditorFontSize = 22;
 const aiInsertLogPrefix = '[Veloca AI Insert]';
 const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
 const remoteCredentialMask = '********';
@@ -169,6 +172,18 @@ function getFallbackShortcutSettings(platform: string): ShortcutSettings {
   return {
     openAiPanel: getDefaultOpenAiPanelShortcut(platform)
   };
+}
+
+function normalizeEditorFontSize(fontSize: number): number {
+  if (!Number.isFinite(fontSize)) {
+    return defaultEditorFontSize;
+  }
+
+  return Math.round(clampNumber(fontSize, minimumEditorFontSize, maximumEditorFontSize));
+}
+
+function applyEditorFontSize(fontSize: number): void {
+  document.documentElement.style.setProperty('--editor-font-size', `${normalizeEditorFontSize(fontSize)}px`);
 }
 
 function normalizeShortcutKeyLabel(key: string): string | null {
@@ -329,6 +344,10 @@ interface AiModelConfig {
 
 interface ShortcutSettings {
   openAiPanel: string;
+}
+
+interface TypographySettings {
+  editorFontSize: number;
 }
 
 type RemoteDatabaseStatus = 'notConfigured' | 'configured' | 'creating' | 'waiting' | 'initialized' | 'failed';
@@ -1482,6 +1501,7 @@ export function App(): JSX.Element {
   const [lineNumbers, setLineNumbers] = useState(true);
   const [focusMode, setFocusMode] = useState(false);
   const [autoSave, setAutoSave] = useState(true);
+  const [editorFontSize, setEditorFontSize] = useState(defaultEditorFontSize);
   const [shortcutSettings, setShortcutSettings] = useState<ShortcutSettings>(() =>
     getFallbackShortcutSettings(appPlatform)
   );
@@ -1544,6 +1564,8 @@ export function App(): JSX.Element {
   const headerMenuButtonRef = useRef<HTMLButtonElement>(null);
   const headerMenuRef = useRef<HTMLDivElement>(null);
   const openAiPanelShortcutButtonRef = useRef<HTMLButtonElement>(null);
+  const editorFontSizeSaveTimerRef = useRef<number | null>(null);
+  const pendingEditorFontSizeRef = useRef<number | null>(null);
   const updateReadyToastKeyRef = useRef<string>('');
 
   const activeTab = useMemo(
@@ -1769,6 +1791,11 @@ export function App(): JSX.Element {
       setTheme(storedTheme);
     });
     window.veloca?.settings.getAutoSave().then(setAutoSave);
+    window.veloca?.settings.getTypographySettings().then((settings) => {
+      const nextFontSize = normalizeEditorFontSize(settings.editorFontSize);
+      setEditorFontSize(nextFontSize);
+      applyEditorFontSize(nextFontSize);
+    });
     window.veloca?.settings.getShortcutSettings().then(setShortcutSettings);
     window.veloca?.settings.getAiConfig().then((config) => {
       if (config.baseUrl || config.apiKey || config.model || config.contextWindow > 0) {
@@ -1786,10 +1813,15 @@ export function App(): JSX.Element {
     if (!window.veloca) {
       const fallbackTheme = localStorage.getItem('veloca-theme') === 'light' ? 'light' : 'dark';
       const fallbackAutoSave = localStorage.getItem('veloca-auto-save') !== 'false';
+      const fallbackEditorFontSize = normalizeEditorFontSize(
+        Number(localStorage.getItem('veloca-editor-font-size')) || defaultEditorFontSize
+      );
       const fallbackShortcutSettings = getFallbackShortcutSettings(appPlatform);
       applyTheme(fallbackTheme);
+      applyEditorFontSize(fallbackEditorFontSize);
       setTheme(fallbackTheme);
       setAutoSave(fallbackAutoSave);
+      setEditorFontSize(fallbackEditorFontSize);
       setShortcutSettings({
         openAiPanel: localStorage.getItem('veloca-shortcut-open-ai-panel') ?? fallbackShortcutSettings.openAiPanel
       });
@@ -2066,6 +2098,18 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     return () => {
+      if (editorFontSizeSaveTimerRef.current) {
+        window.clearTimeout(editorFontSizeSaveTimerRef.current);
+        editorFontSizeSaveTimerRef.current = null;
+      }
+
+      if (pendingEditorFontSizeRef.current !== null) {
+        void window.veloca?.settings.setTypographySettings({
+          editorFontSize: pendingEditorFontSizeRef.current
+        });
+        pendingEditorFontSizeRef.current = null;
+      }
+
       saveActionTimersRef.current.forEach((timer) => clearTimeout(timer));
       saveActionTimersRef.current.clear();
     };
@@ -2162,6 +2206,36 @@ export function App(): JSX.Element {
       title: 'Editor Updated',
       description: `Auto Save is now ${enabled ? 'enabled' : 'disabled'}.`
     });
+  };
+
+  const commitEditorFontSize = (fontSize: number) => {
+    const nextFontSize = normalizeEditorFontSize(fontSize);
+    pendingEditorFontSizeRef.current = nextFontSize;
+
+    if (editorFontSizeSaveTimerRef.current) {
+      window.clearTimeout(editorFontSizeSaveTimerRef.current);
+    }
+
+    editorFontSizeSaveTimerRef.current = window.setTimeout(() => {
+      editorFontSizeSaveTimerRef.current = null;
+      void window.veloca?.settings.setTypographySettings({
+        editorFontSize: nextFontSize
+      });
+      pendingEditorFontSizeRef.current = null;
+    }, 220);
+  };
+
+  const updateEditorFontSize = (fontSize: number) => {
+    const nextFontSize = normalizeEditorFontSize(fontSize);
+
+    setEditorFontSize(nextFontSize);
+    applyEditorFontSize(nextFontSize);
+    localStorage.setItem('veloca-editor-font-size', String(nextFontSize));
+    commitEditorFontSize(nextFontSize);
+  };
+
+  const resetEditorFontSize = () => {
+    updateEditorFontSize(defaultEditorFontSize);
   };
 
   const updateShortcutSettings = async (settings: ShortcutSettings) => {
@@ -5552,6 +5626,13 @@ export function App(): JSX.Element {
                 Editor
               </button>
               <button
+                className={settingsPanel === 'typography' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('typography')}
+              >
+                Typography
+              </button>
+              <button
                 className={settingsPanel === 'shortcuts' ? 'settings-nav-item active' : 'settings-nav-item'}
                 type="button"
                 onClick={() => setSettingsPanel('shortcuts')}
@@ -5662,6 +5743,66 @@ export function App(): JSX.Element {
                       </div>
                       <Switch checked={focusMode} onChange={setFocusMode} />
                     </div>
+                  </>
+                )}
+                {settingsPanel === 'typography' && (
+                  <>
+                    <h3 className="settings-section-title">Typography</h3>
+
+                    <div className="setting-row typography-setting-row">
+                      <div className="setting-info">
+                        <span className="setting-label">Editor Font Size</span>
+                        <span className="setting-desc">
+                          Adjust the Markdown editor reading size. Rendered and source views update immediately.
+                        </span>
+                      </div>
+                      <div className="typography-control">
+                        <span
+                          className="typography-preview-glyph"
+                          style={{ fontSize: `${editorFontSize}px` }}
+                          aria-label={`Preview at ${editorFontSize} pixels`}
+                        >
+                          字
+                        </span>
+                        <div className="typography-size-control">
+                          <div className="typography-size-header">
+                            <span>{minimumEditorFontSize}px</span>
+                            <strong>{editorFontSize}px</strong>
+                            <span>{maximumEditorFontSize}px</span>
+                          </div>
+                          <input
+                            className="typography-size-slider"
+                            type="range"
+                            min={minimumEditorFontSize}
+                            max={maximumEditorFontSize}
+                            step={1}
+                            value={editorFontSize}
+                            aria-label="Editor font size"
+                            onChange={(event) => updateEditorFontSize(Number(event.currentTarget.value))}
+                          />
+                          <div className="typography-size-actions">
+                            <input
+                              className="settings-text-input typography-size-input"
+                              type="number"
+                              min={minimumEditorFontSize}
+                              max={maximumEditorFontSize}
+                              step={1}
+                              value={editorFontSize}
+                              aria-label="Editor font size in pixels"
+                              onChange={(event) => updateEditorFontSize(Number(event.currentTarget.value))}
+                            />
+                            <button className="secondary-action" type="button" onClick={resetEditorFontSize}>
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="settings-panel-hint">
+                      The default editor font size is <code>{defaultEditorFontSize}px</code>. Headings, lists, code,
+                      tables and the source editor scale from this base value.
+                    </p>
                   </>
                 )}
                 {settingsPanel === 'shortcuts' && (
