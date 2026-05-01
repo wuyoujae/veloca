@@ -1689,24 +1689,32 @@ button {
 }
 
 .agent-overlay {
-  --agent-bg: #ffffff;
-  --agent-fg: #09090b;
-  --agent-surface: #f4f4f5;
-  --agent-border: #e4e4e7;
-  --agent-text-body: #3f3f46;
-  --agent-text-muted: #71717a;
+  --agent-bg: #18181b;
+  --agent-fg: #f4f4f5;
+  --agent-surface: #27272a;
+  --agent-canvas-bg: #111114;
+  --agent-border: #3f3f46;
+  --agent-text-body: #d4d4d8;
+  --agent-text-muted: #a1a1aa;
   --agent-radius-lg: 20px;
   --agent-radius-md: 12px;
   --agent-radius-sm: 8px;
-  --agent-model-lite-fg: #52525b;
+  --agent-model-lite-fg: #d4d4d8;
   --agent-model-lite-bg: transparent;
-  --agent-model-pro-fg: #2563eb;
-  --agent-model-pro-bg: #eff6ff;
-  --agent-model-ultra-fg: #9333ea;
-  --agent-model-ultra-bg: #f3e8ff;
+  --agent-model-pro-fg: #93c5fd;
+  --agent-model-pro-bg: rgba(37, 99, 235, 0.18);
+  --agent-model-ultra-fg: #d8b4fe;
+  --agent-model-ultra-bg: rgba(147, 51, 234, 0.2);
   --agent-tool-success: #10b981;
-  --agent-ring: rgba(59, 130, 246, 0.15);
-  --agent-ring-border: #3b82f6;
+  --agent-ring: rgba(96, 165, 250, 0.18);
+  --agent-ring-border: #60a5fa;
+  --agent-menu-selected-bg: rgba(37, 99, 235, 0.18);
+  --agent-menu-selected-fg: #93c5fd;
+  --agent-paper-divider: rgba(63, 63, 70, 0.72);
+  --agent-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --agent-soft-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  --agent-popover-shadow: 0 18px 36px -12px rgba(0, 0, 0, 0.62);
+  --agent-floating-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
   position: fixed;
   top: var(--agent-top);
   left: var(--agent-left);
@@ -1718,9 +1726,7 @@ button {
   border-radius: var(--agent-radius-lg);
   background: var(--agent-bg);
   color: var(--agent-fg);
-  box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.25),
-    0 0 0 1px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--agent-shadow);
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%) translateY(-6px) scale(0.985);
@@ -1728,6 +1734,31 @@ button {
   transition:
     opacity 0.22s ease,
     transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-theme='light'] .agent-overlay {
+  --agent-bg: #ffffff;
+  --agent-fg: #09090b;
+  --agent-surface: #f4f4f5;
+  --agent-canvas-bg: #fafafa;
+  --agent-border: #e4e4e7;
+  --agent-text-body: #3f3f46;
+  --agent-text-muted: #71717a;
+  --agent-model-lite-fg: #52525b;
+  --agent-model-lite-bg: transparent;
+  --agent-model-pro-fg: #2563eb;
+  --agent-model-pro-bg: #eff6ff;
+  --agent-model-ultra-fg: #9333ea;
+  --agent-model-ultra-bg: #f3e8ff;
+  --agent-ring: rgba(59, 130, 246, 0.15);
+  --agent-ring-border: #3b82f6;
+  --agent-menu-selected-bg: #eff6ff;
+  --agent-menu-selected-fg: #2563eb;
+  --agent-paper-divider: rgba(228, 228, 231, 0.7);
+  --agent-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --agent-soft-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  --agent-popover-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  --agent-floating-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
 ::highlight(veloca-agent-selection) {
@@ -2031,13 +2062,13 @@ button {
 }
 
 .agent-main-action-btn.voice.listening {
-  box-shadow: 0 0 0 4px rgba(9, 9, 11, 0.08);
+  box-shadow: 0 0 0 4px var(--agent-ring);
 }
 
 .agent-main-action-btn.send {
   background: var(--agent-fg);
   color: var(--agent-bg);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--agent-soft-shadow);
 }
 
 .agent-main-action-btn.send:hover {
@@ -2047,7 +2078,7 @@ button {
 .agent-main-action-btn.stop {
   background: var(--agent-fg);
   color: var(--agent-bg);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--agent-soft-shadow);
 }
 
 .agent-main-action-btn.stop:hover {
@@ -2064,7 +2095,7 @@ button {
   border: 1px solid var(--agent-border);
   border-radius: var(--agent-radius-md);
   background: var(--agent-bg);
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--agent-popover-shadow);
   opacity: 0;
   pointer-events: none;
   transform: translateY(-5px);
@@ -2108,8 +2139,8 @@ button {
 }
 
 .agent-menu-item.selected {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--agent-menu-selected-bg);
+  color: var(--agent-menu-selected-fg);
 }
 
 .agent-menu-item.model-lite svg {
@@ -2140,7 +2171,7 @@ button {
 }
 
 .agent-menu-item.new-session {
-  color: #2563eb;
+  color: var(--agent-menu-selected-fg);
 }
 
 .agent-file-input {
@@ -2154,7 +2185,7 @@ button {
   scroll-behavior: smooth;
   scroll-snap-type: y mandatory;
   border-radius: 0 0 var(--agent-radius-lg) var(--agent-radius-lg);
-  background: #fafafa;
+  background: var(--agent-canvas-bg);
   transition:
     height 0.4s cubic-bezier(0.16, 1, 0.3, 1),
     border-color 0.2s ease;
@@ -2199,7 +2230,7 @@ button {
   border-radius: 999px;
   background: var(--agent-bg);
   color: var(--agent-fg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  box-shadow: var(--agent-soft-shadow);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -2230,7 +2261,7 @@ button {
   border-radius: 50%;
   background: var(--agent-bg);
   color: var(--agent-text-muted);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  box-shadow: var(--agent-soft-shadow);
 }
 
 .agent-control-close:hover {
@@ -2264,7 +2295,7 @@ button {
   border-radius: 999px;
   background: var(--agent-bg);
   color: var(--agent-fg);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--agent-floating-shadow);
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
@@ -2312,7 +2343,7 @@ button {
   right: 15%;
   left: 15%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(228, 228, 231, 0.7), transparent);
+  background: linear-gradient(90deg, transparent, var(--agent-paper-divider), transparent);
 }
 
 .agent-user-block {
@@ -2397,7 +2428,7 @@ button {
   border-radius: 50%;
   background: var(--agent-bg);
   color: var(--agent-text-muted);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--agent-soft-shadow);
   cursor: pointer;
   transition: color 0.18s ease, border-color 0.18s ease;
 }
@@ -2593,7 +2624,7 @@ button {
   border: 1px solid var(--agent-border);
   border-radius: var(--agent-radius-md);
   background: var(--agent-bg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  box-shadow: var(--agent-soft-shadow);
   transition:
     border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1),
     box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1),
@@ -2710,7 +2741,7 @@ button {
 
 .agent-action-btn.primary:hover {
   opacity: 0.9;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--agent-soft-shadow);
   transform: translateY(-1px);
 }
 
