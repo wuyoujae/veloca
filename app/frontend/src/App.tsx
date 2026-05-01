@@ -3032,7 +3032,6 @@ export function App(): JSX.Element {
     const nextMode: DocumentViewMode = currentMode === 'rendered' ? 'source' : 'rendered';
     let cursorOffset: number | null = null;
     let scrollTop: number | null = null;
-    let flushedMarkdownLength = documentContentRef.current.length;
 
     try {
       const renderedHandle = currentMode === 'rendered' ? renderedEditorHandlesRef.current.get(targetPath) : null;
@@ -3041,7 +3040,6 @@ export function App(): JSX.Element {
         const latestRenderedMarkdown = renderedHandle.getMarkdownContent();
         const latestRenderedRanges = renderedHandle.getAiProvenanceRanges(latestRenderedMarkdown);
         const shouldSkipEmptyFlush = !latestRenderedMarkdown.trim() && documentContentRef.current.trim();
-        flushedMarkdownLength = latestRenderedMarkdown.length;
 
         if (!shouldSkipEmptyFlush) {
           updateTabProvenanceSnapshot(
@@ -3057,31 +3055,19 @@ export function App(): JSX.Element {
         }
       }
     } catch (error) {
-      showToast({
-        type: 'info',
-        title: 'Source Toggle Diagnostic',
-        description: `Markdown flush failed: ${error instanceof Error ? error.message : String(error)}`
-      });
+      console.info('[Veloca Source Toggle]', 'Markdown flush failed', error);
     }
 
     try {
       cursorOffset = getCursorOffsetForViewMode(targetPath, currentMode);
     } catch (error) {
-      showToast({
-        type: 'info',
-        title: 'Source Toggle Diagnostic',
-        description: `Cursor restore failed: ${error instanceof Error ? error.message : String(error)}`
-      });
+      console.info('[Veloca Source Toggle]', 'Cursor restore failed', error);
     }
 
     try {
       scrollTop = getEditorScrollPosition(targetPath);
     } catch (error) {
-      showToast({
-        type: 'info',
-        title: 'Source Toggle Diagnostic',
-        description: `Scroll capture failed: ${error instanceof Error ? error.message : String(error)}`
-      });
+      console.info('[Veloca Source Toggle]', 'Scroll capture failed', error);
     }
 
     if (typeof cursorOffset === 'number') {
@@ -3099,12 +3085,6 @@ export function App(): JSX.Element {
       [targetPath]: nextMode
     }));
     restoreEditorScrollPosition(targetPath, scrollTop);
-
-    showToast({
-      type: 'info',
-      title: 'Source Toggle Diagnostic',
-      description: `Switch requested: ${currentMode} -> ${nextMode}, markdown chars: ${flushedMarkdownLength}`
-    });
   };
 
   const updateTabProvenanceFields = (

@@ -132,6 +132,7 @@ flowchart TD
 - 源代码视图仍复用当前草稿和保存链路：
   - textarea 输入会更新 `draftContent`、`documentContent` 和对应标签 `status`；
   - 自动保存、手动保存、关闭未保存确认和状态栏统计继续使用同一份 Markdown 内容。
+- 切换源代码视图和渲染视图时不弹出 toast 提示；切换过程中的诊断信息仅写入开发控制台。
 - 切换视图时会尽量保持文本焦点位置：
   - 渲染视图切到源代码视图时，TipTap 编辑器会临时插入唯一 cursor marker，序列化为 Markdown 后计算 marker offset，再移除 marker；
   - 源代码视图切回渲染视图时，textarea 的 `selectionStart` 会作为 Markdown offset，通过临时 marker 恢复到 TipTap 文档中的相近位置；
