@@ -113,6 +113,7 @@ export type AgentStreamEvent =
 const defaultAgentBaseUrl = 'https://openrouter.ai/api/v1';
 const defaultAgentModel = 'google/gemini-3.1-flash-lite-preview';
 const defaultContextWindow = 128000;
+const defaultAgentReasoningEffort = 'high';
 const bashDefaultTimeoutMs = 10000;
 const bashMaxCommandLength = 2000;
 const bashMaxOutputBytes = 16384;
@@ -656,6 +657,42 @@ function getNumberEnv(name: string, fallback: number): number {
   const parsed = Number(value);
 
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function getAgentReasoningEffort(): string {
+  const value = process.env.VELOCA_AGENT_REASONING_EFFORT?.trim().toLowerCase();
+  const allowedEfforts = new Set(['xhigh', 'high', 'medium', 'low', 'minimal', 'none']);
+
+  return value && allowedEfforts.has(value) ? value : defaultAgentReasoningEffort;
+}
+
+function shouldDisableAgentReasoning(): boolean {
+  const value = process.env.VELOCA_AGENT_REASONING_ENABLED?.trim().toLowerCase();
+
+  return value === '0' || value === 'false' || value === 'no' || value === 'off';
+}
+
+function isOpenRouterBaseUrl(baseUrl: string): boolean {
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase();
+
+    return hostname === 'openrouter.ai' || hostname.endsWith('.openrouter.ai');
+  } catch {
+    return false;
+  }
+}
+
+function buildAgentChatOptions(baseUrl: string): Record<string, unknown> | undefined {
+  if (!isOpenRouterBaseUrl(baseUrl) || shouldDisableAgentReasoning()) {
+    return undefined;
+  }
+
+  return {
+    reasoning: {
+      effort: getAgentReasoningEffort(),
+      exclude: false
+    }
+  };
 }
 
 function validateRequest(request: AgentSendMessageRequest): string {
@@ -5848,6 +5885,42 @@ function getReasoningAwareMessages(messages: unknown, sessionId: string): unknow
   return attachStoredReasoningToMessages(messages, getStoredSessionEntries(sessionId));
 }
 
+function getReasoningText(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(getReasoningText).filter(Boolean).join('');
+  }
+
+  if (!isRecord(value)) {
+    return '';
+  }
+
+  if (typeof value.text === 'string') {
+    return value.text;
+  }
+
+  if (typeof value.summary === 'string') {
+    return value.summary;
+  }
+
+  if (typeof value.content === 'string') {
+    return value.content;
+  }
+
+  if (typeof value.reasoning === 'string') {
+    return value.reasoning;
+  }
+
+  if (typeof value.reasoning_content === 'string') {
+    return value.reasoning_content;
+  }
+
+  return '';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -5867,10 +5940,14 @@ function parseOpenAiAgentResponse(response: unknown): {
   const message = isRecord(choice) && isRecord(choice.message) ? choice.message : {};
   const usage = isRecord(response.usage) ? response.usage : {};
   const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+  const reasoningContent =
+    getReasoningText(message.reasoning_content)
+    || getReasoningText(message.reasoning)
+    || getReasoningText(message.reasoning_details);
 
   return {
     content: typeof message.content === 'string' ? message.content : '',
-    reasoningContent: typeof message.reasoning_content === 'string' ? message.reasoning_content : undefined,
+    reasoningContent: reasoningContent || undefined,
     role: typeof message.role === 'string' ? message.role : 'assistant',
     tokenConsumption: typeof usage.total_tokens === 'number' ? usage.total_tokens : 0,
     tools: toolCalls.length > 0 ? { tool_calls: toolCalls } : null
@@ -5894,6 +5971,15 @@ function getStreamReasoningDelta(chunk: unknown): string {
     if (typeof chunk.reasoning_content === 'string') {
       return chunk.reasoning_content;
     }
+
+    const topLevelReasoning =
+      getReasoningText(chunk.reasoning)
+      || getReasoningText(chunk.reasoningDetails)
+      || getReasoningText(chunk.reasoning_details);
+
+    if (topLevelReasoning) {
+      return topLevelReasoning;
+    }
   }
 
   const choices = (
@@ -5901,6 +5987,7 @@ function getStreamReasoningDelta(chunk: unknown): string {
       choices?: Array<{
         delta?: {
           reasoning?: unknown;
+          reasoning_details?: unknown;
           reasoning_content?: unknown;
           thinking?: unknown;
         };
@@ -5908,9 +5995,12 @@ function getStreamReasoningDelta(chunk: unknown): string {
     }
   ).choices;
   const reasoningContent =
-    choices?.[0]?.delta?.reasoning_content ?? choices?.[0]?.delta?.reasoning ?? choices?.[0]?.delta?.thinking;
+    getReasoningText(choices?.[0]?.delta?.reasoning_content)
+    || getReasoningText(choices?.[0]?.delta?.reasoning)
+    || getReasoningText(choices?.[0]?.delta?.reasoning_details)
+    || getReasoningText(choices?.[0]?.delta?.thinking);
 
-  return typeof reasoningContent === 'string' ? reasoningContent : '';
+  return reasoningContent;
 }
 
 function getStreamRoleDelta(chunk: unknown): string {
@@ -6045,6 +6135,7 @@ function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolea
   const contextWindow = (uiContextWindow != null && uiContextWindow > 0)
     ? uiContextWindow
     : getNumberEnv('VELOCA_AGENT_CONTEXT_WINDOW', defaultContextWindow);
+  const chatOptions = buildAgentChatOptions(baseUrl);
 
   return {
     ai: {
@@ -6059,6 +6150,7 @@ function getAgentRuntimeOptions(request: AgentSendMessageRequest, stream: boolea
       tools: buildAgentTools(),
       tools_realize: buildAgentToolRealizers(request.context, hooks),
       parallelToolCalls: false,
+      ...(chatOptions ? { other: { chat: chatOptions } } : {}),
       userPrompt: buildUserPrompt(prompt, request)
     },
     input: {

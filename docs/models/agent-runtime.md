@@ -412,12 +412,16 @@ DeepSeek thinking mode returns assistant thinking text as `reasoning_content`. W
 
 Veloca therefore wraps the `otherone-agent` OpenAI-compatible loop in the backend service:
 
-- Streaming responses accumulate both `delta.content` and `delta.reasoning_content`.
+- OpenRouter requests receive `reasoning: { effort: "high", exclude: false }` by default when the active base URL is `openrouter.ai`, because OpenRouter exposes visible reasoning through the unified `reasoning` request option. Set `VELOCA_AGENT_REASONING_ENABLED=false` to disable this behavior or `VELOCA_AGENT_REASONING_EFFORT` to `xhigh`, `high`, `medium`, `low`, `minimal`, or `none` to tune it.
+- Streaming responses accumulate `delta.content` plus provider reasoning fields including `delta.reasoning_content`, `delta.reasoning`, and `delta.reasoning_details`.
+- Non-streaming responses read `message.reasoning_content`, `message.reasoning`, and `message.reasoning_details`.
 - Assistant entries are stored in `.veloca/storage/veloca-storage.json` with a `reasoning_content` field when the provider returns one.
 - Before each follow-up request, backend message preparation reads stored assistant entries and attaches matching `reasoning_content` back onto assistant messages, including assistant messages that carry `tool_calls`.
 - The renderer receives reasoning deltas as collapsible `thinking` items. Thinking content is not merged into the assistant answer text, but it is displayed in-stream so users can see deep-thinking progress when the provider exposes it.
 
 This is intentionally scoped to the existing local-file Agent memory. Veloca's SQLite product database does not need a schema change until Agent conversation memory is migrated into first-party tables.
+
+The upstream `otherone-agent` stream loop currently initializes `thinking` but does not append OpenAI-compatible reasoning deltas before yielding its final parsed response. Veloca avoids that loss by calling `veloca.InvokeModel` directly inside a local reasoning-aware loop and normalizing provider-specific reasoning fields before emitting UI events.
 
 ## Configuration Notes
 

@@ -181,6 +181,8 @@ Runtime configuration starts from `.env.example`:
 | `VELOCA_AGENT_MODEL` | `google/gemini-3.1-flash-lite-preview` | Default Agent model. Settings inside the app can override this value. |
 | `VELOCA_AGENT_API_KEY` | `your-openrouter-api-key` | API key used by the backend Agent service. |
 | `VELOCA_AGENT_CONTEXT_WINDOW` | `128000` | Context window used by the Agent runtime. |
+| `VELOCA_AGENT_REASONING_ENABLED` | `true` | Enables OpenRouter visible reasoning for supported reasoning models. |
+| `VELOCA_AGENT_REASONING_EFFORT` | `high` | Reasoning effort sent to OpenRouter. Supported values: `xhigh`, `high`, `medium`, `low`, `minimal`, `none`. |
 | `VELOCA_WEB_SEARCH_BASE_URL` | `https://html.duckduckgo.com/html/` | Search endpoint used by the Agent web-search tool path. |
 | `VELOCA_GITHUB_CLIENT_ID` | `your-github-oauth-app-client-id` | GitHub OAuth App client ID for device-flow account binding and Veloca version management. |
 
