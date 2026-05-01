@@ -21,7 +21,7 @@ npm run release:major
 npm run release:push
 ```
 
-`release:check` runs type checking, the current test script, and a production build. The version scripts run the same checks first, then call `npm version` to update `package.json`, update `package-lock.json`, create a version commit, and create a Git tag such as `v0.1.1`.
+`release:check` runs type checking, the current test script, a production build, and a renderer-output guard that confirms `dist/frontend/index.html` exists inside the project. The version scripts run the same checks first, then call `npm version` to update `package.json`, update `package-lock.json`, create a version commit, and create a Git tag such as `v0.1.1`.
 
 `release:push` pushes the current branch and all reachable tags to `origin`. Pushing a `v*` tag starts the GitHub Actions release workflow.
 
@@ -46,6 +46,8 @@ The release job runs only for `v*` tag refs. It downloads all matrix artifacts, 
 
 Build output is written to the local `release/` directory by electron-builder. This directory is ignored by Git through `.gitignore` and should not be committed.
 
+The renderer must build to project-local `dist/frontend`. Packaged apps load `dist/frontend/index.html` from inside `app.asar`, so a release build must fail if that file is missing.
+
 ## Runtime Dependency Packaging
 
 Veloca's packaged main process loads `isomorphic-git`, which loads `sha.js` and related hashing dependencies at runtime. The `call-bind-apply-helpers` package must be present at the root `node_modules` level inside `app.asar` because dependencies such as `dunder-proto` resolve it from their own root-level package paths.
@@ -61,6 +63,7 @@ macOS artifacts are currently unsigned. Windows artifacts are packaged as zip fi
 ## Verification Checklist
 
 - Run `npm run release:check` locally before creating a release version.
+- Confirm `dist/frontend/index.html` exists after the production build.
 - Run `npm run release:patch`, `npm run release:minor`, or `npm run release:major`.
 - Confirm `git status --short` is clean after `npm version`, then confirm the new tag points at `HEAD`.
 - Run `npm run release:push`.
