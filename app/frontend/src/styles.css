@@ -3069,7 +3069,7 @@ button {
 .markdown-body p {
   margin: 0 0 1.25em;
   color: var(--editor-copy);
-  font-size: 1rem;
+  font-size: 1em;
   line-height: 1.75;
 }
 
@@ -3653,7 +3653,7 @@ button {
 .veloca-editor .ProseMirror p,
 .veloca-editor .ProseMirror li {
   color: var(--editor-copy);
-  font-size: 1rem;
+  font-size: 1em;
   line-height: 1.75;
   overflow-wrap: anywhere;
   word-break: break-word;
