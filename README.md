@@ -68,6 +68,7 @@ TipTap is used as the editor engine because it is MIT licensed, gives Veloca mor
 - Sidebar Git tab showing only Veloca-managed markdown changes from the isolated shadow repository.
 - Remote Supabase configuration through Settings, including encrypted local credential storage, cloud table initialization, and Remote Sync preferences.
 - Settings modal with polished dark/light theme switching.
+- About Veloca panel with version details, GitHub release update checks, and open-source license disclosure.
 - SQLite-backed app setting storage for theme and Auto Save persistence.
 - Toast message component for user feedback.
 
@@ -270,9 +271,10 @@ npm run release:check
 37. Confirm the original workspace folder does not gain a new `.git` folder and an existing user `.git` status is not changed by Veloca.
 38. Enter a version message, click `Commit & Push`, and confirm the private GitHub repository receives the corresponding file under `workspaces/<workspaceSlug>-<shortWorkspaceId>/files/`.
 39. Click `Settings` in the sidebar.
-40. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
-41. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
-42. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
+40. Open `Settings` → `About Veloca`, confirm the logo, version, GitHub URL, license, update check action, and open-source license dialog render correctly.
+41. Toggle `Auto Save` off, edit a document, confirm the status bar shows `Unsaved`, then press `Cmd/Ctrl+S` and confirm it returns to `Saved`.
+42. Switch between `Dark` and `Light` and confirm Mermaid diagrams adapt to the selected theme.
+43. Close and reopen the app, then confirm workspace folders, database-backed workspaces, Auto Save preference, saved markdown content, and the selected theme are restored.
 
 </details>
 
@@ -284,7 +286,7 @@ At this stage, Veloca starts with an empty workspace until folders are added or 
 
 ## Roadmap
 
-- **Completed:** project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, and isolated Veloca markdown version management.
+- **Completed:** project scaffold, Electron shell, React UI, SQLite settings storage, theme switching, persisted workspace folders, database-backed workspaces, recursive markdown discovery, file tree interactions, custom file context menu, untitled file creation with workspace-scoped save dialog, TipTap editor integration, rich Markdown rendering, editable source mode switching, Mermaid diagram rendering, local media handling, Auto Save, manual save, outline interactions, GitHub account binding, isolated Veloca markdown version management, and About/update/license settings.
 - **Next:** markdown export and search.
 - **Later:** plugin or extension system if product requirements justify it.
 

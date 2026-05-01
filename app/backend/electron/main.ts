@@ -94,6 +94,7 @@ import {
   saveRemoteSyncConfig,
   type RemoteSyncConfig
 } from '../services/remote-sync-service';
+import { checkForUpdates, getAppInfo, listOpenSourceComponents } from '../services/app-info-service';
 
 interface WatchedMarkdownFile {
   timer: ReturnType<typeof setTimeout> | null;
@@ -319,6 +320,18 @@ function registerIpcHandlers(): void {
   };
 
   ipcMain.handle('settings:get-theme', () => getTheme());
+  ipcMain.handle('app:get-info', () => getAppInfo());
+  ipcMain.handle('app:check-for-updates', () => checkForUpdates());
+  ipcMain.handle('app:list-open-source-components', () => listOpenSourceComponents());
+  ipcMain.handle('app:open-external', async (_event, url: string) => {
+    const parsedUrl = new URL(url);
+
+    if (parsedUrl.protocol !== 'https:') {
+      throw new Error('Veloca only opens secure external links.');
+    }
+
+    await shell.openExternal(parsedUrl.toString());
+  });
   ipcMain.handle('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize();
   });

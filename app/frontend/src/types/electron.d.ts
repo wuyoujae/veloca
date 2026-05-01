@@ -223,6 +223,34 @@ interface RemoteSyncStatus {
   syncedCount: number;
 }
 
+interface AppInfo {
+  githubUrl: string;
+  license: string;
+  logoDataUrl: string;
+  name: string;
+  version: string;
+}
+
+interface UpdateCheckResult {
+  checkedAt: number;
+  currentVersion: string;
+  errorMessage?: string;
+  hasUpdate: boolean;
+  latestVersion: string | null;
+  publishedAt: string | null;
+  releaseName: string | null;
+  releaseUrl: string | null;
+  status: 'available' | 'current' | 'unavailable';
+}
+
+interface OpenSourceComponent {
+  homepage: string;
+  license: string;
+  name: string;
+  repositoryUrl: string;
+  version: string;
+}
+
 interface AgentAttachmentSummary {
   mimeType: string;
   name: string;
@@ -372,6 +400,10 @@ declare global {
         onMarkdownFileChanged: (callback: (change: WatchedMarkdownFileChange) => void) => () => void;
       };
       app: {
+        checkForUpdates: () => Promise<UpdateCheckResult>;
+        getInfo: () => Promise<AppInfo>;
+        listOpenSourceComponents: () => Promise<OpenSourceComponent[]>;
+        openExternal: (url: string) => Promise<void>;
         platform: NodeJS.Platform;
       };
       windowControls: {

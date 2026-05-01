@@ -23,6 +23,11 @@ import type {
   AgentStreamEvent
 } from '../services/agent-service';
 import type {
+  AppInfo,
+  OpenSourceComponent,
+  UpdateCheckResult
+} from '../services/app-info-service';
+import type {
   FileOperationResult,
   DocumentProvenanceSnapshot,
   MarkdownFileContent,
@@ -121,6 +126,11 @@ contextBridge.exposeInMainWorld('veloca', {
     }
   },
   app: {
+    checkForUpdates: () => ipcRenderer.invoke('app:check-for-updates') as Promise<UpdateCheckResult>,
+    getInfo: () => ipcRenderer.invoke('app:get-info') as Promise<AppInfo>,
+    listOpenSourceComponents: () =>
+      ipcRenderer.invoke('app:list-open-source-components') as Promise<OpenSourceComponent[]>,
+    openExternal: (url: string) => ipcRenderer.invoke('app:open-external', url) as Promise<void>,
     platform: process.platform
   },
   windowControls: {

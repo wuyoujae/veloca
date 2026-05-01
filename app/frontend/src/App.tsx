@@ -104,7 +104,7 @@ import {
 
 type ThemeMode = 'dark' | 'light';
 type SidebarTab = 'files' | 'outline' | 'git';
-type SettingsPanel = 'editor' | 'aiModel' | 'remote' | 'account';
+type SettingsPanel = 'editor' | 'aiModel' | 'remote' | 'account' | 'about';
 type SaveStatus = 'failed' | 'saved' | 'saving' | 'unsaved';
 type SaveActionState = 'idle' | 'saving' | 'success';
 type DocumentViewMode = 'rendered' | 'source';
@@ -112,6 +112,13 @@ type ToastType = 'success' | 'info';
 const aiInsertLogPrefix = '[Veloca AI Insert]';
 const remoteSettingsLogPrefix = '[Veloca Remote Settings]';
 const remoteCredentialMask = '********';
+const defaultAppInfo: AppInfo = {
+  githubUrl: 'https://github.com/wuyoujae/veloca',
+  license: 'MIT',
+  logoDataUrl: '',
+  name: 'Veloca',
+  version: '0.0.0'
+};
 
 function logAiInsertDebug(message: string, details?: Record<string, unknown>): void {
   console.info(aiInsertLogPrefix, message, details ?? {});
@@ -126,6 +133,34 @@ interface ToastMessage {
   type: ToastType;
   title: string;
   description: string;
+}
+
+interface AppInfo {
+  githubUrl: string;
+  license: string;
+  logoDataUrl: string;
+  name: string;
+  version: string;
+}
+
+interface UpdateCheckResult {
+  checkedAt: number;
+  currentVersion: string;
+  errorMessage?: string;
+  hasUpdate: boolean;
+  latestVersion: string | null;
+  publishedAt: string | null;
+  releaseName: string | null;
+  releaseUrl: string | null;
+  status: 'available' | 'current' | 'unavailable';
+}
+
+interface OpenSourceComponent {
+  homepage: string;
+  license: string;
+  name: string;
+  repositoryUrl: string;
+  version: string;
 }
 
 interface AiModelConfig {
@@ -1310,6 +1345,12 @@ export function App(): JSX.Element {
   const [versionStatus, setVersionStatus] = useState<VersionManagerStatus>(() => createEmptyVersionManagerStatus());
   const [versionLoading, setVersionLoading] = useState(false);
   const [versionCommitMessage, setVersionCommitMessage] = useState('');
+  const [appInfo, setAppInfo] = useState<AppInfo>(defaultAppInfo);
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheckResult | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [licenseDialogOpen, setLicenseDialogOpen] = useState(false);
+  const [openSourceComponents, setOpenSourceComponents] = useState<OpenSourceComponent[]>([]);
+  const [openSourceLoading, setOpenSourceLoading] = useState(false);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(null);
@@ -4410,6 +4451,106 @@ export function App(): JSX.Element {
     setToasts((current) => current.filter((toast) => toast.id !== id));
   };
 
+  const openExternalLink = async (url: string) => {
+    if (!url) {
+      return;
+    }
+
+    try {
+      await window.veloca?.app.openExternal(url);
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Unable to Open Link',
+        description: error instanceof Error ? error.message : 'Veloca could not open the external link.'
+      });
+    }
+  };
+
+  const checkForAppUpdates = async (source: 'automatic' | 'manual') => {
+    if (!window.veloca?.app.checkForUpdates) {
+      return;
+    }
+
+    setUpdateChecking(true);
+
+    try {
+      const result = await window.veloca.app.checkForUpdates();
+      setUpdateStatus(result);
+
+      if (result.status === 'available') {
+        showToast({
+          type: 'info',
+          title: 'Update Available',
+          description: `Veloca ${result.latestVersion} is available.`
+        });
+      } else if (source === 'manual' && result.status === 'current') {
+        showToast({
+          type: 'success',
+          title: 'Veloca is Up to Date',
+          description: `You are running version ${result.currentVersion}.`
+        });
+      } else if (source === 'manual') {
+        showToast({
+          type: 'info',
+          title: 'Unable to Check Updates',
+          description: result.errorMessage ?? 'Veloca could not inspect GitHub Releases.'
+        });
+      }
+    } finally {
+      setUpdateChecking(false);
+    }
+  };
+
+  const openLicenseDialog = async () => {
+    setLicenseDialogOpen(true);
+
+    if (openSourceComponents.length > 0 || openSourceLoading) {
+      return;
+    }
+
+    setOpenSourceLoading(true);
+
+    try {
+      const components = await window.veloca?.app.listOpenSourceComponents();
+      setOpenSourceComponents(components ?? []);
+    } catch (error) {
+      showToast({
+        type: 'info',
+        title: 'Unable to Load Licenses',
+        description: error instanceof Error ? error.message : 'Veloca could not load open-source component metadata.'
+      });
+    } finally {
+      setOpenSourceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAppInfo = async () => {
+      try {
+        const info = await window.veloca?.app.getInfo();
+
+        if (!cancelled && info) {
+          setAppInfo(info);
+        }
+      } catch {
+        // The static fallback keeps About Veloca usable if the backend is unavailable.
+      }
+    };
+
+    void loadAppInfo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    void checkForAppUpdates('automatic');
+  }, []);
+
   useEffect(() => {
     if (!autoSave || saveStatus !== 'unsaved' || !activeTabPath || activeSaveActionState === 'saving') {
       return undefined;
@@ -5168,8 +5309,13 @@ export function App(): JSX.Element {
                 Account
               </button>
               <span className="settings-spacer" />
-              <button className="settings-nav-item muted" type="button">
-                About Veloca
+              <button
+                className={settingsPanel === 'about' ? 'settings-nav-item active' : 'settings-nav-item'}
+                type="button"
+                onClick={() => setSettingsPanel('about')}
+              >
+                <span>About Veloca</span>
+                {updateStatus?.status === 'available' && <span className="settings-nav-badge">New</span>}
               </button>
             </aside>
 
@@ -5796,7 +5942,158 @@ export function App(): JSX.Element {
                     </div>
                   </>
                 )}
+                {settingsPanel === 'about' && (
+                  <>
+                    <div className="about-hero">
+                      {appInfo.logoDataUrl ? (
+                        <img className="about-logo" src={appInfo.logoDataUrl} alt="Veloca" />
+                      ) : (
+                        <div className="about-logo-fallback">V</div>
+                      )}
+                      <div className="about-title-block">
+                        <h3>Veloca</h3>
+                        <span>Markdown editor for focused desktop writing.</span>
+                      </div>
+                    </div>
+
+                    {updateStatus?.status === 'available' && (
+                      <div className="settings-update-banner">
+                        <div>
+                          <strong>Veloca {updateStatus.latestVersion} is available</strong>
+                          <span>Your current version is {updateStatus.currentVersion}.</span>
+                        </div>
+                        {updateStatus.releaseUrl && (
+                          <button
+                            className="secondary-action"
+                            type="button"
+                            onClick={() => void openExternalLink(updateStatus.releaseUrl ?? '')}
+                          >
+                            <ExternalLink size={14} />
+                            Open Release
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="about-info-grid">
+                      <div className="about-info-item">
+                        <span>Version</span>
+                        <strong>{appInfo.version}</strong>
+                      </div>
+                      <div className="about-info-item">
+                        <span>License</span>
+                        <strong>{appInfo.license}</strong>
+                      </div>
+                      <div className="about-info-item wide">
+                        <span>GitHub</span>
+                        <button
+                          className="about-link-button"
+                          type="button"
+                          onClick={() => void openExternalLink(appInfo.githubUrl)}
+                        >
+                          {appInfo.githubUrl}
+                          <ExternalLink size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="about-action-list">
+                      <button
+                        className="about-action-row"
+                        type="button"
+                        disabled={updateChecking}
+                        onClick={() => void checkForAppUpdates('manual')}
+                      >
+                        <span className="about-action-icon">
+                          <RefreshCw className={updateChecking ? 'spinning' : ''} size={16} />
+                        </span>
+                        <span className="about-action-copy">
+                          <strong>Check for Updates</strong>
+                          <small>
+                            {updateStatus?.checkedAt
+                              ? `Last checked ${new Date(updateStatus.checkedAt).toLocaleString()}`
+                              : 'Inspect the latest public GitHub Release.'}
+                          </small>
+                        </span>
+                        <ChevronRight size={16} />
+                      </button>
+
+                      <button className="about-action-row" type="button" onClick={() => void openLicenseDialog()}>
+                        <span className="about-action-icon">
+                          <FileText size={16} />
+                        </span>
+                        <span className="about-action-copy">
+                          <strong>Open Source Licenses</strong>
+                          <small>{openSourceComponents.length || 'View'} components used by Veloca.</small>
+                        </span>
+                        <ChevronRight size={16} />
+                      </button>
+                    </div>
+
+                    {updateStatus?.status === 'current' && (
+                      <p className="settings-panel-hint">Veloca is up to date at version {updateStatus.currentVersion}.</p>
+                    )}
+                    {updateStatus?.status === 'unavailable' && (
+                      <p className="settings-panel-hint">
+                        Update status is unavailable: {updateStatus.errorMessage ?? 'GitHub Releases could not be checked.'}
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {licenseDialogOpen && (
+        <div className="license-dialog-overlay" onMouseDown={() => setLicenseDialogOpen(false)}>
+          <section
+            className="license-dialog"
+            aria-label="Open source licenses"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="license-dialog-header">
+              <div>
+                <h2>Open Source Licenses</h2>
+                <p>{openSourceComponents.length} runtime components used by Veloca.</p>
+              </div>
+              <button
+                className="settings-close-btn inline"
+                type="button"
+                aria-label="Close open source licenses"
+                onClick={() => setLicenseDialogOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="license-dialog-body">
+              {openSourceLoading ? (
+                <div className="license-loading">
+                  <LoaderCircle className="spinning" size={18} />
+                  Loading components
+                </div>
+              ) : (
+                openSourceComponents.map((component) => (
+                  <div className="license-component-row" key={`${component.name}-${component.version}`}>
+                    <div className="license-component-main">
+                      <strong>{component.name}</strong>
+                      <span>{component.version || 'unknown version'}</span>
+                    </div>
+                    <span className="license-badge">{component.license}</span>
+                    {(component.repositoryUrl || component.homepage) && (
+                      <button
+                        className="license-link"
+                        type="button"
+                        onClick={() => void openExternalLink(component.repositoryUrl || component.homepage)}
+                      >
+                        <ExternalLink size={13} />
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </section>
         </div>
