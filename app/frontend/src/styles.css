@@ -3211,7 +3211,7 @@ button {
   align-items: center;
   padding: 0.25rem 0.7rem;
   font-family: var(--font-sans);
-  font-size: 0.75rem;
+  font-size: 0.75em;
   font-weight: 600;
   line-height: 1;
   text-transform: uppercase;
@@ -3242,7 +3242,7 @@ button {
 .markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button > .veloca-code-copy-status,
 .veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button > .veloca-code-copy-status {
   display: block;
-  font-size: 0.95rem;
+  font-size: 0.95em;
   font-weight: 600;
   line-height: 1;
   pointer-events: none;
@@ -3267,7 +3267,7 @@ button {
 
 .markdown-body pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true'] > .veloca-code-copy-status,
 .veloca-editor .ProseMirror pre > .veloca-code-toolbar > .veloca-code-copy-button[data-copied='true'] > .veloca-code-copy-status {
-  font-size: 1rem;
+  font-size: 1em;
 }
 
 .markdown-body hr {
@@ -4139,7 +4139,7 @@ button {
 
 .veloca-mermaid-label {
   color: var(--muted-foreground);
-  font-size: 0.78rem;
+  font-size: 0.78em;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -4157,7 +4157,7 @@ button {
   background: var(--background);
   color: var(--foreground);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.78em;
   font-weight: 500;
   transition: background-color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
 }
@@ -4182,7 +4182,7 @@ button {
   padding: 20px;
   overflow-x: auto;
   color: var(--muted-foreground);
-  font-size: 0.9rem;
+  font-size: 0.9em;
 }
 
 .veloca-mermaid-preview svg {
@@ -4222,7 +4222,7 @@ button {
   background: var(--code-background);
   color: var(--editor-copy);
   font-family: var(--font-mono);
-  font-size: 0.86rem;
+  font-size: 0.86em;
   line-height: 1.55;
 }
 
@@ -4387,7 +4387,7 @@ button {
   padding: 1em;
   overflow-x: auto;
   text-align: center;
-  font-size: 1.2rem;
+  font-size: 1.2em;
 }
 
 .veloca-editor .ProseMirror .tiptap-mathematics-render[data-type='block-math'] .block-math-inner {
