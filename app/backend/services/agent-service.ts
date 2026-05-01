@@ -7,6 +7,7 @@ import { getDatabase } from '../database/connection';
 import { getWorkspaceSnapshot, readMarkdownFile, type WorkspaceSnapshot, type WorkspaceTreeNode } from './workspace-service';
 import { getAiBaseUrl, getAiApiKey, getAiModel, getAiContextWindow } from './settings-store';
 import { attachStoredReasoningToMessages, getStoredReasoningContent } from './agent-reasoning';
+import { mapStoredEntriesToConversations } from './agent-history';
 
 export type AgentUiModel = 'lite' | 'pro' | 'ultra';
 
@@ -56,7 +57,9 @@ export interface AgentStoredConversation {
   id: string;
   model: AgentUiModel;
   prompt: string;
+  responseParts?: AgentStoredResponsePart[];
   status: 'complete';
+  toolCalls?: AgentToolCallMessage[];
   webSearch: boolean;
 }
 
@@ -77,6 +80,18 @@ export interface AgentToolCallMessage {
   status: AgentToolCallStatus;
   summary?: string;
 }
+
+export type AgentStoredResponsePart =
+  | {
+      content: string;
+      id: string;
+      type: 'text';
+    }
+  | {
+      id: string;
+      item: AgentToolCallMessage;
+      type: 'thinking' | 'tool';
+    };
 
 export type AgentStreamEvent =
   | {
@@ -6239,58 +6254,10 @@ function getStoredTimestamp(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value : new Date(0).toISOString();
 }
 
-function getStoredEntryContent(entry: StoredAgentEntry): string {
-  return typeof entry.content === 'string' ? entry.content : '';
-}
-
-function getStoredEntryId(entry: StoredAgentEntry, fallback: string): string {
-  return typeof entry.entry_id === 'string' && entry.entry_id.trim() ? entry.entry_id : fallback;
-}
-
-function getDisplayPrompt(content: string): string {
-  const metadataSeparator = '\n\n用户问题：\n';
-  const separatorIndex = content.lastIndexOf(metadataSeparator);
-
-  if (separatorIndex < 0) {
-    return content;
-  }
-
-  return content.slice(separatorIndex + metadataSeparator.length).trim();
-}
-
 function sortStoredSessions(sessions: StoredAgentSessionSummary[]): StoredAgentSessionSummary[] {
   return [...sessions]
     .filter((session) => getStoredSessionId(session) && Number(session.status ?? 0) !== 1)
     .sort((left, right) => getStoredTimestamp(left.create_at).localeCompare(getStoredTimestamp(right.create_at)));
-}
-
-function mapStoredEntriesToConversations(sessionId: string, entries: StoredAgentEntry[]): AgentStoredConversation[] {
-  const conversations: AgentStoredConversation[] = [];
-
-  for (const [index, entry] of entries.entries()) {
-    const role = typeof entry.role === 'string' ? entry.role : '';
-    const content = getStoredEntryContent(entry);
-
-    if (role === 'user') {
-      conversations.push({
-        answer: '',
-        attachments: [],
-        id: getStoredEntryId(entry, `${sessionId}-message-${index}`),
-        model: 'lite',
-        prompt: getDisplayPrompt(content),
-        status: 'complete',
-        webSearch: false
-      });
-      continue;
-    }
-
-    if (role === 'assistant' && conversations.length > 0) {
-      const latestConversation = conversations[conversations.length - 1];
-      latestConversation.answer = latestConversation.answer ? `${latestConversation.answer}\n\n${content}` : content;
-    }
-  }
-
-  return conversations.filter((conversation) => conversation.prompt.trim() || conversation.answer.trim());
 }
 
 function readStoredSession(sessionId: string, displayIndex: number): AgentStoredSession {

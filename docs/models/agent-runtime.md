@@ -125,7 +125,7 @@ type AgentToolCallMessage = {
 };
 ```
 
-The renderer stores AI output as an ordered response timeline rather than separate top-level buckets. Text deltas, thinking items, and tool-call items are appended or updated in the same order they arrive, so a tool call that happens after a paragraph appears after that paragraph instead of being moved to the top of the AI message.
+The renderer stores AI output as an ordered response timeline rather than separate top-level buckets. Text deltas, thinking items, and tool-call items are appended or updated in the same order they arrive, so a tool call that happens after a paragraph appears after that paragraph instead of being moved to the top of the AI message. When historical sessions are reopened, the backend reconstructs this same timeline from stored assistant `reasoning_content`, assistant `tool_calls`, and following role=`tool` result entries.
 
 Thinking items use the same collapsible item renderer as tool calls:
 
@@ -394,7 +394,7 @@ Veloca now exposes a small backend-owned session API over IPC:
 - `agent:inherit-sessions`: moves session ownership from an untitled-file brainstorm scope into the saved file's workspace root after Save As succeeds. It only updates Veloca's sidecar ownership index; the underlying `otherone-agent` conversation data remains unchanged.
 - `agent:send-message-stream`: validates that the active session id belongs to the current workspace root before sending it into `veloca.InvokeAgent()`, so follow-up turns reuse the same context memory without allowing another workspace to open that session.
 
-The renderer no longer treats Agent sessions as throwaway UI-only state. On mount and whenever the active workspace root changes, the Agent palette calls `window.veloca.agent.listSessions(context)`, restores historical sessions for that workspace, and selects the newest session by default. The session switcher uses the same `otherone-agent` session ids that are passed back to the runtime, which means switching to an older session and sending a new message continues that session's saved context inside the same workspace.
+The renderer no longer treats Agent sessions as throwaway UI-only state. On mount and whenever the active workspace root changes, the Agent palette calls `window.veloca.agent.listSessions(context)`, restores historical sessions for that workspace, and selects the newest session by default. The session switcher uses the same `otherone-agent` session ids that are passed back to the runtime, which means switching to an older session and sending a new message continues that session's saved context inside the same workspace. Restored messages include durable response timeline parts for assistant text, thinking items, and tool-call items, so reopening a session preserves the same visible Agent canvas structure instead of showing only final assistant text.
 
 Session content still stays in the third-party local-file store, but Veloca owns the workspace boundary through a small sidecar index:
 
@@ -404,7 +404,7 @@ Session content still stays in the third-party local-file store, but Veloca owns
 
 The sidecar maps `session_id` to a normalized workspace key. Filesystem workspaces use the registered real path; database workspaces use the registered `veloca-db://root/{workspaceId}` root. When the Agent palette is opened from an untitled file or any state without a valid workspace root, Veloca sends an empty workspace context and stores the conversation under a brainstorm scope. Untitled files add an opaque `brainstormSessionKey` based on their temporary file id, so each unsaved file keeps a separate standalone history. After the user saves that file, the renderer calls `agent:inherit-sessions` with the temporary brainstorm context and the saved workspace context, and the backend rewrites matching sidecar records to the saved workspace key. Brainstorm sessions are intentionally separate from every real workspace and do not expose workspace tools or directory context before inheritance. Sessions without a matching sidecar record are not listed for any workspace and cannot be sent through the Veloca IPC API.
 
-`otherone-agent` does not currently store Veloca UI metadata such as the selected Lite / Pro / Ultra badge, upload attachment UI state, or Web Search toggle separately. Persisted history therefore restores the durable user/assistant text from local memory and treats attachment chips as per-turn runtime context until a dedicated metadata layer is added.
+`otherone-agent` does not currently store Veloca UI metadata such as the selected Lite / Pro / Ultra badge, upload attachment UI state, or Web Search toggle separately. Persisted history restores durable user/assistant text, visible thinking content, and tool-call records from local memory, while attachment chips remain per-turn runtime context until a dedicated metadata layer is added.
 
 ## DeepSeek Thinking Mode Compatibility
 
@@ -416,8 +416,9 @@ Veloca therefore wraps the `otherone-agent` OpenAI-compatible loop in the backen
 - Streaming responses accumulate `delta.content` plus provider reasoning fields including `delta.reasoning_content`, `delta.reasoning`, and `delta.reasoning_details`.
 - Non-streaming responses read `message.reasoning_content`, `message.reasoning`, and `message.reasoning_details`.
 - Assistant entries are stored in `.veloca/storage/veloca-storage.json` with a `reasoning_content` field when the provider returns one.
+- Tool calls are stored on assistant entries through `tools.tool_calls`, and executed tool results are stored as following role=`tool` entries with `function_name`, `tool_call_id`, `result`, and `error` metadata.
 - Before each follow-up request, backend message preparation reads stored assistant entries and attaches matching `reasoning_content` back onto assistant messages, including assistant messages that carry `tool_calls`.
-- The renderer receives reasoning deltas as collapsible `thinking` items. Thinking content is not merged into the assistant answer text, but it is displayed in-stream so users can see deep-thinking progress when the provider exposes it.
+- The renderer receives reasoning deltas as collapsible `thinking` items. Thinking content is not merged into the assistant answer text, but it is displayed in-stream and reconstructed from storage when the session is opened again.
 
 This is intentionally scoped to the existing local-file Agent memory. Veloca's SQLite product database does not need a schema change until Agent conversation memory is migrated into first-party tables.
 

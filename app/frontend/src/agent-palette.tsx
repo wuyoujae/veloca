@@ -155,7 +155,9 @@ interface StoredAgentConversation {
   id: string;
   model: AgentModelId;
   prompt: string;
+  responseParts?: AgentResponsePart[];
   status: AgentMessageStatus;
+  toolCalls?: AgentToolCallMessage[];
   webSearch: boolean;
 }
 
@@ -234,23 +236,71 @@ function normalizeStoredAttachmentStatus(status: string): AgentAttachmentStatus 
   return status === 'uploading' || status === 'parsing' || status === 'recording' ? status : 'ready';
 }
 
+function normalizeStoredToolCallStatus(status: string): AgentToolCallStatus {
+  return status === 'running' || status === 'error' ? status : 'success';
+}
+
+function normalizeStoredToolCall(toolCall: AgentToolCallMessage): AgentToolCallMessage {
+  return {
+    action: toolCall.action,
+    detail: toolCall.detail,
+    icon: toolCall.icon,
+    id: toolCall.id,
+    openable: Boolean(toolCall.openable),
+    status: normalizeStoredToolCallStatus(toolCall.status),
+    summary: toolCall.summary
+  };
+}
+
+function normalizeStoredResponsePart(part: AgentResponsePart): AgentResponsePart | null {
+  if (part.type === 'text') {
+    return {
+      content: part.content,
+      id: part.id,
+      type: 'text'
+    };
+  }
+
+  if (part.type === 'tool' || part.type === 'thinking') {
+    return {
+      id: part.id,
+      item: normalizeStoredToolCall(part.item),
+      type: part.type
+    };
+  }
+
+  if (part.type === 'interaction') {
+    return part;
+  }
+
+  return null;
+}
+
 function normalizeStoredSession(session: StoredAgentSession): AgentSession {
   return {
     id: session.id,
-    messages: session.messages.map((message) => ({
-      answer: message.answer,
-      attachments: (message.attachments ?? []).map((attachment) => ({
-        id: attachment.id ?? createAgentId('attachment'),
-        mimeType: attachment.mimeType,
-        name: attachment.name,
-        status: normalizeStoredAttachmentStatus(attachment.status)
-      })),
-      id: message.id,
-      model: normalizeStoredModel(message.model),
-      prompt: message.prompt,
-      status: normalizeStoredStatus(message.status),
-      webSearch: message.webSearch
-    })),
+    messages: session.messages.map((message) => {
+      const responseParts = (message.responseParts ?? [])
+        .map(normalizeStoredResponsePart)
+        .filter((part): part is AgentResponsePart => Boolean(part));
+
+      return {
+        answer: message.answer,
+        attachments: (message.attachments ?? []).map((attachment) => ({
+          id: attachment.id ?? createAgentId('attachment'),
+          mimeType: attachment.mimeType,
+          name: attachment.name,
+          status: normalizeStoredAttachmentStatus(attachment.status)
+        })),
+        id: message.id,
+        model: normalizeStoredModel(message.model),
+        prompt: message.prompt,
+        responseParts,
+        status: normalizeStoredStatus(message.status),
+        toolCalls: (message.toolCalls ?? []).map(normalizeStoredToolCall),
+        webSearch: message.webSearch
+      };
+    }),
     name: session.name
   };
 }

@@ -312,7 +312,9 @@ interface AgentStoredConversation {
   id: string;
   model: AgentUiModel;
   prompt: string;
+  responseParts?: AgentStoredResponsePart[];
   status: 'complete';
+  toolCalls?: AgentToolCallMessage[];
   webSearch: boolean;
 }
 
@@ -333,6 +335,18 @@ interface AgentToolCallMessage {
   status: AgentToolCallStatus;
   summary?: string;
 }
+
+type AgentStoredResponsePart =
+  | {
+      content: string;
+      id: string;
+      type: 'text';
+    }
+  | {
+      id: string;
+      item: AgentToolCallMessage;
+      type: 'thinking' | 'tool';
+    };
 
 type AgentStreamEvent =
   | {
