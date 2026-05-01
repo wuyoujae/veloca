@@ -86,6 +86,13 @@ interface SupabaseProjectListResponse {
   projects?: SupabaseProjectResponse[];
 }
 
+interface PostgresConnectionTarget {
+  host: string;
+  label: string;
+  port: number;
+  user: string;
+}
+
 class SupabaseManagementApiError extends Error {
   method: string;
   path: string;
@@ -703,52 +710,88 @@ function isTransientPostgresConnectionError(error: unknown): boolean {
   );
 }
 
-async function initializeRemoteSchema(project: SupabaseProjectResponse, databasePassword: string): Promise<void> {
+function getRemoteSchemaConnectionTargets(
+  project: SupabaseProjectResponse,
+  region: string
+): PostgresConnectionTarget[] {
+  const projectRef = project.ref ?? '';
+  const directHost = project.database?.host || `db.${projectRef}.supabase.co`;
+  const poolerHost = `aws-0-${region}.pooler.supabase.com`;
+
+  return [
+    {
+      host: directHost,
+      label: 'direct',
+      port: 5432,
+      user: 'postgres'
+    },
+    {
+      host: poolerHost,
+      label: 'session-pooler',
+      port: 5432,
+      user: `postgres.${projectRef}`
+    }
+  ];
+}
+
+async function initializeRemoteSchema(
+  project: SupabaseProjectResponse,
+  databasePassword: string,
+  region: string
+): Promise<string> {
   if (!project.ref) {
     throw new Error('Supabase did not return a project ref.');
   }
 
-  const host = project.database?.host || `db.${project.ref}.supabase.co`;
+  const targets = getRemoteSchemaConnectionTargets(project, region);
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt < projectReadyPollAttempts; attempt += 1) {
-    const client = new Client({
-      connectionTimeoutMillis: 10000,
-      database: 'postgres',
-      host,
-      password: databasePassword,
-      port: 5432,
-      query_timeout: 30000,
-      ssl: {
-        rejectUnauthorized: false
-      },
-      user: 'postgres'
-    });
-
-    try {
-      await client.connect();
-      await client.query(remoteSchemaSql);
-      return;
-    } catch (error) {
-      lastError = error;
-
-      if (!isTransientPostgresConnectionError(error)) {
-        throw new Error(`Supabase database schema initialization failed: ${getErrorMessage(error)}`);
-      }
-
-      logRemoteSetupStep('database not ready; retrying schema initialization', {
-        attempt: String(attempt + 1),
-        error: getErrorMessage(error),
-        host
+    for (const target of targets) {
+      const client = new Client({
+        connectionTimeoutMillis: 10000,
+        database: 'postgres',
+        host: target.host,
+        password: databasePassword,
+        port: target.port,
+        query_timeout: 30000,
+        ssl: {
+          rejectUnauthorized: false
+        },
+        user: target.user
       });
-      await wait(projectReadyPollDelayMs);
-    } finally {
+
       try {
-        await client.end();
-      } catch {
-        // Ignore cleanup errors after failed connection attempts.
+        await client.connect();
+        await client.query(remoteSchemaSql);
+        logRemoteSetupStep('remote schema initialized', {
+          connectionTarget: target.label,
+          host: target.host
+        });
+        return target.host;
+      } catch (error) {
+        lastError = error;
+
+        if (!isTransientPostgresConnectionError(error)) {
+          throw new Error(`Supabase database schema initialization failed: ${getErrorMessage(error)}`);
+        }
+
+        logRemoteSetupStep('database not ready; retrying schema initialization', {
+          attempt: String(attempt + 1),
+          connectionTarget: target.label,
+          error: getErrorMessage(error),
+          host: target.host
+        });
+      } finally {
+        try {
+          await client.end();
+        } catch {
+          // Ignore cleanup errors after failed connection attempts.
+        }
       }
     }
+
+    await wait(projectReadyPollDelayMs);
   }
 
   throw new Error(
@@ -887,7 +930,14 @@ export async function provisionRemoteVelocaProject(
     logRemoteSetupStep('initialize remote schema', {
       projectRef: readyProject.ref ?? null
     });
-    await initializeRemoteSchema(readyProject, databasePassword);
+    const databaseHost = await initializeRemoteSchema(readyProject, databasePassword, normalizedInput.region);
+    const initializedProject = {
+      ...readyProject,
+      database: {
+        ...readyProject.database,
+        host: databaseHost
+      }
+    };
 
     logRemoteSetupStep('load api keys', {
       projectRef: readyProject.ref ?? null
@@ -896,7 +946,7 @@ export async function provisionRemoteVelocaProject(
     const projectUrl = `https://${readyProject.ref}.supabase.co`;
     await testRemoteSupabaseClient(projectUrl, apiKeys.secretKey);
     updateRemoteProjectDetails(
-      readyProject,
+      initializedProject,
       normalizedInput.organizationSlug,
       normalizedInput.region,
       apiKeys.publishableKey,
