@@ -538,57 +538,57 @@ interface AgentToolRunState {
 
 const agentToolDisplayConfig: Record<AgentToolName, AgentToolDisplayConfig> = {
   get_workspace_directory_tree: {
-    action: '查看工作区结构',
+    action: 'Inspect workspace tree',
     icon: 'folder-tree',
     openable: false
   },
   glob_search: {
-    action: '查找文件',
+    action: 'Find files',
     icon: 'search',
     openable: false
   },
   grep_search: {
-    action: '搜索内容',
+    action: 'Search content',
     icon: 'search-code',
     openable: false
   },
   read_file: {
-    action: '阅读文件',
+    action: 'Read file',
     icon: 'file-text',
     openable: false
   },
   edit_file: {
-    action: '编辑文件',
+    action: 'Edit file',
     icon: 'file-pen-line',
     openable: true
   },
   write_file: {
-    action: '写入文件',
+    action: 'Write file',
     icon: 'save',
     openable: true
   },
   WebFetch: {
-    action: '读取网页',
+    action: 'Fetch web page',
     icon: 'link',
     openable: true
   },
   WebSearch: {
-    action: '搜索网页',
+    action: 'Search web',
     icon: 'globe',
     openable: true
   },
   REPL: {
-    action: '运行代码',
+    action: 'Run code',
     icon: 'play',
     openable: true
   },
   PowerShell: {
-    action: '运行 PowerShell',
+    action: 'Run PowerShell',
     icon: 'terminal',
     openable: true
   },
   run_bash_command: {
-    action: '运行命令',
+    action: 'Run command',
     icon: 'terminal',
     openable: true
   }
@@ -984,7 +984,7 @@ function stringifyToolDetail(value: unknown): string {
 
 function getToolInputSummary(toolName: AgentToolName, input: unknown): string | undefined {
   if (toolName === 'get_workspace_directory_tree') {
-    return compactToolSummary(undefined, '当前工作区');
+    return compactToolSummary(undefined, 'Current workspace');
   }
 
   if (!isRecord(input)) {
@@ -1158,13 +1158,13 @@ function toAgentToolCallMessage(state: AgentToolRunState): AgentToolCallMessage 
 
 function createAgentThinkingMessage(id: string, detail: string, status: AgentToolCallStatus): AgentToolCallMessage {
   return {
-    action: '深度思考',
+    action: 'Thinking',
     detail: truncateToolDisplayText(detail),
     icon: 'brain',
     id,
     openable: Boolean(detail.trim()),
     status,
-    summary: status === 'running' ? '正在推理' : '推理完成'
+    summary: status === 'running' ? 'Reasoning in progress' : 'Reasoning complete'
   };
 }
 

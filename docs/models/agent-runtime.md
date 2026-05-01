@@ -131,23 +131,23 @@ Thinking items use the same collapsible item renderer as tool calls:
 
 | Stream event | User-facing action | Default state |
 | --- | --- | --- |
-| `thinking` | 深度思考 | Expanded while streaming, collapsible by the user |
+| `thinking` | Thinking | Expanded while streaming, collapsible by the user |
 
 The UI must not display raw tool names such as `read_file` as the primary text. Backend adapters map tool names to user-facing action labels:
 
 | Tool | User-facing action | Expandable |
 | --- | --- | --- |
-| `get_workspace_directory_tree` | 查看工作区结构 | No |
-| `glob_search` | 查找文件 | No |
-| `grep_search` | 搜索内容 | No |
-| `read_file` | 阅读文件 | No |
-| `edit_file` | 编辑文件 | Yes |
-| `write_file` | 写入文件 | Yes |
-| `WebFetch` | 读取网页 | Yes |
-| `WebSearch` | 搜索网页 | Yes |
-| `REPL` | 运行代码 | Yes |
-| `PowerShell` | 运行 PowerShell | Yes |
-| `run_bash_command` | 运行命令 | Yes |
+| `get_workspace_directory_tree` | Inspect workspace tree | No |
+| `glob_search` | Find files | No |
+| `grep_search` | Search content | No |
+| `read_file` | Read file | No |
+| `edit_file` | Edit file | Yes |
+| `write_file` | Write file | Yes |
+| `WebFetch` | Fetch web page | Yes |
+| `WebSearch` | Search web | Yes |
+| `REPL` | Run code | Yes |
+| `PowerShell` | Run PowerShell | Yes |
+| `run_bash_command` | Run command | Yes |
 
 The expandable decision follows the user visibility rule: if the result is mainly private context for the model, such as reading a file or searching local text before answering, the item stays compact. If the result is otherwise invisible to the user, such as command stdout/stderr, code execution output, web results, or file-write patches, the item can expand to show a concise detail panel. Tool errors are expandable when a detail message is available, even for normally compact tools.
 
