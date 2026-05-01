@@ -1,6 +1,6 @@
 {
   "name": "veloca",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Veloca is an Electron markdown editor inspired by Typora.",
   "main": "dist/backend/main/main.js",
   "type": "module",
