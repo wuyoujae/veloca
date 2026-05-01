@@ -1726,7 +1726,7 @@ export function createRichEditorExtensions(callbacks: RichEditorCallbacks) {
       }
     }),
     Placeholder.configure({
-      placeholder: 'Start writing in Markdown...'
+      placeholder: 'Start writing in Markdown, or type / to use commands.'
     }),
     VelocaAiGeneratedBlock,
     VelocaAiGeneratedMark,
